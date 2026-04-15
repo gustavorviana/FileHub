@@ -98,6 +98,7 @@ namespace FileHub.Memory
             _files.Clear();
             _directories.Clear();
             _parent?.RemoveDirectory(Name);
+            Dispose();
         }
 
         public override void Delete(string name)
@@ -116,6 +117,11 @@ namespace FileHub.Memory
             var renamed = new MemoryDirectory(newName, _parent);
             CopyContentsTo(this, renamed);
             _parent?.AddDirectory(renamed);
+
+            // Clear and dispose the old instance so stale references stop reporting as alive.
+            _files.Clear();
+            _directories.Clear();
+            Dispose();
             return renamed;
         }
 
@@ -124,6 +130,11 @@ namespace FileHub.Memory
             ThrowIfReadOnly();
             var copied = CopyTo(directory, name);
             _parent?.RemoveDirectory(Name);
+
+            // Clear and dispose the old instance so stale references stop reporting as alive.
+            _files.Clear();
+            _directories.Clear();
+            Dispose();
             return copied;
         }
 

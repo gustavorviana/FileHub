@@ -123,7 +123,7 @@ namespace FileHub
             using (stream)
             using (var ms = new MemoryStream())
             {
-                await stream.CopyToAsync(ms).ConfigureAwait(false);
+                await stream.CopyToAsync(ms, 81920, cancellationToken).ConfigureAwait(false);
                 return ms.ToArray();
             }
         }
@@ -155,7 +155,7 @@ namespace FileHub
 
             var source = await GetReadStreamAsync(cancellationToken).ConfigureAwait(false);
             using (source)
-                await source.CopyToAsync(destination).ConfigureAwait(false);
+                await source.CopyToAsync(destination, 81920, cancellationToken).ConfigureAwait(false);
         }
 
         public virtual Task DeleteAsync(CancellationToken cancellationToken = default)

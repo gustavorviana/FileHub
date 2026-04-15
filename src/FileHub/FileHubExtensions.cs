@@ -23,9 +23,11 @@ namespace FileHub
     internal class ReadOnlyFileWrapper : FileEntry
     {
         private readonly FileEntry _inner;
+        private FileDirectory _parentWrapped;
 
         public override string Path => _inner.Path;
-        public override FileDirectory Parent => _inner.Parent;
+        public override FileDirectory Parent =>
+            _parentWrapped ??= _inner.Parent != null ? new ReadOnlyDirectoryWrapper(_inner.Parent) : null;
         public override long Length => _inner.Length;
         public override DateTime CreationTimeUtc => _inner.CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => _inner.LastWriteTimeUtc;
@@ -49,9 +51,11 @@ namespace FileHub
     internal class ReadOnlyDirectoryWrapper : FileDirectory
     {
         private readonly FileDirectory _inner;
+        private FileDirectory _parentWrapped;
 
         public override string Path => _inner.Path;
-        public override FileDirectory Parent => _inner.Parent;
+        public override FileDirectory Parent =>
+            _parentWrapped ??= _inner.Parent != null ? new ReadOnlyDirectoryWrapper(_inner.Parent) : null;
         public override DateTime CreationTimeUtc => _inner.CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => _inner.LastWriteTimeUtc;
 

@@ -229,13 +229,49 @@ namespace FileHub
                 return relativePath;
 
             var fullPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(Path, relativePath));
-            var normalizedRoot = System.IO.Path.GetFullPath(RootPath);
-
-            if (!fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
-                throw new FileHubException($"Access denied: path \"{relativePath}\" is outside the root directory.");
-
+            EnsureWithinRoot(fullPath);
+#if NET8_0_OR_GREATER
+            EnsureNoSymlinkEscape(fullPath);
+#endif
             return fullPath;
         }
+
+        protected void EnsureWithinRoot(string fullPath)
+        {
+            if (string.IsNullOrEmpty(RootPath)) return;
+
+            var normalizedRoot = System.IO.Path.GetFullPath(RootPath);
+            var separator = System.IO.Path.DirectorySeparatorChar;
+            var rootWithSep = normalizedRoot.EndsWith(separator.ToString())
+                ? normalizedRoot
+                : normalizedRoot + separator;
+
+            bool isRoot = string.Equals(fullPath, normalizedRoot, StringComparison.OrdinalIgnoreCase);
+            bool isInside = fullPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase);
+
+            if (!isRoot && !isInside)
+                throw new FileHubException($"Access denied: path \"{fullPath}\" is outside the root directory.");
+        }
+
+#if NET8_0_OR_GREATER
+        protected void EnsureNoSymlinkEscape(string fullPath)
+        {
+            if (string.IsNullOrEmpty(RootPath)) return;
+
+            FileSystemInfo info = null;
+            if (System.IO.File.Exists(fullPath))
+                info = new System.IO.FileInfo(fullPath);
+            else if (System.IO.Directory.Exists(fullPath))
+                info = new System.IO.DirectoryInfo(fullPath);
+
+            if (info?.LinkTarget == null) return;
+
+            var resolved = info.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolved == null) return;
+
+            EnsureWithinRoot(resolved.FullName);
+        }
+#endif
 
         protected string FixPath(string path)
         {

@@ -43,23 +43,9 @@ namespace FileHub
                 throw new ArgumentException($"The name \"{name}\" contains invalid characters.", nameof(name));
         }
 
-        #region IDisposable
-        protected virtual void Dispose(bool disposing)
+        public virtual void Dispose()
         {
-            if (Disposed) return;
             Disposed = true;
         }
-
-        ~FileSystemEntry()
-        {
-            Dispose(disposing: false);
-        }
-
-        public void Dispose()
-        {
-            Dispose(disposing: true);
-            GC.SuppressFinalize(this);
-        }
-        #endregion
     }
 }

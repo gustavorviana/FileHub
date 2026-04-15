@@ -33,16 +33,34 @@ namespace FileHub.Memory
 
         public override Stream GetReadStream()
         {
-            Data.Stream.Position = 0;
-            return new NonDisposableMemoryStream(Data, Data.Stream);
+            Data.AcquireRead();
+            try
+            {
+                Data.Stream.Position = 0;
+                return new NonDisposableMemoryStream(Data, isWriter: false);
+            }
+            catch
+            {
+                Data.ReleaseRead();
+                throw;
+            }
         }
 
         public override Stream GetWriteStream()
         {
             ThrowIfReadOnly();
-            Data.Stream.SetLength(0);
-            Data.Stream.Position = 0;
-            return new NonDisposableMemoryStream(Data, Data.Stream);
+            Data.AcquireWrite();
+            try
+            {
+                Data.Stream.SetLength(0);
+                Data.Stream.Position = 0;
+                return new NonDisposableMemoryStream(Data, isWriter: true);
+            }
+            catch
+            {
+                Data.ReleaseWrite();
+                throw;
+            }
         }
 
         public override FileEntry Rename(string newName)

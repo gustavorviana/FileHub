@@ -7,11 +7,13 @@ namespace FileHub.Local
 {
     public class LocalDirectory : FileDirectory
     {
+        private DirectoryInfo _info;
+
         public override string Path { get; }
         public override FileDirectory Parent { get; }
 
-        public override DateTime CreationTimeUtc => new DirectoryInfo(Path).CreationTimeUtc;
-        public override DateTime LastWriteTimeUtc => new DirectoryInfo(Path).LastWriteTimeUtc;
+        public override DateTime CreationTimeUtc => RefreshInfo().CreationTimeUtc;
+        public override DateTime LastWriteTimeUtc => RefreshInfo().LastWriteTimeUtc;
 
         internal LocalDirectory(string path, string rootPath, FileDirectory parent)
             : base(GetDirectoryName(path), rootPath)
@@ -31,6 +33,7 @@ namespace FileHub.Local
             ValidateName(name);
             var filePath = ResolveSafePath(name);
             File.Create(filePath).Dispose();
+            InvalidateInfo();
             return new LocalFile(this, name, RootPath);
         }
 
@@ -50,8 +53,11 @@ namespace FileHub.Local
         public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*")
         {
             var dir = new DirectoryInfo(Path);
-            return dir.GetFiles(searchPattern, SearchOption.TopDirectoryOnly)
-                .Select(f => new LocalFile(this, f.Name, RootPath));
+            foreach (var f in dir.GetFiles(searchPattern, SearchOption.TopDirectoryOnly))
+            {
+                if (ShouldSkipLink(f)) continue;
+                yield return new LocalFile(this, f.Name, RootPath);
+            }
         }
 
         // === Directory operations ===
@@ -61,6 +67,7 @@ namespace FileHub.Local
             ThrowIfReadOnly();
             ValidateName(name);
             var dirPath = ResolveSafePath(name);
+            InvalidateInfo();
             return new LocalDirectory(dirPath, RootPath, this);
         }
 
@@ -80,15 +87,19 @@ namespace FileHub.Local
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
         {
             var dir = new DirectoryInfo(Path);
-            return dir.GetDirectories(searchPattern, SearchOption.TopDirectoryOnly)
-                .Select(d => new LocalDirectory(d.FullName, RootPath, this));
+            foreach (var d in dir.GetDirectories(searchPattern, SearchOption.TopDirectoryOnly))
+            {
+                if (ShouldSkipLink(d)) continue;
+                yield return new LocalDirectory(d.FullName, RootPath, this);
+            }
         }
 
         // === Common operations ===
 
         public override bool ItemExists(string name)
         {
-            var fullPath = System.IO.Path.Combine(Path, name);
+            ValidateName(name);
+            var fullPath = ResolveSafePath(name);
             return File.Exists(fullPath) || Directory.Exists(fullPath);
         }
 
@@ -98,11 +109,13 @@ namespace FileHub.Local
         {
             ThrowIfReadOnly();
             Directory.Delete(Path, recursive: true);
+            InvalidateInfo();
         }
 
         public override void Delete(string name)
         {
             ThrowIfReadOnly();
+            ValidateName(name);
             var fullPath = ResolveSafePath(name);
             if (Directory.Exists(fullPath))
                 Directory.Delete(fullPath, recursive: true);
@@ -110,14 +123,19 @@ namespace FileHub.Local
                 File.Delete(fullPath);
             else
                 throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+            InvalidateInfo();
         }
 
         public override FileDirectory Rename(string newName)
         {
             ThrowIfReadOnly();
             ValidateName(newName);
+
             var parentPath = System.IO.Path.GetDirectoryName(Path);
-            var newPath = System.IO.Path.Combine(parentPath, newName);
+            var newPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(parentPath, newName));
+
+            EnsureWithinRoot(newPath);
+
             Directory.Move(Path, newPath);
             return new LocalDirectory(newPath, RootPath, Parent);
         }
@@ -125,8 +143,18 @@ namespace FileHub.Local
         public override FileDirectory MoveTo(FileDirectory directory, string name)
         {
             ThrowIfReadOnly();
+
             var copied = CopyTo(directory, name);
-            Directory.Delete(Path, recursive: true);
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+            catch
+            {
+                // Rollback: delete the copy that was made to keep state consistent
+                try { copied.Delete(); } catch { }
+                throw;
+            }
             return copied;
         }
 
@@ -141,9 +169,28 @@ namespace FileHub.Local
         {
             ThrowIfReadOnly();
             Directory.SetLastWriteTimeUtc(Path, date);
+            InvalidateInfo();
         }
 
         // === Helpers ===
+
+        private DirectoryInfo RefreshInfo()
+        {
+            if (_info == null)
+                _info = new DirectoryInfo(Path);
+            _info.Refresh();
+            return _info;
+        }
+
+        private void InvalidateInfo()
+        {
+            _info = null;
+        }
+
+        private static bool ShouldSkipLink(FileSystemInfo info)
+        {
+            return (info.Attributes & FileAttributes.ReparsePoint) != 0;
+        }
 
         private static void CopyContents(FileDirectory source, FileDirectory destination)
         {
