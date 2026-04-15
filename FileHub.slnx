@@ -2,5 +2,10 @@
   <Folder Name="/Solution Items/">
     <File Path="Directory.Packages.props" />
   </Folder>
-  <Project Path="src/FileHub/FileHub.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/FileHub/FileHub.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="FileHub.Tests/FileHub.Tests.csproj" Id="09e0d2a3-b075-4003-b67c-529ce46378ca" />
+  </Folder>
 </Solution>
