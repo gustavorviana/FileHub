@@ -11,8 +11,6 @@ namespace FileHub.DependencyInjection
     /// </summary>
     public static class FileHubServiceCollectionExtensions
     {
-        // ---- Non-keyed ----
-
         /// <summary>
         /// Register a FileHub under both <typeparamref name="TFileHub"/> and
         /// <see cref="IFileHub"/>. Consumers can inject either.
@@ -83,55 +81,57 @@ namespace FileHub.DependencyInjection
             services.Add(new ServiceDescriptor(typeof(IFileHub), instance));
             return services;
         }
-
-        // ---- Keyed (named, .NET 8+) ----
-
         /// <summary>
-        /// Register a keyed FileHub under both the keyed <typeparamref name="TFileHub"/>
-        /// slot and the keyed <see cref="IFileHub"/> slot with the same
-        /// <paramref name="serviceKey"/>.
+        /// Register a singleton <see cref="INamedFileHubs"/> registry. The
+        /// <paramref name="configure"/> callback receives a
+        /// <see cref="NamedFileHubsBuilder"/>; call <see cref="NamedFileHubsBuilder.Register"/>
+        /// on it to add hubs by name. The resulting registry is immutable — once
+        /// <c>AddNamedFileHubs</c> returns, no further hubs can be registered.
+        /// Hubs are <b>not</b> exposed as keyed DI services.
         /// </summary>
-        public static IServiceCollection AddKeyedFileHub<TFileHub>(
+        /// <example>
+        /// <code>
+        /// services.AddNamedFileHubs(builder =>
+        /// {
+        ///     builder.Register("reports", new MemoryFileHub());
+        ///     builder.Register("logs",    new LocalFileHub(@"C:\logs"));
+        /// });
+        /// </code>
+        /// </example>
+        public static IServiceCollection AddNamedFileHubs(
             this IServiceCollection services,
-            object serviceKey,
-            Func<IServiceProvider, object, TFileHub> factory,
-            ServiceLifetime lifetime = ServiceLifetime.Singleton)
-            where TFileHub : class, IFileHub
+            Action<NamedFileHubsBuilder> configure)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
-            if (serviceKey == null) throw new ArgumentNullException(nameof(serviceKey));
-            if (factory == null) throw new ArgumentNullException(nameof(factory));
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-            services.Add(new ServiceDescriptor(typeof(TFileHub), serviceKey, factory, lifetime));
-            services.Add(new ServiceDescriptor(
-                typeof(IFileHub),
-                serviceKey,
-                (sp, key) => sp.GetRequiredKeyedService<TFileHub>(key),
-                lifetime));
+            var builder = new NamedFileHubsBuilder();
+            configure(builder);
+            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), builder.Build()));
             return services;
         }
 
         /// <summary>
-        /// Register a prebuilt keyed FileHub instance (Singleton) under both
-        /// the keyed <typeparamref name="TFileHub"/> slot and the keyed
-        /// <see cref="IFileHub"/> slot.
+        /// Register a singleton <see cref="INamedFileHubs"/> registry. The
+        /// <paramref name="configure"/> callback receives the resolved
+        /// <see cref="IServiceProvider"/> and a <see cref="NamedFileHubsBuilder"/>
+        /// — useful when hub construction depends on other services
+        /// (e.g. <c>IOptions&lt;T&gt;</c>). The resulting registry is immutable
+        /// once the registry is built.
         /// </summary>
-        public static IServiceCollection AddKeyedFileHub<TFileHub>(
+        public static IServiceCollection AddNamedFileHubs(
             this IServiceCollection services,
-            object serviceKey,
-            TFileHub instance)
-            where TFileHub : class, IFileHub
+            Action<IServiceProvider, NamedFileHubsBuilder> configure)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
-            if (serviceKey == null) throw new ArgumentNullException(nameof(serviceKey));
-            if (instance == null) throw new ArgumentNullException(nameof(instance));
+            if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-            services.Add(new ServiceDescriptor(typeof(TFileHub), serviceKey, instance));
-            services.Add(new ServiceDescriptor(
-                typeof(IFileHub),
-                serviceKey,
-                (sp, key) => sp.GetRequiredKeyedService<TFileHub>(key),
-                ServiceLifetime.Singleton));
+            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), sp =>
+            {
+                var builder = new NamedFileHubsBuilder();
+                configure(sp, builder);
+                return builder.Build();
+            }, ServiceLifetime.Singleton));
             return services;
         }
     }

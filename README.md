@@ -2,6 +2,22 @@
 
 A .NET library that abstracts file and directory access through a unified API. Install and it works with local files out of the box — no configuration needed. Other storage backends can be plugged in as custom drivers using the same contract.
 
+## Motivation
+
+Most .NET apps end up tangled with `System.IO.File` calls scattered across services, or coupled to a specific cloud SDK whose types leak into every layer. When the storage backend has to change — "move uploads to S3", "keep unit tests off the disk", "sandbox per-tenant data" — the refactor is painful because the abstraction boundary was never drawn.
+
+FileHub draws that boundary once and holds it:
+
+- **One API, many backends.** Consumer code depends on `IFileHub` / `FileDirectory` / `FileEntry`. Local disk, in-memory, Oracle Object Storage, or any custom driver plug into the exact same contract.
+- **No SDK types leak.** Cloud drivers wrap their SDK internally; consumers never see an `ObjectStorageClient` or an SDK-specific exception. Swapping a driver does not ripple through the codebase.
+- **Sync and async on the same class.** Modeled on `Stream.Read` / `Stream.ReadAsync` — pick whichever fits the caller, no parallel async interface to maintain.
+- **Safe by default.** Every hub has a sandbox root. Path traversal (`../`), symlink escape, and invalid names are rejected before any I/O happens.
+- **Testable without mocks.** Swap `LocalFileHub` for `MemoryFileHub` in tests and the same code runs in-process with zero disk I/O. No temp folders to clean up, no fake interfaces to maintain.
+- **Zero dependencies in the core.** The base package pulls nothing beyond the BCL. Optional integrations (DI helpers, OCI driver) live in separate packages so you opt in only where needed.
+- **Read-only as a wrapper, not a policy.** `AsReadOnly()` turns any directory or file into a runtime-enforced read-only view that propagates to everything it returns.
+
+The goal is that a service like `ReportService(IFileHub hub)` can be written once, unit-tested against memory, run locally against disk, and deployed to the cloud against an object store — without a single line changing in the service itself.
+
 ## Features
 
 - **Zero-config for local usage** — `new LocalFileHub(path)` and you're ready
