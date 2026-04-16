@@ -3,7 +3,7 @@ using System.IO;
 
 namespace FileHub.Local
 {
-    public class LocalFileHub : IFileHub
+    public class LocalFileHub : ILocalFileHub
     {
         public FileDirectory Root { get; }
 

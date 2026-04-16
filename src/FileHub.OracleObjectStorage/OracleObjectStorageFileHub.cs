@@ -12,7 +12,7 @@ namespace FileHub.OracleObjectStorage
     /// (OCI) Object Storage. A FileHub instance is scoped to a single bucket;
     /// an optional <c>rootPath</c> narrows visibility to objects under a given prefix.
     /// </summary>
-    public sealed class OracleObjectStorageFileHub : IFileHub, IDisposable
+    public sealed class OracleObjectStorageFileHub : IOracleObjectStorageFileHub, IDisposable
     {
         private readonly OciSession _session;
         private bool _disposed;

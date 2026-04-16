@@ -1,6 +1,6 @@
 namespace FileHub.Memory
 {
-    public class MemoryFileHub : IFileHub
+    public class MemoryFileHub : IMemoryFileHub
     {
         public FileDirectory Root { get; }
 

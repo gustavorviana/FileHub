@@ -16,4 +16,9 @@
 		<PackageVersion Include="OCI.DotNetSDK.Objectstorage" Version="78.2.0" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+	</ItemGroup>
+
 </Project>
