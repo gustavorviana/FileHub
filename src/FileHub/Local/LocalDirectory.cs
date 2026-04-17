@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace FileHub.Local
 {
@@ -49,12 +50,31 @@ namespace FileHub.Local
             return true;
         }
 
-        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*")
+        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null)
+        {
+            ValidatePaging(limit);
+            return GetFilesIterator(searchPattern, offset, limit);
+        }
+
+        private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
             var dir = new DirectoryInfo(Path);
-            foreach (var f in dir.GetFiles(searchPattern, SearchOption.TopDirectoryOnly))
+            IEnumerable<FileInfo> files = dir.GetFiles(searchPattern, SearchOption.TopDirectoryOnly)
+                .OrderBy(f => f.Name, StringComparer.Ordinal)
+                .Where(f => !ShouldSkipLink(f));
+
+            if (offset.IsNamed)
             {
-                if (ShouldSkipLink(f)) continue;
+                files = files.Where(f => string.CompareOrdinal(f.Name, offset.Name) >= 0);
+            }
+
+            int skipped = 0;
+            int yielded = 0;
+            foreach (var f in files)
+            {
+                if (!offset.IsNamed && skipped < offset.Index) { skipped++; continue; }
+                if (limit.HasValue && yielded >= limit.Value) yield break;
+                yielded++;
                 yield return new LocalFile(this, f.Name, RootPath);
             }
         }

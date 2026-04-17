@@ -49,8 +49,8 @@ namespace FileHub.OracleObjectStorage
         /// Build a FileHub from a user-supplied authentication provider and region id.
         /// </summary>
         public static OracleObjectStorageFileHub FromProvider(
-            string bucketName,
             string rootPath,
+            string bucketName,
             IAuthenticationDetailsProvider provider,
             string regionId)
         {
@@ -75,6 +75,16 @@ namespace FileHub.OracleObjectStorage
             var real = new RealOciClient(sdkClient, @namespace, bucketName, regionId, ownsClient: true);
             return FromOciClient(real, rootPath);
         }
+
+
+        /// <summary>
+        /// Build a FileHub from a user-supplied authentication provider and region id.
+        /// </summary>
+        public static OracleObjectStorageFileHub FromProvider(
+            string rootPath,
+            string bucketName,
+            ConfigFileAuthenticationDetailsProvider provider)
+            => FromProvider(rootPath, bucketName, provider, provider.Region.RegionId);
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="ObjectStorageClient"/>.

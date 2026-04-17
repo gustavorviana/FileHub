@@ -79,9 +79,9 @@ namespace FileHub
             return false;
         }
 
-        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*")
+        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null)
         {
-            return _inner.GetFiles(searchPattern).Select(f => f.AsReadOnly());
+            return _inner.GetFiles(searchPattern, offset, limit).Select(f => f.AsReadOnly());
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)

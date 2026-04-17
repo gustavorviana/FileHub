@@ -109,6 +109,34 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void GetFiles_IndexOffsetAndLimit_PaginateSlice()
+    {
+        var scope = Scope(nameof(GetFiles_IndexOffsetAndLimit_PaginateSlice));
+        for (int i = 0; i < 10; i++)
+            scope.CreateFile($"f{i:D2}.txt").SetBytes(new byte[] { (byte)i });
+
+        var first = scope.GetFiles(offset: 0, limit: 3).Select(f => f.Name).ToArray();
+        var second = scope.GetFiles(offset: 3, limit: 3).Select(f => f.Name).ToArray();
+
+        Assert.Equal(3, first.Length);
+        Assert.Equal(3, second.Length);
+        Assert.Empty(first.Intersect(second));
+    }
+
+    [Fact]
+    public void GetFiles_NamedOffset_StartsFromCursorInclusive()
+    {
+        var scope = Scope(nameof(GetFiles_NamedOffset_StartsFromCursorInclusive));
+        for (int i = 0; i < 5; i++)
+            scope.CreateFile($"f{i:D2}.txt").SetBytes(new byte[] { (byte)i });
+
+        var names = scope.GetFiles(offset: FileListOffset.FromName("f02.txt"), limit: 2)
+            .Select(f => f.Name).ToArray();
+
+        Assert.Equal(new[] { "f02.txt", "f03.txt" }, names);
+    }
+
+    [Fact]
     public void GetFiles_HandlesPagination()
     {
         var scope = Scope(nameof(GetFiles_HandlesPagination));

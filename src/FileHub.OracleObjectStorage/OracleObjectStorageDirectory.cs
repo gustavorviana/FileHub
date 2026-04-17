@@ -181,17 +181,40 @@ namespace FileHub.OracleObjectStorage
             }
         }
 
-        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*")
+        /// <summary>
+        /// Lists files under this prefix, optionally paginated.
+        /// </summary>
+        /// <remarks>
+        /// WARNING: an index-based <paramref name="offset"/> on this driver
+        /// iterates object-by-object through OCI <c>ListObjects</c> calls,
+        /// since OCI has no native "skip N" primitive. For large offsets
+        /// this can blow up API consumption. Prefer
+        /// <see cref="FileListOffset.FromName(string)"/> for pagination —
+        /// the cursor is pushed straight to OCI's <c>start</c> parameter.
+        /// </remarks>
+        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null)
+        {
+            ValidatePaging(limit);
+            return GetFilesIterator(searchPattern, offset, limit);
+        }
+
+        private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
             var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
-            string start = null;
+            int? backendLimit = ResolveBackendLimit(offset, limit);
+            string start = offset.IsNamed ? _prefix + offset.Name : null;
+            int skipped = 0;
+            int yielded = 0;
             do
             {
-                var page = _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, start: start).GetAwaiter().GetResult();
+                var page = _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: backendLimit, start: start).GetAwaiter().GetResult();
                 foreach (var obj in page.Objects)
                 {
                     if (!IsChildFile(obj.Name, out var leaf)) continue;
                     if (!regex.IsMatch(leaf)) continue;
+                    if (!offset.IsNamed && skipped < offset.Index) { skipped++; continue; }
+                    if (limit.HasValue && yielded >= limit.Value) yield break;
+                    yielded++;
                     yield return new OracleObjectStorageFile(this, leaf, obj.Size ?? 0, obj.TimeCreated);
                 }
                 start = page.NextStartWith;
@@ -199,26 +222,53 @@ namespace FileHub.OracleObjectStorage
         }
 
 #if NET8_0_OR_GREATER
+        /// <summary>
+        /// Asynchronously lists files under this prefix, optionally paginated.
+        /// </summary>
+        /// <remarks>
+        /// Same caveat as the sync <see cref="GetFiles"/>: an index-based
+        /// <paramref name="offset"/> iterates object-by-object through
+        /// <c>ListObjects</c>. Prefer <see cref="FileListOffset.FromName(string)"/>
+        /// for pagination.
+        /// </remarks>
         public override async IAsyncEnumerable<FileEntry> GetFilesAsync(
             string searchPattern = "*",
+            FileListOffset offset = default,
+            int? limit = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            ValidatePaging(limit);
             var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
-            string start = null;
+            int? backendLimit = ResolveBackendLimit(offset, limit);
+            string start = offset.IsNamed ? _prefix + offset.Name : null;
+            int skipped = 0;
+            int yielded = 0;
             do
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var page = await _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, start: start, cancellationToken).ConfigureAwait(false);
+                var page = await _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: backendLimit, start: start, cancellationToken).ConfigureAwait(false);
                 foreach (var obj in page.Objects)
                 {
                     if (!IsChildFile(obj.Name, out var leaf)) continue;
                     if (!regex.IsMatch(leaf)) continue;
+                    if (!offset.IsNamed && skipped < offset.Index) { skipped++; continue; }
+                    if (limit.HasValue && yielded >= limit.Value) yield break;
+                    yielded++;
                     yield return new OracleObjectStorageFile(this, leaf, obj.Size ?? 0, obj.TimeCreated);
                 }
                 start = page.NextStartWith;
             } while (!string.IsNullOrEmpty(start));
         }
 #endif
+
+        private static int? ResolveBackendLimit(FileListOffset offset, int? limit)
+        {
+            if (!limit.HasValue) return null;
+            if (offset.IsNamed)
+                return limit.Value < 1000 ? limit : null;
+            long total = (long)offset.Index + limit.Value;
+            return total < 1000 ? (int)total : null;
+        }
 
         // === Directory operations ===
 

@@ -129,6 +129,97 @@ public class LocalDirectoryTests
     }
 
     [Fact]
+    public void GetFiles_WithOffset_SkipsFirstN()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt");
+        root.CreateFile("b.txt");
+        root.CreateFile("c.txt");
+
+        var names = root.GetFiles(offset: 1).Select(f => f.Name).OrderBy(n => n).ToArray();
+
+        Assert.Equal(2, names.Length);
+    }
+
+    [Fact]
+    public void GetFiles_WithLimit_CapsResults()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt");
+        root.CreateFile("b.txt");
+        root.CreateFile("c.txt");
+
+        var names = root.GetFiles(limit: 2).ToArray();
+
+        Assert.Equal(2, names.Length);
+    }
+
+    [Fact]
+    public void GetFiles_OffsetAndLimit_PaginateSlice()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        for (int i = 0; i < 5; i++) root.CreateFile($"f{i}.txt");
+
+        var first = root.GetFiles(offset: 0, limit: 2).Select(f => f.Name).ToArray();
+        var second = root.GetFiles(offset: 2, limit: 2).Select(f => f.Name).ToArray();
+
+        Assert.Equal(2, first.Length);
+        Assert.Equal(2, second.Length);
+        Assert.Empty(first.Intersect(second));
+    }
+
+    [Fact]
+    public void GetFiles_NegativeOffset_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.GetFiles(offset: -1).ToArray());
+    }
+
+    [Fact]
+    public void GetFiles_NegativeLimit_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.GetFiles(limit: -1).ToArray());
+    }
+
+    [Fact]
+    public async Task GetFilesAsync_WithOffsetAndLimit_PaginateSlice()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        for (int i = 0; i < 5; i++) root.CreateFile($"f{i}.txt");
+
+        var names = new List<string>();
+        await foreach (var f in root.GetFilesAsync(offset: 1, limit: 2))
+            names.Add(f.Name);
+
+        Assert.Equal(2, names.Count);
+    }
+
+    [Fact]
+    public void GetFiles_NamedOffset_StartsFromCursorInclusive()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt");
+        root.CreateFile("b.txt");
+        root.CreateFile("c.txt");
+        root.CreateFile("d.txt");
+
+        var names = root.GetFiles(offset: FileListOffset.FromName("c.txt"))
+            .Select(f => f.Name).ToArray();
+
+        Assert.Equal(new[] { "c.txt", "d.txt" }, names);
+    }
+
+    [Fact]
     public void GetFiles_WithPattern_FiltersByExtension()
     {
         using var temp = new TempDirectory();
@@ -308,6 +399,97 @@ public class LocalDirectoryTests
         // path-separator character is an invalid filename character on Windows and
         // should be rejected by ValidateName long before any filesystem call.
         Assert.Throws<ArgumentException>(() => root.CreateFile("..\\escape.txt"));
+    }
+
+    [Fact]
+    public void OpenDirectory_NestedPath_NavigatesIntoSubdirectory()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateDirectory("folder1").CreateDirectory("folder2");
+
+        var opened = root.OpenDirectory("folder1/folder2");
+
+        Assert.Equal("folder2", opened.Name);
+        Assert.True(opened.Exists());
+    }
+
+    [Fact]
+    public void OpenDirectory_NestedPath_BackslashSeparator_Works()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateDirectory("folder1").CreateDirectory("folder2");
+
+        var opened = root.OpenDirectory("folder1\\folder2");
+
+        Assert.Equal("folder2", opened.Name);
+    }
+
+    [Fact]
+    public void OpenDirectory_NestedPath_CreateIfNotExists_CreatesChain()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        var opened = root.OpenDirectory("folder1/folder2/folder3", createIfNotExists: true);
+
+        Assert.True(opened.Exists());
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "folder1", "folder2", "folder3")));
+    }
+
+    [Fact]
+    public void OpenFile_NestedPath_OpensFileInSubdirectory()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateDirectory("folder1").CreateFile("file.txt").SetText("payload");
+
+        var opened = root.OpenFile("folder1/file.txt");
+
+        Assert.Equal("file.txt", opened.Name);
+        Assert.Equal("payload", opened.ReadAllText());
+    }
+
+    [Fact]
+    public void OpenDirectory_ParentTraversal_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var sub = root.CreateDirectory("sub");
+
+        Assert.Throws<FileHubException>(() => sub.OpenDirectory("../escape"));
+    }
+
+    [Fact]
+    public void OpenFile_ParentTraversal_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var sub = root.CreateDirectory("sub");
+
+        Assert.Throws<FileHubException>(() => sub.OpenFile("../escape.txt"));
+    }
+
+    [Fact]
+    public void OpenDirectory_LeadingSlash_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateDirectory("folder1");
+
+        Assert.Throws<FileHubException>(() => root.OpenDirectory("/folder1"));
+        Assert.Throws<FileHubException>(() => root.OpenDirectory("\\folder1"));
+    }
+
+    [Fact]
+    public void OpenFile_LeadingSlash_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.Throws<FileHubException>(() => root.OpenFile("/file.txt"));
+        Assert.Throws<FileHubException>(() => root.OpenFile("\\file.txt"));
     }
 
     [Fact]

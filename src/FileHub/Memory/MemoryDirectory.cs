@@ -50,10 +50,22 @@ namespace FileHub.Memory
             return true;
         }
 
-        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*")
+        public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null)
         {
-            return FilterByPattern(_files.Keys, searchPattern)
-                .Select(name => (FileEntry)new MemoryFile(this, _files[name]));
+            ValidatePaging(limit);
+            IEnumerable<string> names = FilterByPattern(_files.Keys, searchPattern).OrderBy(n => n, StringComparer.Ordinal);
+
+            if (offset.IsNamed)
+            {
+                names = names.Where(n => string.CompareOrdinal(n, offset.Name) >= 0);
+            }
+            else if (offset.Index > 0)
+            {
+                names = names.Skip(offset.Index);
+            }
+
+            if (limit.HasValue) names = names.Take(limit.Value);
+            return names.Select(name => (FileEntry)new MemoryFile(this, _files[name]));
         }
 
         // === Directory operations ===

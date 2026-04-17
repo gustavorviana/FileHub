@@ -24,7 +24,7 @@ namespace FileHub
 
         public abstract FileEntry CreateFile(string name);
         public abstract bool TryOpenFile(string name, out FileEntry file);
-        public abstract IEnumerable<FileEntry> GetFiles(string searchPattern = "*");
+        public abstract IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null);
 
         public abstract FileDirectory CreateDirectory(string name);
         public abstract bool TryOpenDirectory(string name, out FileDirectory directory);
@@ -54,13 +54,21 @@ namespace FileHub
 
         public FileEntry OpenFile(string name, bool createIfNotExists)
         {
-            if (TryOpenFile(name, out var file))
-                return file;
+            var (head, rest) = SplitPath(name);
 
-            if (createIfNotExists)
-                return CreateFile(name);
+            if (rest == null)
+            {
+                if (TryOpenFile(head, out var file))
+                    return file;
 
-            throw new FileNotFoundException($"The file \"{System.IO.Path.Combine(Path, name)}\" was not found.");
+                if (createIfNotExists)
+                    return CreateFile(head);
+
+                throw new FileNotFoundException($"The file \"{System.IO.Path.Combine(Path, name)}\" was not found.");
+            }
+
+            var dir = OpenOrCreateChildDirectory(head, createIfNotExists);
+            return dir.OpenFile(rest, createIfNotExists);
         }
 
         public FileDirectory OpenDirectory(string name)
@@ -70,13 +78,55 @@ namespace FileHub
 
         public FileDirectory OpenDirectory(string name, bool createIfNotExists)
         {
-            if (TryOpenDirectory(name, out var directory))
+            var (head, rest) = SplitPath(name);
+
+            var directory = OpenOrCreateChildDirectory(head, createIfNotExists);
+
+            if (rest == null)
+                return directory;
+
+            return directory.OpenDirectory(rest, createIfNotExists);
+        }
+
+        private FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
+        {
+            if (TryOpenDirectory(segment, out var directory))
                 return directory;
 
             if (createIfNotExists)
-                return CreateDirectory(name);
+                return CreateDirectory(segment);
 
-            throw new DirectoryNotFoundException($"The directory \"{System.IO.Path.Combine(Path, name)}\" was not found.");
+            throw new DirectoryNotFoundException($"The directory \"{System.IO.Path.Combine(Path, segment)}\" was not found.");
+        }
+
+        private static (string Head, string Remainder) SplitPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+
+            if (path[0] == '/' || path[0] == '\\')
+                throw new FileHubException($"Absolute paths are not allowed; path \"{path}\" must be relative.");
+
+            var idx = path.IndexOfAny(new[] { '/', '\\' });
+
+            string head;
+            string remainder;
+            if (idx < 0)
+            {
+                head = path;
+                remainder = null;
+            }
+            else
+            {
+                head = path.Substring(0, idx);
+                var rest = path.Substring(idx + 1).Trim('/', '\\');
+                remainder = rest.Length == 0 ? null : rest;
+            }
+
+            if (head == "..")
+                throw new FileHubException($"Parent-directory traversal is not allowed in path \"{path}\".");
+
+            return (head, remainder);
         }
 
         public void DeleteIfExists(string name)
@@ -185,9 +235,11 @@ namespace FileHub
 #if NET8_0_OR_GREATER
         public virtual async IAsyncEnumerable<FileEntry> GetFilesAsync(
             string searchPattern = "*",
+            FileListOffset offset = default,
+            int? limit = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            foreach (var file in GetFiles(searchPattern))
+            foreach (var file in GetFiles(searchPattern, offset, limit))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return file;
@@ -207,10 +259,10 @@ namespace FileHub
             await Task.CompletedTask.ConfigureAwait(false);
         }
 #else
-        public virtual Task<IEnumerable<FileEntry>> GetFilesAsync(string searchPattern = "*", CancellationToken cancellationToken = default)
+        public virtual Task<IEnumerable<FileEntry>> GetFilesAsync(string searchPattern = "*", FileListOffset offset = default, int? limit = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(GetFiles(searchPattern));
+            return Task.FromResult(GetFiles(searchPattern, offset, limit));
         }
 
         public virtual Task<IEnumerable<FileDirectory>> GetDirectoriesAsync(string searchPattern = "*", CancellationToken cancellationToken = default)
@@ -221,6 +273,12 @@ namespace FileHub
 #endif
 
         // === Helpers ===
+
+        protected static void ValidatePaging(int? limit)
+        {
+            if (limit.HasValue && limit.Value < 0)
+                throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be non-negative.");
+        }
 
         protected string ResolveSafePath(string relativePath)
         {

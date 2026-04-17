@@ -167,6 +167,79 @@ public class MemoryDirectoryTests
         Assert.True(root.ItemExists("auto"));
     }
 
+    [Fact]
+    public void OpenDirectory_NestedPath_NavigatesIntoSubdirectory()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("folder1").CreateDirectory("folder2");
+
+        var opened = root.OpenDirectory("folder1/folder2");
+
+        Assert.Equal("folder2", opened.Name);
+    }
+
+    [Fact]
+    public void OpenDirectory_NestedPath_CreateIfNotExists_CreatesChain()
+    {
+        var root = NewRoot();
+
+        var opened = root.OpenDirectory("folder1/folder2/folder3", createIfNotExists: true);
+
+        Assert.Equal("folder3", opened.Name);
+        Assert.True(root.TryOpenDirectory("folder1", out var f1));
+        Assert.True(f1.TryOpenDirectory("folder2", out var f2));
+        Assert.True(f2.TryOpenDirectory("folder3", out _));
+    }
+
+    [Fact]
+    public void OpenFile_NestedPath_OpensFileInSubdirectory()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("folder1").CreateFile("file.txt").SetText("payload");
+
+        var opened = root.OpenFile("folder1/file.txt");
+
+        Assert.Equal("file.txt", opened.Name);
+        Assert.Equal("payload", opened.ReadAllText());
+    }
+
+    [Fact]
+    public void OpenDirectory_ParentTraversal_Throws()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+
+        Assert.Throws<FileHubException>(() => sub.OpenDirectory("../escape"));
+    }
+
+    [Fact]
+    public void OpenFile_ParentTraversal_Throws()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+
+        Assert.Throws<FileHubException>(() => sub.OpenFile("../escape.txt"));
+    }
+
+    [Fact]
+    public void OpenDirectory_LeadingSlash_Throws()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("folder1");
+
+        Assert.Throws<FileHubException>(() => root.OpenDirectory("/folder1"));
+        Assert.Throws<FileHubException>(() => root.OpenDirectory("\\folder1"));
+    }
+
+    [Fact]
+    public void OpenFile_LeadingSlash_Throws()
+    {
+        var root = NewRoot();
+
+        Assert.Throws<FileHubException>(() => root.OpenFile("/file.txt"));
+        Assert.Throws<FileHubException>(() => root.OpenFile("\\file.txt"));
+    }
+
     // === GetFiles / GetDirectories with patterns ===
 
     [Fact]
@@ -179,6 +252,60 @@ public class MemoryDirectoryTests
         var names = root.GetFiles().Select(f => f.Name).OrderBy(n => n).ToArray();
 
         Assert.Equal(new[] { "a.txt", "b.log" }, names);
+    }
+
+    [Fact]
+    public void GetFiles_OffsetAndLimit_PaginateSlice()
+    {
+        var root = NewRoot();
+        for (int i = 0; i < 5; i++) root.CreateFile($"f{i}.txt");
+
+        var first = root.GetFiles(offset: 0, limit: 2).ToArray();
+        var second = root.GetFiles(offset: 2, limit: 2).ToArray();
+
+        Assert.Equal(2, first.Length);
+        Assert.Equal(2, second.Length);
+        Assert.Empty(first.Select(f => f.Name).Intersect(second.Select(f => f.Name)));
+    }
+
+    [Fact]
+    public void GetFiles_NegativeOffset_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.GetFiles(offset: -1).ToArray());
+    }
+
+    [Fact]
+    public void GetFiles_NamedOffset_StartsFromCursorInclusive()
+    {
+        var root = NewRoot();
+        root.CreateFile("a.txt");
+        root.CreateFile("b.txt");
+        root.CreateFile("c.txt");
+        root.CreateFile("d.txt");
+
+        var names = root.GetFiles(offset: FileListOffset.FromName("c.txt")).Select(f => f.Name).ToArray();
+
+        Assert.Equal(new[] { "c.txt", "d.txt" }, names);
+    }
+
+    [Fact]
+    public void GetFiles_NamedOffsetWithLimit_PaginatesSlice()
+    {
+        var root = NewRoot();
+        for (int i = 0; i < 5; i++) root.CreateFile($"f{i}.txt");
+
+        var names = root.GetFiles(offset: FileListOffset.FromName("f2.txt"), limit: 2)
+            .Select(f => f.Name).ToArray();
+
+        Assert.Equal(new[] { "f2.txt", "f3.txt" }, names);
+    }
+
+    [Fact]
+    public void GetFiles_NegativeLimit_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.GetFiles(limit: -1).ToArray());
     }
 
     [Fact]
