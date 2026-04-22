@@ -45,7 +45,6 @@ namespace FileHub
         public override void Delete() => ThrowIfReadOnly();
         public override FileEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
         public override FileEntry MoveTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
-        public override void SetLastWriteTime(DateTime date) => ThrowIfReadOnly();
     }
 
     internal class ReadOnlyDirectoryWrapper : FileDirectory
@@ -108,6 +107,5 @@ namespace FileHub
         public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }
         public override FileDirectory MoveTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
         public override FileDirectory CopyTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
-        public override void SetLastWriteTime(DateTime date) => ThrowIfReadOnly();
     }
 }

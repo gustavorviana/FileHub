@@ -43,7 +43,7 @@ namespace FileHub.Local
         {
             ThrowIfReadOnly();
             ValidateName(newName);
-            var newPath = System.IO.Path.Combine(Parent.Path, newName);
+            var newPath = ((LocalDirectory)Parent).ResolveSafeChildPath(newName);
             File.Move(Path, newPath);
             Name = newName;
             _info = null;
@@ -56,13 +56,6 @@ namespace FileHub.Local
             var newFile = CopyTo(directory, name);
             Delete();
             return newFile;
-        }
-
-        public override void SetLastWriteTime(DateTime date)
-        {
-            ThrowIfReadOnly();
-            File.SetLastWriteTimeUtc(Path, date);
-            _info = null;
         }
 
         private FileInfo RefreshInfo()

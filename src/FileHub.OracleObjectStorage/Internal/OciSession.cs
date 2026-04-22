@@ -18,10 +18,30 @@ namespace FileHub.OracleObjectStorage.Internal
         Task<bool> GetIsPublicAsync(CancellationToken cancellationToken = default);
     }
 
+    internal static class OciSessionTarget
+    {
+        /// <summary>
+        /// Returns true when both clients are authenticated with the same
+        /// credentials (same <see cref="IOciClient.CredentialScope"/>). OCI
+        /// routes server-side <c>CopyObject</c> across buckets, namespaces and
+        /// regions through the authenticated client, so a shared scope is the
+        /// correct gate — not matching <c>Namespace/Bucket/Region</c>.
+        /// </summary>
+        public static bool SameCredentials(IOciClient a, IOciClient b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+            return ReferenceEquals(a.CredentialScope, b.CredentialScope);
+        }
+    }
+
     internal sealed class OciSession : IOciSession
     {
-        private readonly object _publicAccessGate = new object();
-        private bool? _isPublicCached;
+        // 0 = unknown, 1 = false, 2 = true. Packed into an int so reads are
+        // torn-free; the semaphore serialises the GetBucketAsync probe so only
+        // one caller pays the round-trip.
+        private int _isPublicState;
+        private readonly SemaphoreSlim _publicAccessGate = new SemaphoreSlim(1, 1);
         private bool _disposed;
 
         public IOciClient Client { get; }
@@ -36,23 +56,33 @@ namespace FileHub.OracleObjectStorage.Internal
         public async Task<bool> GetIsPublicAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            lock (_publicAccessGate)
+            var cached = Volatile.Read(ref _isPublicState);
+            if (cached != 0) return cached == 2;
+
+            await _publicAccessGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                if (_isPublicCached.HasValue) return _isPublicCached.Value;
+                cached = Volatile.Read(ref _isPublicState);
+                if (cached != 0) return cached == 2;
+
+                ThrowIfDisposed();
+                var info = await Client.GetBucketAsync(cancellationToken).ConfigureAwait(false);
+                var value = info.PublicAccessType == OciBucketAccessType.ObjectRead
+                    || info.PublicAccessType == OciBucketAccessType.ObjectReadWithoutList;
+                Volatile.Write(ref _isPublicState, value ? 2 : 1);
+                return value;
             }
-
-            var info = await Client.GetBucketAsync(cancellationToken).ConfigureAwait(false);
-            var value = info.PublicAccessType == OciBucketAccessType.ObjectRead
-                || info.PublicAccessType == OciBucketAccessType.ObjectReadWithoutList;
-
-            lock (_publicAccessGate) _isPublicCached = value;
-            return value;
+            finally
+            {
+                _publicAccessGate.Release();
+            }
         }
 
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
+            _publicAccessGate.Dispose();
             Client.Dispose();
         }
 

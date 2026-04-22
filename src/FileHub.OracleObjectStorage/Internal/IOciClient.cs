@@ -18,6 +18,15 @@ namespace FileHub.OracleObjectStorage.Internal
         string Bucket { get; }
         string Region { get; }
 
+        /// <summary>
+        /// Opaque identity shared by clients that talk to OCI with the same
+        /// credentials. Reference equality of this object decides whether the
+        /// driver can issue a server-side <c>CopyObject</c> across buckets,
+        /// namespaces or regions — OCI routes such copies through a single
+        /// authenticated <c>ObjectStorageClient</c>.
+        /// </summary>
+        object CredentialScope { get; }
+
         Task<OciHeadResult> HeadObjectAsync(string objectName, CancellationToken cancellationToken = default);
 
         Task<OciGetResult> GetObjectAsync(string objectName, long? rangeStart, long? rangeEndInclusive, CancellationToken cancellationToken = default);
@@ -34,7 +43,13 @@ namespace FileHub.OracleObjectStorage.Internal
 
         Task RenameObjectAsync(string sourceName, string newName, CancellationToken cancellationToken = default);
 
-        Task CopyObjectAsync(string sourceObjectName, string destinationObjectName, CancellationToken cancellationToken = default);
+        Task CopyObjectAsync(
+            string sourceObjectName,
+            string destinationNamespace,
+            string destinationBucket,
+            string destinationRegion,
+            string destinationObjectName,
+            CancellationToken cancellationToken = default);
 
         Task<OciListPage> ListObjectsAsync(string prefix, string delimiter, int? limit, string start, CancellationToken cancellationToken = default);
 

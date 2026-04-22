@@ -82,57 +82,78 @@ namespace FileHub.DependencyInjection
             return services;
         }
         /// <summary>
-        /// Register a singleton <see cref="INamedFileHubs"/> registry. The
+        /// Register an <see cref="INamedFileHubs"/> registry. The
         /// <paramref name="configure"/> callback receives a
-        /// <see cref="NamedFileHubsBuilder"/>; call <see cref="NamedFileHubsBuilder.Register"/>
-        /// on it to add hubs by name. The resulting registry is immutable — once
-        /// <c>AddNamedFileHubs</c> returns, no further hubs can be registered.
-        /// Hubs are <b>not</b> exposed as keyed DI services.
+        /// <see cref="NamedFileHubsServiceBuilder"/>; call
+        /// <see cref="NamedFileHubsServiceBuilder.Register(string, IFileHub)"/> for
+        /// prebuilt singletons, or
+        /// <see cref="NamedFileHubsServiceBuilder.Register(string, Func{IServiceProvider, IFileHub}, ServiceLifetime)"/>
+        /// when hub construction depends on DI services (tenant context, options,
+        /// etc.) and you need per-entry lifetime control (singleton, scoped,
+        /// transient).
         /// </summary>
+        /// <remarks>
+        /// The registry itself is registered as a scoped service so scoped and
+        /// transient hubs honour <see cref="IServiceScope"/> boundaries; singleton
+        /// hubs are cached once at the root. Hubs are <b>not</b> exposed as keyed
+        /// DI services — access is only through <see cref="INamedFileHubs"/>.
+        /// </remarks>
         /// <example>
         /// <code>
         /// services.AddNamedFileHubs(builder =>
         /// {
         ///     builder.Register("reports", new MemoryFileHub());
-        ///     builder.Register("logs",    new LocalFileHub(@"C:\logs"));
+        ///     builder.Register(
+        ///         "tenant",
+        ///         sp => new LocalFileHub($@"C:\tenants\{sp.GetRequiredService&lt;ITenantContext&gt;().Id}"),
+        ///         ServiceLifetime.Scoped);
         /// });
         /// </code>
         /// </example>
         public static IServiceCollection AddNamedFileHubs(
             this IServiceCollection services,
-            Action<NamedFileHubsBuilder> configure)
+            Action<NamedFileHubsServiceBuilder> configure)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
             if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-            var builder = new NamedFileHubsBuilder();
+            var builder = new NamedFileHubsServiceBuilder();
             configure(builder);
-            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), builder.Build()));
+            RegisterNamedFileHubsServices(services, new NamedFileHubsSpec(builder.BuildSnapshot()));
             return services;
         }
 
         /// <summary>
-        /// Register a singleton <see cref="INamedFileHubs"/> registry. The
-        /// <paramref name="configure"/> callback receives the resolved
-        /// <see cref="IServiceProvider"/> and a <see cref="NamedFileHubsBuilder"/>
-        /// — useful when hub construction depends on other services
-        /// (e.g. <c>IOptions&lt;T&gt;</c>). The resulting registry is immutable
-        /// once the registry is built.
+        /// Register an <see cref="INamedFileHubs"/> registry where the
+        /// <paramref name="configure"/> callback gets an
+        /// <see cref="IServiceProvider"/> for one-time setup lookups
+        /// (e.g. <c>IOptions&lt;T&gt;</c>). The inner factory passed to
+        /// <see cref="NamedFileHubsServiceBuilder.Register(string, Func{IServiceProvider, IFileHub}, ServiceLifetime)"/>
+        /// still runs per lookup with the current scope's provider.
         /// </summary>
         public static IServiceCollection AddNamedFileHubs(
             this IServiceCollection services,
-            Action<IServiceProvider, NamedFileHubsBuilder> configure)
+            Action<IServiceProvider, NamedFileHubsServiceBuilder> configure)
         {
             if (services == null) throw new ArgumentNullException(nameof(services));
             if (configure == null) throw new ArgumentNullException(nameof(configure));
 
-            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), sp =>
+            services.Add(new ServiceDescriptor(typeof(NamedFileHubsSpec), sp =>
             {
-                var builder = new NamedFileHubsBuilder();
+                var builder = new NamedFileHubsServiceBuilder();
                 configure(sp, builder);
-                return builder.Build();
+                return new NamedFileHubsSpec(builder.BuildSnapshot());
             }, ServiceLifetime.Singleton));
+            services.Add(new ServiceDescriptor(typeof(NamedFileHubsSingletonCache), typeof(NamedFileHubsSingletonCache), ServiceLifetime.Singleton));
+            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), typeof(DiNamedFileHubs), ServiceLifetime.Scoped));
             return services;
+        }
+
+        private static void RegisterNamedFileHubsServices(IServiceCollection services, NamedFileHubsSpec spec)
+        {
+            services.Add(new ServiceDescriptor(typeof(NamedFileHubsSpec), spec));
+            services.Add(new ServiceDescriptor(typeof(NamedFileHubsSingletonCache), typeof(NamedFileHubsSingletonCache), ServiceLifetime.Singleton));
+            services.Add(new ServiceDescriptor(typeof(INamedFileHubs), typeof(DiNamedFileHubs), ServiceLifetime.Scoped));
         }
     }
 }

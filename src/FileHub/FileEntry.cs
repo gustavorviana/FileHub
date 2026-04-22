@@ -21,7 +21,6 @@ namespace FileHub
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name);
-        public abstract void SetLastWriteTime(DateTime date);
 
         // === Sync convenience (implemented using streams) ===
 
@@ -191,13 +190,6 @@ namespace FileHub
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(Rename(newName));
-        }
-
-        public virtual Task SetLastWriteTimeAsync(DateTime date, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            SetLastWriteTime(date);
-            return Task.CompletedTask;
         }
 
         public override string ToString() => Path;

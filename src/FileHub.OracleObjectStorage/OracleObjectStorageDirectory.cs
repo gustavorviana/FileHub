@@ -445,7 +445,7 @@ namespace FileHub.OracleObjectStorage
 
             OciPathUtil.ValidateName(newName);
             var destinationPrefix = OciPathUtil.CombinePrefix(_parent._prefix, newName);
-            await CopyAllObjectsAsync(_prefix, destinationPrefix, cancellationToken).ConfigureAwait(false);
+            await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
             return new OracleObjectStorageDirectory(_parent, newName);
         }
@@ -467,39 +467,17 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             if (directory is OracleObjectStorageDirectory ociDir
-                && ReferenceEquals(ociDir._session, _session))
+                && OciSessionTarget.SameCredentials(ociDir._session.Client, _session.Client))
             {
-                OciPathUtil.ValidateName(name);
+                OciPathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
                 var destinationPrefix = OciPathUtil.CombinePrefix(ociDir._prefix, name);
-                await CopyAllObjectsAsync(_prefix, destinationPrefix, cancellationToken).ConfigureAwait(false);
+                await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }
 
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
             CopyContentsGeneric(this, newDir);
             return newDir;
-        }
-
-        public override void SetLastWriteTime(DateTime date) => SetLastWriteTimeAsync(date).GetAwaiter().GetResult();
-
-        public override async Task SetLastWriteTimeAsync(DateTime date, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            if (string.IsNullOrEmpty(_prefix)) return;
-
-            var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                [OracleObjectStorageFile.ChangedAtTag] = date.ToUniversalTime().ToString("O")
-            };
-
-            using (var empty = new MemoryStream())
-            {
-                await _session.Client.PutObjectAsync(_prefix, empty, 0, DirectoryContentType, meta, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (DateTime.TryParse(meta[OracleObjectStorageFile.ChangedAtTag], null,
-                System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                _lastWriteTimeUtc = parsed;
         }
 
         // === Helpers ===
@@ -546,7 +524,7 @@ namespace FileHub.OracleObjectStorage
             }
         }
 
-        private async Task CopyAllObjectsAsync(string sourcePrefix, string destinationPrefix, CancellationToken cancellationToken)
+        private async Task CopyAllObjectsAsync(string sourcePrefix, IOciClient destinationClient, string destinationPrefix, CancellationToken cancellationToken)
         {
             string start = null;
             do
@@ -555,7 +533,13 @@ namespace FileHub.OracleObjectStorage
                 foreach (var obj in page.Objects)
                 {
                     var destName = destinationPrefix + obj.Name.Substring(sourcePrefix.Length);
-                    await _session.Client.CopyObjectAsync(obj.Name, destName, cancellationToken).ConfigureAwait(false);
+                    await _session.Client.CopyObjectAsync(
+                        obj.Name,
+                        destinationClient.Namespace,
+                        destinationClient.Bucket,
+                        destinationClient.Region,
+                        destName,
+                        cancellationToken).ConfigureAwait(false);
                 }
                 start = page.NextStartWith;
             } while (!string.IsNullOrEmpty(start));
@@ -563,13 +547,13 @@ namespace FileHub.OracleObjectStorage
             // Make sure the destination marker exists so empty-dir renames still surface.
             try
             {
-                await _session.Client.HeadObjectAsync(destinationPrefix, cancellationToken).ConfigureAwait(false);
+                await destinationClient.HeadObjectAsync(destinationPrefix, cancellationToken).ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {
                 using (var empty = new MemoryStream())
                 {
-                    await _session.Client.PutObjectAsync(destinationPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
+                    await destinationClient.PutObjectAsync(destinationPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

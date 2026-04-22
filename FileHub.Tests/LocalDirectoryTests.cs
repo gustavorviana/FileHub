@@ -373,21 +373,6 @@ public class LocalDirectoryTests
         Assert.True(src.Exists());
     }
 
-    // === SetLastWriteTime ===
-
-    [Fact]
-    public void SetLastWriteTime_UpdatesTimestamp()
-    {
-        using var temp = new TempDirectory();
-        var root = NewRoot(temp);
-        var sub = root.CreateDirectory("sub");
-        var ts = new DateTime(2020, 5, 5, 0, 0, 0, DateTimeKind.Utc);
-
-        sub.SetLastWriteTime(ts);
-
-        Assert.Equal(ts, sub.LastWriteTimeUtc);
-    }
-
     // === Path traversal protection ===
 
     [Fact]

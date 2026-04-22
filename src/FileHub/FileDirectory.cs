@@ -36,7 +36,6 @@ namespace FileHub
         public abstract FileDirectory Rename(string newName);
         public abstract FileDirectory MoveTo(FileDirectory directory, string name);
         public abstract FileDirectory CopyTo(FileDirectory directory, string name);
-        public abstract void SetLastWriteTime(DateTime date);
 
         // === Sync default implementations ===
 
@@ -204,13 +203,6 @@ namespace FileHub
         {
             cancellationToken.ThrowIfCancellationRequested();
             DeleteIfExists(name);
-            return Task.CompletedTask;
-        }
-
-        public virtual Task SetLastWriteTimeAsync(DateTime date, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            SetLastWriteTime(date);
             return Task.CompletedTask;
         }
 

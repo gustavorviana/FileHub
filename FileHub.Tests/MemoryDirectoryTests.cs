@@ -553,16 +553,6 @@ public class MemoryDirectoryTests
         }
     }
 
-    // === SetLastWriteTime ===
-
-    [Fact]
-    public void SetLastWriteTime_OnMemoryDirectory_IsNoOpButDoesNotThrow()
-    {
-        var root = NewRoot();
-        var ex = Record.Exception(() => root.SetLastWriteTime(DateTime.UtcNow));
-        Assert.Null(ex);
-    }
-
     // === Async wrappers ===
 
     [Fact]
@@ -678,13 +668,6 @@ public class MemoryDirectoryTests
 
         Assert.True(copy.TryOpenFile("a.txt", out var f));
         Assert.Equal("data", f.ReadAllText());
-    }
-
-    [Fact]
-    public async Task SetLastWriteTimeAsync_DoesNotThrow()
-    {
-        var root = NewRoot();
-        await root.SetLastWriteTimeAsync(DateTime.UtcNow);
     }
 
     [Fact]

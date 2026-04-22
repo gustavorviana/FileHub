@@ -6,7 +6,7 @@ namespace FileHub.DependencyInjection.Tests;
 public class NamedFileHubTests
 {
     [Fact]
-    public void AddNamedFileHubs_RegistersRegistryAsSingleton()
+    public void AddNamedFileHubs_ResolvesRegistryFromProvider()
     {
         var services = new ServiceCollection();
         services.AddNamedFileHubs(builder =>
@@ -18,6 +18,7 @@ public class NamedFileHubTests
         var r1 = provider.GetRequiredService<INamedFileHubs>();
         var r2 = provider.GetRequiredService<INamedFileHubs>();
 
+        // Same root-scope provider returns the same scoped registry instance.
         Assert.Same(r1, r2);
     }
 
@@ -178,29 +179,15 @@ public class NamedFileHubTests
     {
         var services = new ServiceCollection();
         Assert.Throws<ArgumentNullException>(
-            () => services.AddNamedFileHubs((Action<NamedFileHubsBuilder>)null!));
+            () => services.AddNamedFileHubs((Action<NamedFileHubsServiceBuilder>)null!));
         Assert.Throws<ArgumentNullException>(
-            () => services.AddNamedFileHubs((Action<IServiceProvider, NamedFileHubsBuilder>)null!));
-    }
-
-    [Fact]
-    public void Builder_Build_ProducesIndependentRegistry_MutationAfterBuildHasNoEffect()
-    {
-        var builder = new NamedFileHubsBuilder()
-            .Register("a", new MemoryFileHub("a-root"));
-
-        var registry = builder.Build();
-
-        // Mutating the builder after Build() must not affect the already-built registry.
-        builder.Register("b", new MemoryFileHub("b-root"));
-
-        Assert.NotNull(registry.GetByName("a"));
-        Assert.Null(registry.GetByName("b"));
+            () => services.AddNamedFileHubs((Action<IServiceProvider, NamedFileHubsServiceBuilder>)null!));
     }
 
     [Fact]
     public void Builder_Standalone_ProducesWorkingRegistry()
     {
+        // Core NamedFileHubsBuilder remains available for non-DI usage.
         var hubs = new NamedFileHubsBuilder()
             .Register("reports", new MemoryFileHub("reports-root"))
             .Register("logs",    new MemoryFileHub("logs-root"))
@@ -212,22 +199,251 @@ public class NamedFileHubTests
     }
 
     [Fact]
-    public void Builder_RegisterNullHub_Throws()
+    public void Builder_Build_ProducesIndependentRegistry_MutationAfterBuildHasNoEffect()
     {
-        var builder = new NamedFileHubsBuilder();
-        Assert.Throws<ArgumentNullException>(() => builder.Register("a", null));
+        var builder = new NamedFileHubsBuilder()
+            .Register("a", new MemoryFileHub("a-root"));
+
+        var registry = builder.Build();
+
+        builder.Register("b", new MemoryFileHub("b-root"));
+
+        Assert.NotNull(registry.GetByName("a"));
+        Assert.Null(registry.GetByName("b"));
     }
 
     [Fact]
-    public void Builder_RegisterEmptyName_Throws()
+    public void ServiceBuilder_RegisterNullHub_Throws()
     {
-        var builder = new NamedFileHubsBuilder();
-        Assert.Throws<ArgumentException>(() => builder.Register("", new MemoryFileHub()));
-        Assert.Throws<ArgumentException>(() => builder.Register(null, new MemoryFileHub()));
+        var services = new ServiceCollection();
+        Assert.Throws<ArgumentNullException>(() => services.AddNamedFileHubs(b => b.Register("a", (IFileHub)null!)));
+    }
+
+    [Fact]
+    public void ServiceBuilder_RegisterNullFactory_Throws()
+    {
+        var services = new ServiceCollection();
+        Assert.Throws<ArgumentNullException>(
+            () => services.AddNamedFileHubs(b => b.Register("a", (Func<IServiceProvider, IFileHub>)null!)));
+    }
+
+    [Fact]
+    public void ServiceBuilder_RegisterEmptyName_Throws()
+    {
+        var services = new ServiceCollection();
+        Assert.Throws<ArgumentException>(() => services.AddNamedFileHubs(b => b.Register("", new MemoryFileHub())));
+        Assert.Throws<ArgumentException>(() => services.AddNamedFileHubs(b => b.Register(null!, new MemoryFileHub())));
+        Assert.Throws<ArgumentException>(
+            () => services.AddNamedFileHubs(b => b.Register("", _ => new MemoryFileHub())));
+    }
+
+    [Fact]
+    public void Register_Factory_SingletonLifetime_CachesAcrossScopes()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.AddNamedFileHubs(b => b.Register(
+            "cached",
+            _ => { calls++; return new MemoryFileHub($"hub-{calls}"); },
+            ServiceLifetime.Singleton));
+
+        using var provider = services.BuildServiceProvider();
+
+        IFileHub a, b2;
+        using (var scope = provider.CreateScope())
+            a = scope.ServiceProvider.GetRequiredService<INamedFileHubs>().GetByName("cached");
+        using (var scope = provider.CreateScope())
+            b2 = scope.ServiceProvider.GetRequiredService<INamedFileHubs>().GetByName("cached");
+
+        Assert.Same(a, b2);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void Register_Factory_ScopedLifetime_NewInstancePerScope_SharedWithinScope()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.AddNamedFileHubs(b => b.Register(
+            "per-scope",
+            _ => { calls++; return new MemoryFileHub($"hub-{calls}"); },
+            ServiceLifetime.Scoped));
+
+        using var provider = services.BuildServiceProvider();
+
+        IFileHub a1, a2, b1;
+        using (var scope = provider.CreateScope())
+        {
+            var reg = scope.ServiceProvider.GetRequiredService<INamedFileHubs>();
+            a1 = reg.GetByName("per-scope");
+            a2 = reg.GetByName("per-scope");
+        }
+        using (var scope = provider.CreateScope())
+        {
+            b1 = scope.ServiceProvider.GetRequiredService<INamedFileHubs>().GetByName("per-scope");
+        }
+
+        Assert.Same(a1, a2);
+        Assert.NotSame(a1, b1);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Register_Factory_TransientLifetime_NewInstancePerResolve()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.AddNamedFileHubs(b => b.Register(
+            "transient",
+            _ => { calls++; return new MemoryFileHub($"hub-{calls}"); },
+            ServiceLifetime.Transient));
+
+        using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<INamedFileHubs>();
+
+        var a = registry.GetByName("transient");
+        var b2 = registry.GetByName("transient");
+
+        Assert.NotSame(a, b2);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void Register_Factory_ScopedLifetime_ResolvesPerScopeDependency()
+    {
+        // Simulates tenant-aware resolution: a scoped ITenantContext drives the
+        // hub's root path, so each scope gets its own hub.
+        var services = new ServiceCollection();
+        services.AddScoped<ITenantContext, TenantContext>();
+        services.AddNamedFileHubs(b => b.Register(
+            "tenant",
+            sp => new MemoryFileHub(sp.GetRequiredService<ITenantContext>().Id),
+            ServiceLifetime.Scoped));
+
+        using var provider = services.BuildServiceProvider();
+
+        string scopeAId, scopeBId;
+        using (var scope = provider.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().Id = "tenant-a";
+            scopeAId = scope.ServiceProvider.GetRequiredService<INamedFileHubs>()
+                .GetRootByName("tenant").Name;
+        }
+        using (var scope = provider.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<ITenantContext>().Id = "tenant-b";
+            scopeBId = scope.ServiceProvider.GetRequiredService<INamedFileHubs>()
+                .GetRootByName("tenant").Name;
+        }
+
+        Assert.Equal("tenant-a", scopeAId);
+        Assert.Equal("tenant-b", scopeBId);
+    }
+
+    [Fact]
+    public void Register_Factory_ScopedHub_DisposedWhenScopeEnds()
+    {
+        var services = new ServiceCollection();
+        services.AddNamedFileHubs(b => b.Register(
+            "scoped",
+            _ => new DisposableFileHub(),
+            ServiceLifetime.Scoped));
+
+        using var provider = services.BuildServiceProvider();
+
+        DisposableFileHub hub;
+        using (var scope = provider.CreateScope())
+        {
+            hub = (DisposableFileHub)scope.ServiceProvider
+                .GetRequiredService<INamedFileHubs>().GetByName("scoped");
+            Assert.False(hub.Disposed);
+        }
+
+        Assert.True(hub.Disposed);
+    }
+
+    [Fact]
+    public void Register_Factory_SingletonHub_DisposedWhenContainerDisposed()
+    {
+        var services = new ServiceCollection();
+        services.AddNamedFileHubs(b => b.Register(
+            "singleton",
+            _ => new DisposableFileHub(),
+            ServiceLifetime.Singleton));
+
+        var provider = services.BuildServiceProvider();
+        var hub = (DisposableFileHub)provider.GetRequiredService<INamedFileHubs>().GetByName("singleton");
+
+        Assert.False(hub.Disposed);
+        provider.Dispose();
+        Assert.True(hub.Disposed);
+    }
+
+    [Fact]
+    public void Register_Factory_DefaultLifetime_IsSingleton()
+    {
+        var services = new ServiceCollection();
+        var calls = 0;
+        services.AddNamedFileHubs(b => b.Register(
+            "default",
+            _ => { calls++; return new MemoryFileHub(); }));
+
+        using var provider = services.BuildServiceProvider();
+        var registry = provider.GetRequiredService<INamedFileHubs>();
+
+        var a = registry.GetByName("default");
+        var b2 = registry.GetByName("default");
+
+        Assert.Same(a, b2);
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void AddNamedFileHubs_WithServiceProvider_SupportsFactoryLifetime()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(new StorageConfig { Root = "base" });
+        services.AddScoped<ITenantContext, TenantContext>();
+
+        services.AddNamedFileHubs((sp, builder) =>
+        {
+            var cfg = sp.GetRequiredService<StorageConfig>();
+            builder.Register(
+                "tenant",
+                innerSp => new MemoryFileHub($"{cfg.Root}/{innerSp.GetRequiredService<ITenantContext>().Id}"),
+                ServiceLifetime.Scoped);
+        });
+
+        using var provider = services.BuildServiceProvider();
+
+        using var scope = provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ITenantContext>().Id = "acme";
+        var rootName = scope.ServiceProvider.GetRequiredService<INamedFileHubs>()
+            .GetRootByName("tenant").Name;
+
+        Assert.Equal("base/acme", rootName);
     }
 
     private sealed class StorageConfig
     {
         public string Root { get; set; } = "";
+    }
+
+    private interface ITenantContext
+    {
+        string Id { get; set; }
+    }
+
+    private sealed class TenantContext : ITenantContext
+    {
+        public string Id { get; set; } = "";
+    }
+
+    private sealed class DisposableFileHub : IFileHub, IDisposable
+    {
+        private readonly MemoryFileHub _inner = new();
+        public FileDirectory Root => _inner.Root;
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
     }
 }

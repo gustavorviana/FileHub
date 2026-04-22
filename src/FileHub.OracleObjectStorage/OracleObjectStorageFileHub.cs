@@ -30,8 +30,8 @@ namespace FileHub.OracleObjectStorage
         /// Build a FileHub using an OCI config file (<c>~/.oci/config</c>) and profile.
         /// </summary>
         public static OracleObjectStorageFileHub FromConfigFile(
+            string rootPath,
             string bucketName,
-            string rootPath = "",
             string configFilePath = null,
             string profile = "DEFAULT")
         {
@@ -42,7 +42,7 @@ namespace FileHub.OracleObjectStorage
                 ? new ConfigFileAuthenticationDetailsProvider(profile ?? "DEFAULT")
                 : new ConfigFileAuthenticationDetailsProvider(configFilePath, profile ?? "DEFAULT");
 
-            return FromProvider(bucketName, rootPath, provider, provider.Region.RegionId);
+            return FromProvider(rootPath, bucketName, provider, provider.Region.RegionId);
         }
 
         /// <summary>

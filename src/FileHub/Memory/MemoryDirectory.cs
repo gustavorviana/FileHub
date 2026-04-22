@@ -160,11 +160,6 @@ namespace FileHub.Memory
             return newDir;
         }
 
-        public override void SetLastWriteTime(DateTime date)
-        {
-            ThrowIfReadOnly();
-        }
-
         // === Internal helpers ===
 
         internal bool ContainsFile(string name) => _files.ContainsKey(name);

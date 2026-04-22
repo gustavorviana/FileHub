@@ -120,20 +120,6 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
     }
 
     [Fact]
-    public void SetLastWriteTime_PersistsViaChangedAtTag()
-    {
-        var scope = Scope(nameof(SetLastWriteTime_PersistsViaChangedAtTag));
-        var file = scope.CreateFile("time.txt");
-        file.SetText("t");
-
-        var custom = new DateTime(2024, 1, 15, 10, 20, 30, DateTimeKind.Utc);
-        file.SetLastWriteTime(custom);
-
-        var reopened = scope.OpenFile("time.txt");
-        Assert.Equal(custom, reopened.LastWriteTimeUtc);
-    }
-
-    [Fact]
     public void Second_GetReadStream_Throws_When_Previous_NotDisposed()
     {
         var scope = Scope(nameof(Second_GetReadStream_Throws_When_Previous_NotDisposed));

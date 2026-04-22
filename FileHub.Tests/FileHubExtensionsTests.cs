@@ -90,15 +90,6 @@ public class FileHubExtensionsTests
     }
 
     [Fact]
-    public void File_AsReadOnly_SetLastWriteTime_Throws()
-    {
-        var file = NewRoot().CreateFile("a.txt");
-        var ro = file.AsReadOnly();
-
-        Assert.Throws<FileHubException>(() => ro.SetLastWriteTime(DateTime.UtcNow));
-    }
-
-    [Fact]
     public void File_AsReadOnly_Parent_IsAlsoReadOnly()
     {
         var root = NewRoot();
@@ -222,13 +213,6 @@ public class FileHubExtensionsTests
         var ro = src.AsReadOnly();
 
         Assert.Throws<FileHubException>(() => ro.CopyTo(dst, "x"));
-    }
-
-    [Fact]
-    public void Directory_AsReadOnly_SetLastWriteTime_Throws()
-    {
-        var ro = NewRoot().AsReadOnly();
-        Assert.Throws<FileHubException>(() => ro.SetLastWriteTime(DateTime.UtcNow));
     }
 
     [Fact]

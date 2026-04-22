@@ -184,14 +184,15 @@ namespace FileHub.Local
             return newDir;
         }
 
-        public override void SetLastWriteTime(DateTime date)
-        {
-            ThrowIfReadOnly();
-            Directory.SetLastWriteTimeUtc(Path, date);
-            InvalidateInfo();
-        }
-
         // === Helpers ===
+
+        /// <summary>
+        /// Resolves a sandbox-safe absolute path for a child entry and verifies
+        /// it stays inside the hub root. Exposed so sibling types in the Local
+        /// driver (e.g. <see cref="LocalFile"/>) can reuse the sandbox check
+        /// without duplicating the root-containment logic.
+        /// </summary>
+        internal string ResolveSafeChildPath(string childName) => ResolveSafePath(childName);
 
         private DirectoryInfo RefreshInfo()
         {

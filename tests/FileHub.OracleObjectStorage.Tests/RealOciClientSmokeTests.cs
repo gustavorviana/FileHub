@@ -23,8 +23,8 @@ public class RealOciClientSmokeTests
         if (!basePrefix.EndsWith("/")) basePrefix += "/";
 
         return OracleObjectStorageFileHub.FromConfigFile(
-            bucket,
             rootPath: basePrefix + "smoke/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/",
+            bucket,
             configFilePath: configFile,
             profile: profile);
     }

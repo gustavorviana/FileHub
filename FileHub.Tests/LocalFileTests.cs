@@ -142,18 +142,6 @@ public class LocalFileTests
     }
 
     [Fact]
-    public void SetLastWriteTime_UpdatesFileTimestamp()
-    {
-        using var temp = new TempDirectory();
-        var file = NewRoot(temp).CreateFile("a.txt");
-        var ts = new DateTime(2020, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-
-        file.SetLastWriteTime(ts);
-
-        Assert.Equal(ts, file.LastWriteTimeUtc);
-    }
-
-    [Fact]
     public void CreationTimeUtc_IsPopulated()
     {
         using var temp = new TempDirectory();

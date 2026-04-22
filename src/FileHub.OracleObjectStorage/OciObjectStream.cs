@@ -107,7 +107,7 @@ namespace FileHub.OracleObjectStorage
             {
                 SeekOrigin.Begin => offset,
                 SeekOrigin.Current => _position + offset,
-                SeekOrigin.End => Length - offset,
+                SeekOrigin.End => Length + offset,
                 _ => throw new ArgumentException("Invalid seek origin.", nameof(origin)),
             };
 

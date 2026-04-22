@@ -160,35 +160,21 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             if (directory is OracleObjectStorageDirectory ociDir
-                && ReferenceEquals(ociDir.SessionInternal, SessionInternal))
+                && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
                 OciPathUtil.ValidateName(name);
                 var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
-                await SessionInternal.Client.CopyObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
+                var destClient = ociDir.SessionInternal.Client;
+                await SessionInternal.Client.CopyObjectAsync(
+                    ObjectName,
+                    destClient.Namespace,
+                    destClient.Bucket,
+                    destClient.Region,
+                    destinationObject,
+                    cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageFile(ociDir, name);
             }
             return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-        }
-
-        public override void SetLastWriteTime(DateTime date)
-            => SetLastWriteTimeAsync(date).GetAwaiter().GetResult();
-
-        public override async Task SetLastWriteTimeAsync(DateTime date, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            EnsureTags();
-            _tags[ChangedAtTag] = date.ToUniversalTime().ToString("O");
-
-            using (var empty = new MemoryStream())
-            {
-                await SessionInternal.Client.PutObjectAsync(
-                    ObjectName,
-                    empty,
-                    contentLength: 0,
-                    contentType: null,
-                    opcMeta: _tags,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-            }
         }
 
         // === IUrlAccessible ===

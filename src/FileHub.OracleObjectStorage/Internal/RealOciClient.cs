@@ -29,6 +29,8 @@ namespace FileHub.OracleObjectStorage.Internal
         public string Bucket { get; }
         public string Region { get; }
 
+        public object CredentialScope => _client;
+
         public RealOciClient(ObjectStorageClient client, string @namespace, string bucket, string region, bool ownsClient)
         {
             _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -138,7 +140,13 @@ namespace FileHub.OracleObjectStorage.Internal
             }, cancellationToken);
         }
 
-        public Task CopyObjectAsync(string sourceObjectName, string destinationObjectName, CancellationToken cancellationToken = default)
+        public Task CopyObjectAsync(
+            string sourceObjectName,
+            string destinationNamespace,
+            string destinationBucket,
+            string destinationRegion,
+            string destinationObjectName,
+            CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             return TranslateAsync(sourceObjectName, async ct =>
@@ -150,9 +158,9 @@ namespace FileHub.OracleObjectStorage.Internal
                     CopyObjectDetails = new Oci.ObjectstorageService.Models.CopyObjectDetails
                     {
                         SourceObjectName = sourceObjectName,
-                        DestinationRegion = Region,
-                        DestinationNamespace = Namespace,
-                        DestinationBucket = Bucket,
+                        DestinationRegion = destinationRegion,
+                        DestinationNamespace = destinationNamespace,
+                        DestinationBucket = destinationBucket,
                         DestinationObjectName = destinationObjectName
                     }
                 }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);

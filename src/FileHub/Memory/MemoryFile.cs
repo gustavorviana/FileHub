@@ -81,11 +81,5 @@ namespace FileHub.Memory
             Delete();
             return newFile;
         }
-
-        public override void SetLastWriteTime(DateTime date)
-        {
-            ThrowIfReadOnly();
-            Data.LastWriteTimeUtc = date;
-        }
     }
 }

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -15,33 +14,69 @@ namespace FileHub.OracleObjectStorage.Tests.Fakes;
 /// the OCI API as described in its docs, including common-prefix enumeration
 /// with delimiter and simple cursor-based paging.
 /// </summary>
+/// <remarks>
+/// Two construction modes:
+/// <list type="bullet">
+///   <item>Stand-alone: <c>new InMemoryOciClient(...)</c> — each instance
+///   owns its bucket store and has a distinct <see cref="CredentialScope"/>.
+///   Matches the "two independent FileHubs" scenario, where the driver must
+///   fall back to stream copy.</item>
+///   <item>World-backed: <see cref="InWorld"/> — the client borrows a bucket
+///   store from a shared <see cref="InMemoryOciWorld"/>, and all clients in
+///   the same world share their <see cref="CredentialScope"/>. Cross-bucket
+///   <see cref="CopyObjectAsync"/> writes to the destination's store in the
+///   same world, exercising the server-side path.</item>
+/// </list>
+/// </remarks>
 internal sealed class InMemoryOciClient : IOciClient
 {
-    private readonly ConcurrentDictionary<string, StoredObject> _store = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, ParRecord> _pars = new(StringComparer.Ordinal);
-    private OciBucketAccessType _bucketAccess = OciBucketAccessType.NoPublicAccess;
+    private readonly InMemoryOciWorld? _world;
+    private readonly object _ownScope;
+    private readonly InMemoryBucketStore _store;
     private bool _disposed;
+    private int _copyInvocationCount;
 
     public string Namespace { get; }
     public string Bucket { get; }
     public string Region { get; }
 
+    public object CredentialScope => (object?)_world ?? _ownScope;
+
+    /// <summary>Number of times <see cref="CopyObjectAsync"/> was invoked on this client instance.</summary>
+    public int CopyInvocationCount => _copyInvocationCount;
+
     public InMemoryOciClient(string bucket = "test-bucket", string @namespace = "test-ns", string region = "us-test-1")
     {
+        _world = null;
+        _ownScope = new object();
+        _store = new InMemoryBucketStore();
         Bucket = bucket;
         Namespace = @namespace;
         Region = region;
     }
 
-    public void SetBucketAccess(OciBucketAccessType access) => _bucketAccess = access;
+    private InMemoryOciClient(InMemoryOciWorld world, string @namespace, string bucket, string region)
+    {
+        _world = world ?? throw new ArgumentNullException(nameof(world));
+        _ownScope = null!; // unused when world is set
+        _store = world.GetOrCreateStore(@namespace, bucket);
+        Namespace = @namespace;
+        Bucket = bucket;
+        Region = region;
+    }
 
-    public int ObjectCount => _store.Count;
-    public IReadOnlyCollection<string> Keys => _store.Keys.ToArray();
-    public IReadOnlyCollection<ParRecord> Pars => _pars.Values.ToArray();
+    internal static InMemoryOciClient InWorld(InMemoryOciWorld world, string @namespace, string bucket, string region)
+        => new(world, @namespace, bucket, region);
+
+    public void SetBucketAccess(OciBucketAccessType access) => _store.BucketAccess = access;
+
+    public int ObjectCount => _store.Objects.Count;
+    public IReadOnlyCollection<string> Keys => _store.Objects.Keys.ToArray();
+    public IReadOnlyCollection<ParRecord> Pars => _store.Pars.Values.ToArray();
 
     public bool TryGetBody(string objectName, out byte[] body)
     {
-        if (_store.TryGetValue(objectName, out var obj))
+        if (_store.Objects.TryGetValue(objectName, out var obj))
         {
             body = obj.Body;
             return true;
@@ -54,7 +89,7 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.TryGetValue(objectName, out var obj))
+        if (!_store.Objects.TryGetValue(objectName, out var obj))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
 
         return Task.FromResult(new OciHeadResult
@@ -72,7 +107,7 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.TryGetValue(objectName, out var obj))
+        if (!_store.Objects.TryGetValue(objectName, out var obj))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
 
         byte[] slice;
@@ -121,7 +156,7 @@ internal sealed class InMemoryOciClient : IOciClient
         if (contentLength >= 0 && contentLength != bytes.LongLength)
             bytes = bytes.Take(checked((int)contentLength)).ToArray();
 
-        var stored = new StoredObject
+        var stored = new InMemoryStoredObject
         {
             Body = bytes,
             ContentType = contentType,
@@ -131,14 +166,14 @@ internal sealed class InMemoryOciClient : IOciClient
             LastModified = DateTime.UtcNow
         };
 
-        _store[objectName] = stored;
+        _store.Objects[objectName] = stored;
     }
 
     public Task DeleteObjectAsync(string objectName, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.TryRemove(objectName, out _))
+        if (!_store.Objects.TryRemove(objectName, out _))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
         return Task.CompletedTask;
     }
@@ -147,21 +182,49 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.TryRemove(sourceName, out var obj))
+        if (!_store.Objects.TryRemove(sourceName, out var obj))
             throw new FileNotFoundException($"Object \"{sourceName}\" not found.");
 
-        _store[newName] = obj;
+        _store.Objects[newName] = obj;
         return Task.CompletedTask;
     }
 
-    public Task CopyObjectAsync(string sourceObjectName, string destinationObjectName, CancellationToken cancellationToken = default)
+    public Task CopyObjectAsync(
+        string sourceObjectName,
+        string destinationNamespace,
+        string destinationBucket,
+        string destinationRegion,
+        string destinationObjectName,
+        CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.TryGetValue(sourceObjectName, out var obj))
+        Interlocked.Increment(ref _copyInvocationCount);
+
+        if (!_store.Objects.TryGetValue(sourceObjectName, out var obj))
             throw new FileNotFoundException($"Object \"{sourceObjectName}\" not found.");
 
-        _store[destinationObjectName] = new StoredObject
+        InMemoryBucketStore destStore;
+        bool sameTarget =
+            string.Equals(destinationNamespace, Namespace, StringComparison.Ordinal)
+            && string.Equals(destinationBucket, Bucket, StringComparison.Ordinal)
+            && string.Equals(destinationRegion, Region, StringComparison.Ordinal);
+
+        if (sameTarget)
+        {
+            destStore = _store;
+        }
+        else if (_world is not null)
+        {
+            destStore = _world.GetOrCreateStore(destinationNamespace, destinationBucket);
+        }
+        else
+        {
+            throw new InvalidOperationException(
+                "Cross-target CopyObject on a scope-less InMemoryOciClient — the driver should have fallen back to stream copy.");
+        }
+
+        destStore.Objects[destinationObjectName] = new InMemoryStoredObject
         {
             Body = (byte[])obj.Body.Clone(),
             ContentType = obj.ContentType,
@@ -177,7 +240,7 @@ internal sealed class InMemoryOciClient : IOciClient
         cancellationToken.ThrowIfCancellationRequested();
 
         prefix ??= string.Empty;
-        var orderedKeys = _store.Keys
+        var orderedKeys = _store.Objects.Keys
             .Where(k => k.StartsWith(prefix, StringComparison.Ordinal))
             .Where(k => string.IsNullOrEmpty(start) || string.CompareOrdinal(k, start) >= 0)
             .OrderBy(k => k, StringComparer.Ordinal);
@@ -215,7 +278,7 @@ internal sealed class InMemoryOciClient : IOciClient
                 }
             }
 
-            _store.TryGetValue(key, out var obj);
+            _store.Objects.TryGetValue(key, out var obj);
             page.Objects.Add(new OciListObject
             {
                 Name = key,
@@ -233,18 +296,18 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(new OciBucketInfo { PublicAccessType = _bucketAccess });
+        return Task.FromResult(new OciBucketInfo { PublicAccessType = _store.BucketAccess });
     }
 
     public Task<string> CreatePreauthenticatedReadRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_store.ContainsKey(objectName))
+        if (!_store.Objects.ContainsKey(objectName))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
 
         var accessUri = $"/p/{parName}/n/{Namespace}/b/{Bucket}/o/{Uri.EscapeDataString(objectName)}";
-        _pars[parName] = new ParRecord(parName, objectName, timeExpiresUtc, accessUri);
+        _store.Pars[parName] = new ParRecord(parName, objectName, timeExpiresUtc, accessUri);
         return Task.FromResult(accessUri);
     }
 
@@ -252,8 +315,12 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         if (_disposed) return;
         _disposed = true;
-        _store.Clear();
-        _pars.Clear();
+        // When world-backed, the store lives on the world and must not be cleared.
+        if (_world is null)
+        {
+            _store.Objects.Clear();
+            _store.Pars.Clear();
+        }
     }
 
     private void ThrowIfDisposed()
@@ -262,12 +329,4 @@ internal sealed class InMemoryOciClient : IOciClient
     }
 
     public sealed record ParRecord(string Name, string ObjectName, DateTime TimeExpiresUtc, string AccessUri);
-
-    private sealed class StoredObject
-    {
-        public byte[] Body { get; set; } = Array.Empty<byte>();
-        public string? ContentType { get; set; }
-        public Dictionary<string, string>? OpcMeta { get; set; }
-        public DateTime LastModified { get; set; }
-    }
 }

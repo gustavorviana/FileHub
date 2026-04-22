@@ -76,7 +76,7 @@ public class InMemoryOciClientContractTests
     public async Task CopyObject_MissingSource_ThrowsFileNotFound()
     {
         using var c = NewClient();
-        await Assert.ThrowsAsync<FileNotFoundException>(() => c.CopyObjectAsync("nope", "dst"));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => c.CopyObjectAsync("nope", c.Namespace, c.Bucket, c.Region, "dst"));
     }
 
     [Fact]

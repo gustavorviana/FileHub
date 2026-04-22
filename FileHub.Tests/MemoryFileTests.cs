@@ -211,19 +211,6 @@ public class MemoryFileTests
         Assert.False(file.Exists());
     }
 
-    // === SetLastWriteTime ===
-
-    [Fact]
-    public void SetLastWriteTime_UpdatesTimestamp()
-    {
-        var file = NewRoot().CreateFile("a.txt");
-        var ts = new DateTime(2022, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        file.SetLastWriteTime(ts);
-
-        Assert.Equal(ts, file.LastWriteTimeUtc);
-    }
-
     [Fact]
     public void Write_UpdatesLastWriteTimeUtc()
     {
@@ -465,17 +452,6 @@ public class MemoryFileTests
 
         Assert.Equal("b.txt", renamed.Name);
         Assert.Equal("keep", renamed.ReadAllText());
-    }
-
-    [Fact]
-    public async Task SetLastWriteTimeAsync_UpdatesTimestamp()
-    {
-        var file = NewRoot().CreateFile("a.txt");
-        var ts = new DateTime(2021, 6, 1, 0, 0, 0, DateTimeKind.Utc);
-
-        await file.SetLastWriteTimeAsync(ts);
-
-        Assert.Equal(ts, file.LastWriteTimeUtc);
     }
 
     [Fact]
