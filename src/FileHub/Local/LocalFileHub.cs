@@ -16,16 +16,6 @@ namespace FileHub.Local
             Root = new LocalDirectory(resolved, rootPath: resolved, parent: null, pathMode: pathMode);
         }
 
-        public LocalFileHub(string rootPath, Func<string, string> pathResolver)
-            : this(rootPath, pathResolver, DirectoryPathMode.OpenIntermediates) { }
-
-        public LocalFileHub(string rootPath, Func<string, string> pathResolver, DirectoryPathMode pathMode)
-        {
-            if (pathResolver == null) throw new ArgumentNullException(nameof(pathResolver));
-            var resolved = pathResolver(rootPath);
-            Root = new LocalDirectory(resolved, rootPath: resolved, parent: null, pathMode: pathMode);
-        }
-
         private static string ResolvePath(string path)
         {
             if (string.IsNullOrEmpty(path))

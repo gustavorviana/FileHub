@@ -48,28 +48,6 @@ public class LocalFileHubTests
     }
 
     [Fact]
-    public void Constructor_WithPathResolver_UsesResolver()
-    {
-        using var temp = new TempDirectory();
-        string? captured = null;
-
-        var hub = new LocalFileHub("placeholder", p =>
-        {
-            captured = p;
-            return temp.Path;
-        });
-
-        Assert.Equal("placeholder", captured);
-        Assert.Equal(Path.GetFullPath(temp.Path), Path.GetFullPath(hub.Root.Path));
-    }
-
-    [Fact]
-    public void Constructor_NullPathResolver_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() => new LocalFileHub("x", null!));
-    }
-
-    [Fact]
     public void Root_ImplementsIFileHub()
     {
         using var temp = new TempDirectory();
