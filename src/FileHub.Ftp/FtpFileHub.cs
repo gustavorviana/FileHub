@@ -85,24 +85,29 @@ namespace FileHub.Ftp
         }
 
         /// <summary>
-        /// Build a hub around an externally-owned <see cref="AsyncFtpClient"/>.
-        /// The caller retains ownership of the client — disposing this hub
-        /// does <b>not</b> dispose it.
+        /// Build a hub around an externally-created <see cref="AsyncFtpClient"/>.
+        /// Set <paramref name="ownsClient"/> to <c>true</c> when the client was
+        /// constructed solely for the hub and the hub should dispose it as part
+        /// of its own disposal. The default is <c>false</c> — the caller keeps
+        /// ownership, and disposing the hub is a no-op on the client so it can
+        /// be shared or reused safely.
         /// </summary>
         public static FtpFileHub FromClient(
             AsyncFtpClient client,
+            bool ownsClient = false,
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => FromClientAsync(client, rootPath, pathMode).GetAwaiter().GetResult();
+            => FromClientAsync(client, ownsClient, rootPath, pathMode).GetAwaiter().GetResult();
 
         public static Task<FtpFileHub> FromClientAsync(
             AsyncFtpClient client,
+            bool ownsClient = false,
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates,
             CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            var real = new RealFtpClient(client, ownsClient: false);
+            var real = new RealFtpClient(client, ownsClient);
             return BuildAsync(real, rootPath, pathMode, cancellationToken);
         }
 

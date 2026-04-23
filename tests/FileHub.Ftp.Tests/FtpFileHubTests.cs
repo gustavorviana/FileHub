@@ -1,4 +1,5 @@
 using FileHub.Ftp.Tests.Fakes;
+using FluentFTP;
 
 namespace FileHub.Ftp.Tests;
 
@@ -70,5 +71,33 @@ public class FtpFileHubTests
     {
         Assert.Throws<ArgumentException>(() =>
             FtpFileHub.Connect(host: ""));
+    }
+
+    [Fact]
+    public async Task FromClientAsync_DefaultOwnsFalse_DoesNotDisposeUnderlyingClient()
+    {
+        // FluentFTP client created externally — caller expects to keep it alive.
+        var client = new AsyncFtpClient("localhost", "u", "p", 21);
+        var hub = await FtpFileHub.FromClientAsync(client);
+
+        hub.Dispose();
+
+        Assert.False(client.IsDisposed,
+            "Hub must not dispose a client it does not own (default ownsClient=false).");
+
+        client.Dispose();
+    }
+
+    [Fact]
+    public async Task FromClientAsync_OwnsClientTrue_DisposesUnderlyingClient()
+    {
+        // Caller built the client solely for the hub and opts into ownership transfer.
+        var client = new AsyncFtpClient("localhost", "u", "p", 21);
+        var hub = await FtpFileHub.FromClientAsync(client, ownsClient: true);
+
+        hub.Dispose();
+
+        Assert.True(client.IsDisposed,
+            "Hub must dispose a client it owns (ownsClient=true).");
     }
 }

@@ -20,7 +20,7 @@ FileHub draws it once. A service like `ReportService(IFileHub hub)` is written o
 
 ## What's in the box
 
-- **Drivers**: `FileHub.Local` (disk), `FileHub.Memory` (in-process), `FileHub.OracleObjectStorage` (OCI). Custom drivers implement two abstract classes.
+- **Drivers**: `FileHub.Local` (disk), `FileHub.Memory` (in-process), `FileHub.OracleObjectStorage` (OCI), `FileHub.Ftp` (FTP server). Custom drivers implement two abstract classes.
 - **Sync + async** on the same types. Async is the source of truth; sync delegates.
 - **Sandboxed by default** — every hub has a root. `..`, absolute paths, and symlink escapes are rejected.
 - **Read-only on demand** — `dir.AsReadOnly()` / `file.AsReadOnly()` wraps anything and blocks writes at runtime.
@@ -34,6 +34,7 @@ FileHub draws it once. A service like `ReportService(IFileHub hub)` is written o
 dotnet add package FileHub
 dotnet add package FileHub.DependencyInjection    # optional
 dotnet add package FileHub.OracleObjectStorage    # optional
+dotnet add package FileHub.Ftp                    # optional
 ```
 
 ## Named hubs (tenant, multi-backend)
@@ -55,7 +56,7 @@ Full docs live in the [wiki](FileHub.wiki/Home.md):
 
 - [Quick Start](FileHub.wiki/Quick-Start.md) — install, hubs, files, directories
 - [API reference](FileHub.wiki/API.md) — `IFileHub`, `FileDirectory`, `FileEntry`, exceptions
-- [Drivers](FileHub.wiki/Driver-Local.md) — [Local](FileHub.wiki/Driver-Local.md), [Memory](FileHub.wiki/Driver-Memory.md), [OCI](FileHub.wiki/Driver-Oracle-Object-Storage.md)
+- [Drivers](FileHub.wiki/Driver-Local.md) — [Local](FileHub.wiki/Driver-Local.md), [Memory](FileHub.wiki/Driver-Memory.md), [OCI](FileHub.wiki/Driver-Oracle-Object-Storage.md), [FTP](FileHub.wiki/Driver-Ftp.md)
 - [Usage patterns](FileHub.wiki/Usage.md) — sync/async, streams, pagination
 - [Security](FileHub.wiki/Security.md) — sandbox and read-only mode
 - [Dependency injection](FileHub.wiki/Dependency-Injection.md) · [Custom drivers](FileHub.wiki/Custom-Drivers.md) · [Testing](FileHub.wiki/Testing.md)
