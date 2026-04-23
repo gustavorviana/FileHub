@@ -18,7 +18,7 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
     {
         using var fake = new InMemoryOciClient();
         fake.SetBucketAccess(OciBucketAccessType.ObjectRead);
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake);
 
         var file = (OracleObjectStorageFile)hub.Root.CreateFile("public.txt");
         Assert.True(file.IsPublic);
@@ -29,7 +29,7 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
     {
         using var fake = new InMemoryOciClient(bucket: "my-bucket", @namespace: "my-ns", region: "us-phoenix-1");
         fake.SetBucketAccess(OciBucketAccessType.ObjectRead);
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake);
 
         var file = (OracleObjectStorageFile)hub.Root.CreateFile("pub.txt");
         var url = file.GetPublicUrl();

@@ -72,7 +72,7 @@ public class FtpRefreshableTests : FtpTestBase
         // This scenario needs its own hub with a non-"/" root, so it opts out
         // of the base fixture and builds directly.
         using var client = new InMemoryFtpClient();
-        using var hub = await FtpFileHubTestAccess.FromFtpClientAsync(client, "uploads/2026");
+        using var hub = await FtpFileHub.FromFtpClientAsync(client, "uploads/2026");
 
         Assert.NotNull(client.Server.Find("/uploads/2026"));
     }

@@ -8,7 +8,7 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageDirectory : FileDirectory
+    public class OracleObjectStorageDirectory : FileDirectory, IRefreshable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -19,20 +19,19 @@ namespace FileHub.OracleObjectStorage
         private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
-        private bool _metadataLoaded;
 
         public override string Path => OciPathUtil.DisplayPath(_prefix);
         public override FileDirectory Parent => _parent;
 
-        public override DateTime CreationTimeUtc
-        {
-            get { EnsureMetadataLoaded(); return _creationTimeUtc; }
-        }
+        /// <summary>
+        /// Cached creation timestamp. Returns <c>default</c> until the first
+        /// <see cref="Refresh"/> / <see cref="RefreshAsync"/> populates it.
+        /// Drivers do not do hidden I/O inside getters.
+        /// </summary>
+        public override DateTime CreationTimeUtc => _creationTimeUtc;
 
-        public override DateTime LastWriteTimeUtc
-        {
-            get { EnsureMetadataLoaded(); return _lastWriteTimeUtc; }
-        }
+        /// <summary>Cached last-write timestamp. See <see cref="CreationTimeUtc"/>.</summary>
+        public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc;
 
         internal IOciSession SessionInternal => _session;
         internal string PrefixInternal => _prefix;
@@ -51,8 +50,6 @@ namespace FileHub.OracleObjectStorage
             _rootPrefix = _prefix;
             _parent = null;
             _pathMode = pathMode;
-
-            EnsureMarkerIfNeeded();
         }
 
         /// <summary>Constructor used for child directories.</summary>
@@ -73,22 +70,47 @@ namespace FileHub.OracleObjectStorage
             return OciPathUtil.GetLeafName(rootPrefix);
         }
 
-        private void EnsureMarkerIfNeeded()
+        // === IRefreshable ===
+
+        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Re-fetches this directory's metadata from OCI. If this is the hub
+        /// root and the configured prefix does not have a marker yet, the
+        /// marker object is created as part of the refresh — matching the
+        /// "hub scoped to a sandboxed prefix" expectation.
+        /// </summary>
+        public async Task RefreshAsync(CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrEmpty(_prefix)) return;
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (string.IsNullOrEmpty(_prefix))
+            {
+                _creationTimeUtc = default;
+                _lastWriteTimeUtc = default;
+                return;
+            }
+
             try
             {
-                var head = _session.Client.HeadObjectAsync(_prefix).GetAwaiter().GetResult();
+                var head = await _session.Client.HeadObjectAsync(_prefix, cancellationToken).ConfigureAwait(false);
                 _creationTimeUtc = head.LastModified ?? default;
                 _lastWriteTimeUtc = _creationTimeUtc;
-                _metadataLoaded = true;
             }
             catch (FileNotFoundException)
             {
-                PutMarker().GetAwaiter().GetResult();
-                _creationTimeUtc = DateTime.UtcNow;
-                _lastWriteTimeUtc = _creationTimeUtc;
-                _metadataLoaded = true;
+                if (_parent == null)
+                {
+                    // Hub root with a configured prefix: create the marker and adopt "now".
+                    await PutMarker(cancellationToken).ConfigureAwait(false);
+                    _creationTimeUtc = DateTime.UtcNow;
+                    _lastWriteTimeUtc = _creationTimeUtc;
+                }
+                else
+                {
+                    _creationTimeUtc = default;
+                    _lastWriteTimeUtc = default;
+                }
             }
         }
 
@@ -97,31 +119,6 @@ namespace FileHub.OracleObjectStorage
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
                 _prefix, empty, contentLength: 0, contentType: DirectoryContentType, opcMeta: null, cancellationToken).ConfigureAwait(false);
-        }
-
-        private void EnsureMetadataLoaded()
-        {
-            if (_metadataLoaded) return;
-            if (string.IsNullOrEmpty(_prefix))
-            {
-                _creationTimeUtc = DateTime.MinValue;
-                _lastWriteTimeUtc = _creationTimeUtc;
-                _metadataLoaded = true;
-                return;
-            }
-
-            try
-            {
-                var head = _session.Client.HeadObjectAsync(_prefix).GetAwaiter().GetResult();
-                _creationTimeUtc = head.LastModified ?? default;
-                _lastWriteTimeUtc = _creationTimeUtc;
-            }
-            catch (FileNotFoundException)
-            {
-                _creationTimeUtc = default;
-                _lastWriteTimeUtc = default;
-            }
-            _metadataLoaded = true;
         }
 
         // === Existence ===

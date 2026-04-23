@@ -70,7 +70,7 @@ public class FtpFileTests : FtpTestBase
     public void MoveTo_DifferentConnection_UsesStreamCopyAndDelete()
     {
         using var otherClient = new InMemoryFtpClient();
-        using var otherHub = FtpFileHubTestAccess.FromFtpClient(otherClient);
+        using var otherHub = FtpFileHub.FromFtpClient(otherClient);
 
         var file = Root.CreateFile("data.txt");
         file.SetText("payload");

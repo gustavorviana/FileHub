@@ -8,7 +8,7 @@ public class FtpFileHubTests
     public void FromFtpClient_BuildsRootDirectoryAtServerRoot()
     {
         using var fake = new InMemoryFtpClient();
-        using var hub = FtpFileHubTestAccess.FromFtpClient(fake);
+        using var hub = FtpFileHub.FromFtpClient(fake);
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
@@ -18,7 +18,7 @@ public class FtpFileHubTests
     public void FromFtpClient_WithRootPath_NormalizesAndCreatesTree()
     {
         using var fake = new InMemoryFtpClient();
-        using var hub = FtpFileHubTestAccess.FromFtpClient(fake, "uploads/2026");
+        using var hub = FtpFileHub.FromFtpClient(fake, "uploads/2026");
 
         Assert.Equal("/uploads/2026", hub.Root.Path);
         // The server should have walked both "uploads" and "2026" into existence.
@@ -30,7 +30,7 @@ public class FtpFileHubTests
     public void FromFtpClient_TrailingSlashIsStripped()
     {
         using var fake = new InMemoryFtpClient();
-        using var hub = FtpFileHubTestAccess.FromFtpClient(fake, "/data/");
+        using var hub = FtpFileHub.FromFtpClient(fake, "/data/");
 
         Assert.Equal("/data", hub.Root.Path);
     }
@@ -39,7 +39,7 @@ public class FtpFileHubTests
     public void Dispose_OwnsClient_DisposesIt()
     {
         var fake = new InMemoryFtpClient();
-        var hub = FtpFileHubTestAccess.FromFtpClient(fake);
+        var hub = FtpFileHub.FromFtpClient(fake);
 
         hub.Dispose();
 
@@ -50,7 +50,7 @@ public class FtpFileHubTests
     public void Dispose_IsIdempotent()
     {
         using var fake = new InMemoryFtpClient();
-        var hub = FtpFileHubTestAccess.FromFtpClient(fake);
+        var hub = FtpFileHub.FromFtpClient(fake);
 
         hub.Dispose();
         hub.Dispose(); // should not throw

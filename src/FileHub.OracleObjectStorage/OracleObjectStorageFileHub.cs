@@ -1,4 +1,6 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
 using Oci.Common;
 using Oci.Common.Auth;
@@ -26,10 +28,14 @@ namespace FileHub.OracleObjectStorage
             Root = new OracleObjectStorageDirectory(_session, rootPrefix, pathMode);
         }
 
+        // === Public factories: sync delegates to async at the top-level boundary ===
+
         /// <summary>
         /// Build a FileHub using an OCI config file (<c>~/.oci/config</c>) and profile.
         /// Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for
-        /// cloud object storage where every API call is billed.
+        /// cloud object storage where every API call is billed. Blocks the
+        /// calling thread while the root marker is created; prefer
+        /// <see cref="FromConfigFileAsync"/> under a <c>SynchronizationContext</c>.
         /// </summary>
         public static OracleObjectStorageFileHub FromConfigFile(
             string rootPath,
@@ -37,6 +43,15 @@ namespace FileHub.OracleObjectStorage
             string configFilePath = null,
             string profile = "DEFAULT",
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            => FromConfigFileAsync(rootPath, bucketName, configFilePath, profile, pathMode).GetAwaiter().GetResult();
+
+        public static async Task<OracleObjectStorageFileHub> FromConfigFileAsync(
+            string rootPath,
+            string bucketName,
+            string configFilePath = null,
+            string profile = "DEFAULT",
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -45,7 +60,7 @@ namespace FileHub.OracleObjectStorage
                 ? new ConfigFileAuthenticationDetailsProvider(profile ?? "DEFAULT")
                 : new ConfigFileAuthenticationDetailsProvider(configFilePath, profile ?? "DEFAULT");
 
-            return FromProvider(rootPath, bucketName, provider, provider.Region.RegionId, pathMode);
+            return await FromProviderAsync(rootPath, bucketName, provider, provider.Region.RegionId, pathMode, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -58,6 +73,15 @@ namespace FileHub.OracleObjectStorage
             IAuthenticationDetailsProvider provider,
             string regionId,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            => FromProviderAsync(rootPath, bucketName, provider, regionId, pathMode).GetAwaiter().GetResult();
+
+        public static async Task<OracleObjectStorageFileHub> FromProviderAsync(
+            string rootPath,
+            string bucketName,
+            IAuthenticationDetailsProvider provider,
+            string regionId,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -69,7 +93,7 @@ namespace FileHub.OracleObjectStorage
             string @namespace;
             try
             {
-                @namespace = sdkClient.GetNamespace(new GetNamespaceRequest()).GetAwaiter().GetResult().Value;
+                @namespace = (await sdkClient.GetNamespace(new GetNamespaceRequest(), retryConfiguration: null, cancellationToken: cancellationToken).ConfigureAwait(false)).Value;
             }
             catch
             {
@@ -78,9 +102,8 @@ namespace FileHub.OracleObjectStorage
             }
 
             var real = new RealOciClient(sdkClient, @namespace, bucketName, regionId, ownsClient: true);
-            return FromOciClient(real, rootPath, pathMode);
+            return await BuildAsync(real, rootPath, pathMode, cancellationToken).ConfigureAwait(false);
         }
-
 
         /// <summary>
         /// Build a FileHub from a user-supplied authentication provider and region id.
@@ -92,6 +115,14 @@ namespace FileHub.OracleObjectStorage
             ConfigFileAuthenticationDetailsProvider provider,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
             => FromProvider(rootPath, bucketName, provider, provider.Region.RegionId, pathMode);
+
+        public static Task<OracleObjectStorageFileHub> FromProviderAsync(
+            string rootPath,
+            string bucketName,
+            ConfigFileAuthenticationDetailsProvider provider,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
+            CancellationToken cancellationToken = default)
+            => FromProviderAsync(rootPath, bucketName, provider, provider.Region.RegionId, pathMode, cancellationToken);
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="ObjectStorageClient"/>.
@@ -105,6 +136,16 @@ namespace FileHub.OracleObjectStorage
             string regionId,
             string @namespace,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            => FromClientAsync(bucketName, rootPath, client, regionId, @namespace, pathMode).GetAwaiter().GetResult();
+
+        public static Task<OracleObjectStorageFileHub> FromClientAsync(
+            string bucketName,
+            string rootPath,
+            ObjectStorageClient client,
+            string regionId,
+            string @namespace,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -115,8 +156,10 @@ namespace FileHub.OracleObjectStorage
                 throw new ArgumentException("Namespace cannot be null or empty.", nameof(@namespace));
 
             var real = new RealOciClient(client, @namespace, bucketName, regionId, ownsClient: false);
-            return FromOciClient(real, rootPath, pathMode);
+            return BuildAsync(real, rootPath, pathMode, cancellationToken);
         }
+
+        // === Internal factories (used by tests with an in-memory fake) ===
 
         /// <summary>
         /// Internal factory — accepts any <see cref="IOciClient"/> implementation.
@@ -127,10 +170,29 @@ namespace FileHub.OracleObjectStorage
             IOciClient client,
             string rootPath = "",
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            => FromOciClientAsync(client, rootPath, pathMode).GetAwaiter().GetResult();
+
+        internal static Task<OracleObjectStorageFileHub> FromOciClientAsync(
+            IOciClient client,
+            string rootPath = "",
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
+            CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            var session = new OciSession(client);
-            return new OracleObjectStorageFileHub(session, rootPath, pathMode);
+            return BuildAsync(client, rootPath, pathMode, cancellationToken);
+        }
+
+        private static async Task<OracleObjectStorageFileHub> BuildAsync(
+            IOciClient client,
+            string rootPath,
+            DirectoryPathMode pathMode,
+            CancellationToken cancellationToken)
+        {
+            var hub = new OracleObjectStorageFileHub(new OciSession(client), rootPath, pathMode);
+            var normalized = OciPathUtil.NormalizePrefix(rootPath);
+            if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
+                await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            return hub;
         }
 
         public void Dispose()

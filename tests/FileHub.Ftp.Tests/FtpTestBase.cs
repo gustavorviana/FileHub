@@ -19,7 +19,7 @@ public abstract class FtpTestBase : IDisposable
     protected FtpTestBase()
     {
         Client = new InMemoryFtpClient();
-        Hub = FtpFileHubTestAccess.FromFtpClient(Client);
+        Hub = FtpFileHub.FromFtpClient(Client);
     }
 
     protected FileDirectory Root => Hub.Root;

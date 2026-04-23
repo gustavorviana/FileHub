@@ -5,9 +5,11 @@ using FileHub.OracleObjectStorage.Tests.Fakes;
 namespace FileHub.OracleObjectStorage.Tests;
 
 /// <summary>
-/// Shared fixture used by unit-style tests. Each test class gets its own
-/// <see cref="InMemoryOciClient"/> + <see cref="OracleObjectStorageFileHub"/>
-/// backed by it — no network I/O, deterministic, fast.
+/// xUnit class fixture: shared across every test in a single test class
+/// (used via <c>IClassFixture&lt;InMemoryOciFixture&gt;</c>). Tests scope
+/// themselves to a per-test directory under the shared root so state doesn't
+/// bleed. Single <see cref="InMemoryOciClient"/> + <see cref="OracleObjectStorageFileHub"/>,
+/// no network I/O, deterministic.
 /// </summary>
 public sealed class InMemoryOciFixture : IDisposable
 {
@@ -17,7 +19,7 @@ public sealed class InMemoryOciFixture : IDisposable
     public InMemoryOciFixture()
     {
         Client = new InMemoryOciClient();
-        FileHub = OracleObjectStorageFileHub_TestAccess.FromOciClient(Client);
+        FileHub = OracleObjectStorageFileHub.FromOciClient(Client);
     }
 
     internal void SetBucketPublic(OciBucketAccessType access) => Client.SetBucketAccess(access);
@@ -26,17 +28,4 @@ public sealed class InMemoryOciFixture : IDisposable
     {
         FileHub.Dispose();
     }
-}
-
-/// <summary>
-/// Bridge to the <c>internal</c> <c>FromOciClient</c> factory, reachable by
-/// the test assembly through <c>InternalsVisibleTo</c>.
-/// </summary>
-internal static class OracleObjectStorageFileHub_TestAccess
-{
-    public static OracleObjectStorageFileHub FromOciClient(IOciClient client, string rootPath = "")
-        => OracleObjectStorageFileHub.FromOciClient(client, rootPath);
-
-    public static OracleObjectStorageFileHub FromOciClient(IOciClient client, string rootPath, DirectoryPathMode pathMode)
-        => OracleObjectStorageFileHub.FromOciClient(client, rootPath, pathMode);
 }

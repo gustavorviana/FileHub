@@ -240,7 +240,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     {
         // Default for OCI is Direct — only the leaf prefix is PUT.
         using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
         hub.Root.CreateDirectory("a/b/c");
 
@@ -254,7 +254,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void CreateDirectory_OpenIntermediatesMode_CreatesEachMarker()
     {
         using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client, "", DirectoryPathMode.OpenIntermediates);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client, "", DirectoryPathMode.OpenIntermediates);
 
         hub.Root.CreateDirectory("a/b/c");
 
@@ -268,7 +268,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void TryOpenDirectory_DirectMode_ResolvesExistingNestedPath()
     {
         using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
         hub.Root.CreateDirectory("a/b/c");
 
@@ -280,7 +280,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void TryOpenDirectory_DirectMode_MissingPath_ReturnsFalse()
     {
         using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
         Assert.False(hub.Root.TryOpenDirectory("x/y/z", out var dir));
         Assert.Null(dir);
@@ -290,7 +290,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void CreateDirectory_DirectMode_ParentTraversal_Throws()
     {
         using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
         Assert.Throws<FileHubException>(() => hub.Root.CreateDirectory("a/../escape"));
     }

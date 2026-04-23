@@ -62,7 +62,7 @@ public class FtpDirectoryTests : FtpTestBase
     public void CreateDirectory_NestedDirect_CreatesInOneRecursiveCall()
     {
         using var client = new InMemoryFtpClient();
-        using var hub = FtpFileHubTestAccess.FromFtpClient(client, "/", DirectoryPathMode.Direct);
+        using var hub = FtpFileHub.FromFtpClient(client, "/", DirectoryPathMode.Direct);
 
         var deep = hub.Root.CreateDirectory("x/y/z");
 
@@ -248,7 +248,7 @@ public class FtpDirectoryTests : FtpTestBase
     public void CreateFile_WhenRootHasSandbox_RejectsEscapeAttempts()
     {
         using var client = new InMemoryFtpClient();
-        using var hub = FtpFileHubTestAccess.FromFtpClient(client, "/sandbox");
+        using var hub = FtpFileHub.FromFtpClient(client, "/sandbox");
 
         Assert.Throws<ArgumentException>(() => hub.Root.CreateFile("../etc/passwd"));
     }

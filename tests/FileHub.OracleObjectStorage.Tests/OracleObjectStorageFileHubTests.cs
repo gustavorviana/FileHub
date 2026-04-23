@@ -10,7 +10,7 @@ public class OracleObjectStorageFileHubTests
     public void FromOciClient_BuildsRootDirectory()
     {
         using var fake = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake);
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
@@ -21,7 +21,7 @@ public class OracleObjectStorageFileHubTests
     public void FromOciClient_WithRootPath_NormalizesAndCreatesMarker()
     {
         using var fake = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake, "uploads/2026");
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake, "uploads/2026");
 
         Assert.Equal("/uploads/2026", hub.Root.Path);
         // Marker object was created under the normalized prefix.
@@ -32,7 +32,7 @@ public class OracleObjectStorageFileHubTests
     public void Dispose_OwnsClient_DisposesIt()
     {
         var fake = new InMemoryOciClient();
-        var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake);
+        var hub = OracleObjectStorageFileHub.FromOciClient(fake);
 
         hub.Dispose();
 
@@ -44,7 +44,7 @@ public class OracleObjectStorageFileHubTests
     public void Dispose_IsIdempotent()
     {
         using var fake = new InMemoryOciClient();
-        var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(fake);
+        var hub = OracleObjectStorageFileHub.FromOciClient(fake);
 
         hub.Dispose();
         hub.Dispose(); // should not throw

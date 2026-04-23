@@ -7,7 +7,7 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageFile : FileEntry, IUrlAccessible
+    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable
     {
         internal const string ChangedAtTag = "_changedAt";
 
@@ -15,19 +15,33 @@ namespace FileHub.OracleObjectStorage
         private long _length;
         private DateTime _creationTimeUtc;
         private Dictionary<string, string> _tags;
-        private bool _needsRefresh;
         private OciObjectStream _lastOpenStream;
 
         public override FileDirectory Parent => _parent;
         public override string Path => ConcatPath(_parent.Path, Name);
-        public override long Length { get { RefreshIfNeeded(); return _length; } }
-        public override DateTime CreationTimeUtc { get { RefreshIfNeeded(); return _creationTimeUtc; } }
 
+        /// <summary>
+        /// Cached content length. Returns the last known value — call
+        /// <see cref="Refresh"/> / <see cref="RefreshAsync"/> to re-sync with
+        /// the bucket. Writes through this driver update the cached length as
+        /// data is streamed, so the common write-then-read flow works without
+        /// an explicit refresh.
+        /// </summary>
+        public override long Length => _length;
+
+        /// <summary>Cached creation timestamp. See <see cref="Length"/> for refresh semantics.</summary>
+        public override DateTime CreationTimeUtc => _creationTimeUtc;
+
+        /// <summary>
+        /// Cached last-write timestamp. Reads from the object's
+        /// <see cref="ChangedAtTag"/> metadata when present, otherwise falls
+        /// back to <see cref="CreationTimeUtc"/>. Drivers do not do hidden
+        /// I/O in getters.
+        /// </summary>
         public override DateTime LastWriteTimeUtc
         {
             get
             {
-                RefreshIfNeeded();
                 if (_tags != null && _tags.TryGetValue(ChangedAtTag, out var value)
                     && DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
                     return parsed;
@@ -43,7 +57,7 @@ namespace FileHub.OracleObjectStorage
         internal OracleObjectStorageFile(OracleObjectStorageDirectory parent, string name) : base(name)
         {
             _parent = parent ?? throw new ArgumentNullException(nameof(parent));
-            _needsRefresh = true;
+            _length = -1;
         }
 
         internal OracleObjectStorageFile(OracleObjectStorageDirectory parent, string name, long length, DateTime? createdUtc)
@@ -52,7 +66,21 @@ namespace FileHub.OracleObjectStorage
             _parent = parent ?? throw new ArgumentNullException(nameof(parent));
             _length = length;
             _creationTimeUtc = createdUtc ?? default;
-            _needsRefresh = true;
+        }
+
+        // === IRefreshable ===
+
+        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+
+        public async Task RefreshAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var head = await SessionInternal.Client.HeadObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            _length = head.ContentLength ?? -1;
+            _creationTimeUtc = head.LastModified ?? default;
+            _tags = head.OpcMeta != null
+                ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
+                : null;
         }
 
         // === Exists (sync delegates to async) ===
@@ -74,11 +102,7 @@ namespace FileHub.OracleObjectStorage
 
         // === Streams ===
 
-        public override Stream GetReadStream()
-        {
-            RefreshIfNeeded();
-            return OpenStream(isWrite: false);
-        }
+        public override Stream GetReadStream() => OpenStream(isWrite: false);
 
         public override Stream GetWriteStream()
         {
@@ -86,10 +110,10 @@ namespace FileHub.OracleObjectStorage
             return OpenStream(isWrite: true);
         }
 
-        public override async Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
+        public override Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
-            await RefreshAsync(cancellationToken).ConfigureAwait(false);
-            return OpenStream(isWrite: false);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<Stream>(OpenStream(isWrite: false));
         }
 
         public override Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
@@ -119,6 +143,21 @@ namespace FileHub.OracleObjectStorage
             _lastOpenStream = null;
         }
 
+        /// <summary>
+        /// Called by <see cref="OciObjectStream"/> at the end of a committed
+        /// upload so the file reflects the new length and modification time
+        /// without forcing a server round-trip. The timestamp is set
+        /// client-side via the <see cref="ChangedAtTag"/> metadata; callers
+        /// that need the authoritative server timestamp should call
+        /// <see cref="Refresh"/>.
+        /// </summary>
+        internal void OnWriteCommitted(long bytesWritten, string timestampTagValue)
+        {
+            _length = bytesWritten;
+            EnsureTags();
+            _tags[ChangedAtTag] = timestampTagValue;
+        }
+
         // === Mutations (sync delegates to async) ===
 
         public override void Delete() => DeleteAsync().GetAwaiter().GetResult();
@@ -141,7 +180,6 @@ namespace FileHub.OracleObjectStorage
             await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
 
             Name = newName;
-            _needsRefresh = true;
             return this;
         }
 
@@ -174,7 +212,8 @@ namespace FileHub.OracleObjectStorage
                     destClient.Region,
                     destinationObject,
                     cancellationToken).ConfigureAwait(false);
-                return new OracleObjectStorageFile(ociDir, name);
+                // Propagate what we know — content is identical, so length matches.
+                return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
             return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
         }
@@ -213,29 +252,10 @@ namespace FileHub.OracleObjectStorage
 
         // === Internal ===
 
-        internal void MarkNeedsRefresh() => _needsRefresh = true;
-
         internal void EnsureTags()
         {
             if (_tags == null)
                 _tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        internal void RefreshIfNeeded(bool forceRefresh = false)
-        {
-            if (!_needsRefresh && !forceRefresh) return;
-            RefreshAsync(CancellationToken.None).GetAwaiter().GetResult();
-        }
-
-        internal async Task RefreshAsync(CancellationToken cancellationToken)
-        {
-            var head = await SessionInternal.Client.HeadObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
-            _length = head.ContentLength ?? -1;
-            _creationTimeUtc = head.LastModified ?? default;
-            _tags = head.OpcMeta != null
-                ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
-                : null;
-            _needsRefresh = false;
         }
 
         public override void Dispose()

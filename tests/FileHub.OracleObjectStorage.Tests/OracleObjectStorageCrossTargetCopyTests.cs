@@ -13,8 +13,8 @@ public class OracleObjectStorageCrossTargetCopyTests
         var world = new InMemoryOciWorld();
         var clientA = world.CreateClient(nsA, bucketA, regionA);
         var clientB = world.CreateClient(nsB, bucketB, regionB);
-        var hubA = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientA);
-        var hubB = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientB);
+        var hubA = OracleObjectStorageFileHub.FromOciClient(clientA);
+        var hubB = OracleObjectStorageFileHub.FromOciClient(clientB);
         return (hubA, clientA, hubB, clientB);
     }
 
@@ -68,8 +68,8 @@ public class OracleObjectStorageCrossTargetCopyTests
     {
         var clientA = new InMemoryOciClient(bucket: "alpha");
         var clientB = new InMemoryOciClient(bucket: "beta");
-        using var hubA = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientA);
-        using var hubB = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientB);
+        using var hubA = OracleObjectStorageFileHub.FromOciClient(clientA);
+        using var hubB = OracleObjectStorageFileHub.FromOciClient(clientB);
 
         hubA.Root.CreateFile("stream.txt").SetText("over-the-wire");
 
@@ -113,8 +113,8 @@ public class OracleObjectStorageCrossTargetCopyTests
     {
         var clientA = new InMemoryOciClient(bucket: "alpha");
         var clientB = new InMemoryOciClient(bucket: "beta");
-        using var hubA = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientA);
-        using var hubB = OracleObjectStorageFileHub_TestAccess.FromOciClient(clientB);
+        using var hubA = OracleObjectStorageFileHub.FromOciClient(clientA);
+        using var hubB = OracleObjectStorageFileHub.FromOciClient(clientB);
 
         var src = hubA.Root.CreateDirectory("tree");
         src.CreateFile("one.txt").SetText("1");

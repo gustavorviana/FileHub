@@ -203,8 +203,9 @@ namespace FileHub.OracleObjectStorage
         {
             _writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
+            var timestamp = DateTime.UtcNow.ToString("O");
             _file.EnsureTags();
-            _file.TagsInternal[OracleObjectStorageFile.ChangedAtTag] = DateTime.UtcNow.ToString("O");
+            _file.TagsInternal[OracleObjectStorageFile.ChangedAtTag] = timestamp;
 
             await client.PutObjectAsync(
                 _file.ObjectName,
@@ -214,7 +215,7 @@ namespace FileHub.OracleObjectStorage
                 _file.TagsInternal,
                 cancellationToken).ConfigureAwait(false);
 
-            _file.MarkNeedsRefresh();
+            _file.OnWriteCommitted(_writeBuffer.Length, timestamp);
         }
 
         private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
