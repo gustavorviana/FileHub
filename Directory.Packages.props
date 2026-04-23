@@ -13,6 +13,9 @@
     <PackageVersion Include="OCI.DotNetSDK.Objectstorage" Version="132.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <PackageVersion Include="FluentFTP" Version="52.*" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>
