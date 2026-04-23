@@ -33,6 +33,7 @@ namespace FileHub.DependencyInjection
 
         public IFileHub GetByName(string name)
         {
+            if (_disposed) throw new ObjectDisposedException(nameof(DiNamedFileHubs));
             if (string.IsNullOrEmpty(name)) return null;
             if (!_entries.TryGetValue(name, out var entry)) return null;
 

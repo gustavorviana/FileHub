@@ -19,21 +19,24 @@ namespace FileHub.OracleObjectStorage
 
         public FileDirectory Root { get; }
 
-        private OracleObjectStorageFileHub(OciSession session, string rootPath)
+        private OracleObjectStorageFileHub(OciSession session, string rootPath, DirectoryPathMode pathMode)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             var rootPrefix = OciPathUtil.NormalizePrefix(rootPath);
-            Root = new OracleObjectStorageDirectory(_session, rootPrefix);
+            Root = new OracleObjectStorageDirectory(_session, rootPrefix, pathMode);
         }
 
         /// <summary>
         /// Build a FileHub using an OCI config file (<c>~/.oci/config</c>) and profile.
+        /// Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for
+        /// cloud object storage where every API call is billed.
         /// </summary>
         public static OracleObjectStorageFileHub FromConfigFile(
             string rootPath,
             string bucketName,
             string configFilePath = null,
-            string profile = "DEFAULT")
+            string profile = "DEFAULT",
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -42,17 +45,19 @@ namespace FileHub.OracleObjectStorage
                 ? new ConfigFileAuthenticationDetailsProvider(profile ?? "DEFAULT")
                 : new ConfigFileAuthenticationDetailsProvider(configFilePath, profile ?? "DEFAULT");
 
-            return FromProvider(rootPath, bucketName, provider, provider.Region.RegionId);
+            return FromProvider(rootPath, bucketName, provider, provider.Region.RegionId, pathMode);
         }
 
         /// <summary>
         /// Build a FileHub from a user-supplied authentication provider and region id.
+        /// Defaults to <see cref="DirectoryPathMode.Direct"/>.
         /// </summary>
         public static OracleObjectStorageFileHub FromProvider(
             string rootPath,
             string bucketName,
             IAuthenticationDetailsProvider provider,
-            string regionId)
+            string regionId,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -73,30 +78,33 @@ namespace FileHub.OracleObjectStorage
             }
 
             var real = new RealOciClient(sdkClient, @namespace, bucketName, regionId, ownsClient: true);
-            return FromOciClient(real, rootPath);
+            return FromOciClient(real, rootPath, pathMode);
         }
 
 
         /// <summary>
         /// Build a FileHub from a user-supplied authentication provider and region id.
+        /// Defaults to <see cref="DirectoryPathMode.Direct"/>.
         /// </summary>
         public static OracleObjectStorageFileHub FromProvider(
             string rootPath,
             string bucketName,
-            ConfigFileAuthenticationDetailsProvider provider)
-            => FromProvider(rootPath, bucketName, provider, provider.Region.RegionId);
+            ConfigFileAuthenticationDetailsProvider provider,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            => FromProvider(rootPath, bucketName, provider, provider.Region.RegionId, pathMode);
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="ObjectStorageClient"/>.
         /// The caller retains ownership of the client — disposing this FileHub does
-        /// <b>not</b> dispose it.
+        /// <b>not</b> dispose it. Defaults to <see cref="DirectoryPathMode.Direct"/>.
         /// </summary>
         public static OracleObjectStorageFileHub FromClient(
             string bucketName,
             string rootPath,
             ObjectStorageClient client,
             string regionId,
-            string @namespace)
+            string @namespace,
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
         {
             if (string.IsNullOrEmpty(bucketName))
                 throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
@@ -107,7 +115,7 @@ namespace FileHub.OracleObjectStorage
                 throw new ArgumentException("Namespace cannot be null or empty.", nameof(@namespace));
 
             var real = new RealOciClient(client, @namespace, bucketName, regionId, ownsClient: false);
-            return FromOciClient(real, rootPath);
+            return FromOciClient(real, rootPath, pathMode);
         }
 
         /// <summary>
@@ -115,11 +123,14 @@ namespace FileHub.OracleObjectStorage
         /// Used by tests with an in-memory fake so the driver logic can be
         /// exercised end-to-end with no network I/O.
         /// </summary>
-        internal static OracleObjectStorageFileHub FromOciClient(IOciClient client, string rootPath = "")
+        internal static OracleObjectStorageFileHub FromOciClient(
+            IOciClient client,
+            string rootPath = "",
+            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             var session = new OciSession(client);
-            return new OracleObjectStorageFileHub(session, rootPath);
+            return new OracleObjectStorageFileHub(session, rootPath, pathMode);
         }
 
         public void Dispose()

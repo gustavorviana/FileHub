@@ -16,6 +16,7 @@ namespace FileHub.OracleObjectStorage
         private readonly OracleObjectStorageDirectory _parent;
         private readonly string _prefix;
         private readonly string _rootPrefix;
+        private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
         private bool _metadataLoaded;
@@ -39,12 +40,17 @@ namespace FileHub.OracleObjectStorage
 
         /// <summary>Constructor used for the root directory of a FileHub.</summary>
         internal OracleObjectStorageDirectory(IOciSession session, string rootPrefix)
+            : this(session, rootPrefix, DirectoryPathMode.Direct) { }
+
+        /// <summary>Constructor used for the root directory of a FileHub.</summary>
+        internal OracleObjectStorageDirectory(IOciSession session, string rootPrefix, DirectoryPathMode pathMode)
             : base(GetDisplayName(rootPrefix), rootPath: rootPrefix)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _prefix = rootPrefix ?? string.Empty;
             _rootPrefix = _prefix;
             _parent = null;
+            _pathMode = pathMode;
 
             EnsureMarkerIfNeeded();
         }
@@ -57,6 +63,7 @@ namespace FileHub.OracleObjectStorage
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
             _prefix = OciPathUtil.CombinePrefix(parent._prefix, name);
+            _pathMode = parent._pathMode;
         }
 
         private static string GetDisplayName(string rootPrefix)
@@ -277,8 +284,18 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            OciPathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, name);
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, name);
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                if (_pathMode == DirectoryPathMode.Direct)
+                    return await CreateDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
+
+                var existing = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                var intermediate = existing
+                    ?? await CreateDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
+                return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
+            }
+
+            var childPrefix = OciPathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, name);
 
             using (var empty = new MemoryStream())
             {
@@ -295,6 +312,17 @@ namespace FileHub.OracleObjectStorage
 
         private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
         {
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                if (_pathMode == DirectoryPathMode.Direct)
+                    return await TryOpenDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
+
+                var childResult = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (childResult is OracleObjectStorageDirectory ociChild)
+                    return await ociChild.TryOpenDirectoryCoreAsync(rest, cancellationToken).ConfigureAwait(false);
+                return null;
+            }
+
             try
             {
                 OciPathUtil.ValidateName(name);
@@ -317,6 +345,79 @@ namespace FileHub.OracleObjectStorage
                     return new OracleObjectStorageDirectory(this, name);
                 return null;
             }
+        }
+
+        // --- Direct-mode implementations: one PUT / one HEAD for the nested leaf ---
+
+        private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        {
+            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var fullPrefix = BuildNestedPrefix(segments);
+            OciPathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+
+            using (var empty = new MemoryStream())
+            {
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
+            }
+            return BuildDirectoryChain(segments);
+        }
+
+        private async Task<FileDirectory> TryOpenDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        {
+            string[] segments;
+            try
+            {
+                segments = ValidateAndSplitNestedSegments(nestedName);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            var fullPrefix = BuildNestedPrefix(segments);
+            OciPathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+
+            try
+            {
+                await _session.Client.HeadObjectAsync(fullPrefix, cancellationToken).ConfigureAwait(false);
+                return BuildDirectoryChain(segments);
+            }
+            catch (FileNotFoundException)
+            {
+                if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
+                    return BuildDirectoryChain(segments);
+                return null;
+            }
+        }
+
+        private static string[] ValidateAndSplitNestedSegments(string nestedName)
+        {
+            var normalized = nestedName.Replace('\\', '/').Trim('/');
+            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var seg in segments)
+            {
+                // Keep the exception type aligned with NestedPath.TrySplit — callers
+                // expect FileHubException for any path-level traversal attempt.
+                if (seg == "." || seg == "..")
+                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
+                OciPathUtil.ValidateName(seg);
+            }
+            return segments;
+        }
+
+        private string BuildNestedPrefix(string[] segments)
+        {
+            var result = _prefix ?? string.Empty;
+            foreach (var seg in segments)
+                result += seg + "/";
+            return result;
+        }
+
+        private OracleObjectStorageDirectory BuildDirectoryChain(string[] segments)
+        {
+            OracleObjectStorageDirectory current = this;
+            foreach (var seg in segments)
+                current = new OracleObjectStorageDirectory(current, seg);
+            return current;
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")

@@ -12,6 +12,7 @@ namespace FileHub.Memory
             = new Dictionary<string, MemoryDirectory>(StringComparer.OrdinalIgnoreCase);
 
         private readonly MemoryDirectory _parent;
+        private readonly DirectoryPathMode _pathMode;
 
         public override string Path { get; }
         public override FileDirectory Parent => _parent;
@@ -19,9 +20,13 @@ namespace FileHub.Memory
         public override DateTime LastWriteTimeUtc { get; }
 
         public MemoryDirectory(string name, MemoryDirectory parent = null)
+            : this(name, parent, DirectoryPathMode.OpenIntermediates) { }
+
+        public MemoryDirectory(string name, MemoryDirectory parent, DirectoryPathMode pathMode)
             : base(name, rootPath: null)
         {
             _parent = parent;
+            _pathMode = pathMode;
             Path = parent != null
                 ? System.IO.Path.Combine(parent.Path, name)
                 : name;
@@ -73,14 +78,30 @@ namespace FileHub.Memory
         public override FileDirectory CreateDirectory(string name)
         {
             ThrowIfReadOnly();
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                var intermediate = TryOpenDirectory(head, out var existing)
+                    ? existing
+                    : CreateDirectory(head);
+                return intermediate.CreateDirectory(rest);
+            }
             ValidateName(name);
-            var dir = new MemoryDirectory(name, this);
+            var dir = new MemoryDirectory(name, this, _pathMode);
             _directories[name] = dir;
             return dir;
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
         {
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                if (!TryOpenDirectory(head, out var child) || child == null)
+                {
+                    directory = null;
+                    return false;
+                }
+                return child.TryOpenDirectory(rest, out directory);
+            }
             directory = null;
             if (!_directories.TryGetValue(name, out var dir))
                 return false;
@@ -126,7 +147,7 @@ namespace FileHub.Memory
             ThrowIfReadOnly();
             ValidateName(newName);
             _parent?.RemoveDirectory(Name);
-            var renamed = new MemoryDirectory(newName, _parent);
+            var renamed = new MemoryDirectory(newName, _parent, _pathMode);
             CopyContentsTo(this, renamed);
             _parent?.AddDirectory(renamed);
 
@@ -177,7 +198,7 @@ namespace FileHub.Memory
 
             foreach (var kvp in source._directories)
             {
-                var subDir = new MemoryDirectory(kvp.Key, destination);
+                var subDir = new MemoryDirectory(kvp.Key, destination, destination._pathMode);
                 CopyContentsTo(kvp.Value, subDir);
                 destination._directories[kvp.Key] = subDir;
             }

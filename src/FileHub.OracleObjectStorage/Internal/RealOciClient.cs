@@ -266,10 +266,6 @@ namespace FileHub.OracleObjectStorage.Internal
             {
                 throw Translate(oe, contextObject);
             }
-            catch (AggregateException ae)
-            {
-                throw Translate(ae.GetBaseException(), contextObject);
-            }
         }
 
         private async Task TranslateAsync(string contextObject, Func<CancellationToken, Task> work, CancellationToken cancellationToken)
@@ -281,10 +277,6 @@ namespace FileHub.OracleObjectStorage.Internal
             catch (OciException oe)
             {
                 throw Translate(oe, contextObject);
-            }
-            catch (AggregateException ae)
-            {
-                throw Translate(ae.GetBaseException(), contextObject);
             }
         }
 

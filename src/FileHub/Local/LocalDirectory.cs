@@ -7,6 +7,7 @@ namespace FileHub.Local
 {
     public class LocalDirectory : FileDirectory
     {
+        private readonly DirectoryPathMode _pathMode;
         private DirectoryInfo _info;
 
         public override string Path { get; }
@@ -16,10 +17,14 @@ namespace FileHub.Local
         public override DateTime LastWriteTimeUtc => RefreshInfo().LastWriteTimeUtc;
 
         internal LocalDirectory(string path, string rootPath, FileDirectory parent)
+            : this(path, rootPath, parent, DirectoryPathMode.OpenIntermediates) { }
+
+        internal LocalDirectory(string path, string rootPath, FileDirectory parent, DirectoryPathMode pathMode)
             : base(GetDirectoryName(path), rootPath)
         {
             Path = path;
             Parent = parent;
+            _pathMode = pathMode;
 
             if (!Directory.Exists(Path))
                 Directory.CreateDirectory(Path);
@@ -84,14 +89,36 @@ namespace FileHub.Local
         public override FileDirectory CreateDirectory(string name)
         {
             ThrowIfReadOnly();
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                if (_pathMode == DirectoryPathMode.Direct)
+                    return CreateDirectoryDirect(name);
+
+                var intermediate = TryOpenDirectory(head, out var existing)
+                    ? existing
+                    : CreateDirectory(head);
+                return intermediate.CreateDirectory(rest);
+            }
             ValidateName(name);
             var dirPath = ResolveSafePath(name);
             InvalidateInfo();
-            return new LocalDirectory(dirPath, RootPath, this);
+            return new LocalDirectory(dirPath, RootPath, this, _pathMode);
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
         {
+            if (NestedPath.TrySplit(name, out var head, out var rest))
+            {
+                if (_pathMode == DirectoryPathMode.Direct)
+                    return TryOpenDirectoryDirect(name, out directory);
+
+                if (!TryOpenDirectory(head, out var child) || child == null)
+                {
+                    directory = null;
+                    return false;
+                }
+                return child.TryOpenDirectory(rest, out directory);
+            }
             ValidateName(name);
             directory = null;
 
@@ -99,7 +126,7 @@ namespace FileHub.Local
             if (!Directory.Exists(dirPath))
                 return false;
 
-            directory = new LocalDirectory(dirPath, RootPath, this);
+            directory = new LocalDirectory(dirPath, RootPath, this, _pathMode);
             return true;
         }
 
@@ -109,8 +136,69 @@ namespace FileHub.Local
             foreach (var d in dir.GetDirectories(searchPattern, SearchOption.TopDirectoryOnly))
             {
                 if (ShouldSkipLink(d)) continue;
-                yield return new LocalDirectory(d.FullName, RootPath, this);
+                yield return new LocalDirectory(d.FullName, RootPath, this, _pathMode);
             }
+        }
+
+        // --- Direct-mode implementations: resolve nested paths in a single syscall ---
+
+        private LocalDirectory CreateDirectoryDirect(string nestedName)
+        {
+            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var relative = string.Join("/", segments);
+            var dirPath = ResolveSafePath(relative);
+            Directory.CreateDirectory(dirPath);
+            InvalidateInfo();
+            return BuildDirectoryChain(segments);
+        }
+
+        private bool TryOpenDirectoryDirect(string nestedName, out FileDirectory directory)
+        {
+            string[] segments;
+            try
+            {
+                segments = ValidateAndSplitNestedSegments(nestedName);
+            }
+            catch (ArgumentException)
+            {
+                directory = null;
+                return false;
+            }
+            var relative = string.Join("/", segments);
+            var dirPath = ResolveSafePath(relative);
+            if (!Directory.Exists(dirPath))
+            {
+                directory = null;
+                return false;
+            }
+            directory = BuildDirectoryChain(segments);
+            return true;
+        }
+
+        private static string[] ValidateAndSplitNestedSegments(string nestedName)
+        {
+            var normalized = nestedName.Replace('\\', '/').Trim('/');
+            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var seg in segments)
+            {
+                // Keep the exception type aligned with NestedPath.TrySplit — callers
+                // expect FileHubException for any path-level traversal attempt.
+                if (seg == "." || seg == "..")
+                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
+                ValidateName(seg);
+            }
+            return segments;
+        }
+
+        private LocalDirectory BuildDirectoryChain(string[] segments)
+        {
+            LocalDirectory current = this;
+            foreach (var seg in segments)
+            {
+                var childPath = System.IO.Path.Combine(current.Path, seg);
+                current = new LocalDirectory(childPath, RootPath, current, _pathMode);
+            }
+            return current;
         }
 
         // === Common operations ===
@@ -156,7 +244,7 @@ namespace FileHub.Local
             EnsureWithinRoot(newPath);
 
             Directory.Move(Path, newPath);
-            return new LocalDirectory(newPath, RootPath, Parent);
+            return new LocalDirectory(newPath, RootPath, Parent, _pathMode);
         }
 
         public override FileDirectory MoveTo(FileDirectory directory, string name)
@@ -193,6 +281,13 @@ namespace FileHub.Local
         /// without duplicating the root-containment logic.
         /// </summary>
         internal string ResolveSafeChildPath(string childName) => ResolveSafePath(childName);
+
+        /// <summary>
+        /// Exposes the protected <see cref="FileDirectory.RootPath"/> to sibling
+        /// types in the Local driver (e.g. the public <see cref="LocalFile"/>
+        /// constructor) so they can stay anchored to the hub's sandbox root.
+        /// </summary>
+        internal string RootPathInternal => RootPath;
 
         private DirectoryInfo RefreshInfo()
         {

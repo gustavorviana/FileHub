@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 #if NET8_0_OR_GREATER
@@ -321,23 +320,6 @@ namespace FileHub
             EnsureWithinRoot(resolved.FullName);
         }
 #endif
-
-        protected string FixPath(string path)
-        {
-            var separator = System.IO.Path.DirectorySeparatorChar;
-            var pBuilder = new StringBuilder(path.Length);
-            int separators = 0;
-            foreach (char c in path)
-            {
-                if (c == '/' || c == '\\') separators++;
-                else separators = 0;
-
-                if (separators == 0) pBuilder.Append(c);
-                else if (separators == 1) pBuilder.Append(separator);
-            }
-
-            return pBuilder.ToString();
-        }
 
         public override string ToString() => Path;
     }

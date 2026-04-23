@@ -181,4 +181,50 @@ public class LocalFileTests
 
         Assert.False(file.Exists());
     }
+
+    // === Public constructor ===
+
+    [Fact]
+    public void PublicConstructor_CreatesReferenceWithoutTouchingDisk()
+    {
+        using var temp = new TempDirectory();
+        var root = (LocalDirectory)new LocalFileHub(temp.Path).Root;
+
+        var file = new LocalFile(root, "a.txt");
+
+        Assert.Equal("a.txt", file.Name);
+        Assert.Same(root, file.Parent);
+        Assert.False(file.Exists());
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
+    [Fact]
+    public void PublicConstructor_CanWriteAndReadBack()
+    {
+        using var temp = new TempDirectory();
+        var root = (LocalDirectory)new LocalFileHub(temp.Path).Root;
+
+        var file = new LocalFile(root, "hello.txt");
+        file.SetText("hi");
+
+        Assert.True(file.Exists());
+        Assert.Equal("hi", file.ReadAllText());
+    }
+
+    [Fact]
+    public void PublicConstructor_NullDirectory_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => new LocalFile(null!, "a.txt"));
+    }
+
+    [Fact]
+    public void PublicConstructor_InvalidName_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = (LocalDirectory)new LocalFileHub(temp.Path).Root;
+
+        Assert.Throws<ArgumentException>(() => new LocalFile(root, ""));
+        Assert.Throws<ArgumentException>(() => new LocalFile(root, ".."));
+        Assert.Throws<ArgumentException>(() => new LocalFile(root, "a/b.txt"));
+    }
 }

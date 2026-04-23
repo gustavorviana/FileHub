@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Text.RegularExpressions;
 
@@ -6,6 +7,10 @@ namespace FileHub.OracleObjectStorage.Internal
 {
     internal static class OciPathUtil
     {
+        private static readonly ConcurrentDictionary<string, Regex> _regexCache =
+            new ConcurrentDictionary<string, Regex>(StringComparer.Ordinal);
+
+
         public static string NormalizePrefix(string path)
         {
             if (string.IsNullOrEmpty(path) || path == "/")
@@ -47,11 +52,15 @@ namespace FileHub.OracleObjectStorage.Internal
 
         public static Regex BuildSearchPatternRegex(string pattern)
         {
-            if (string.IsNullOrEmpty(pattern) || pattern == "*" || pattern == "*.*")
-                return new Regex("^.*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+            var key = pattern ?? string.Empty;
+            return _regexCache.GetOrAdd(key, static k =>
+            {
+                if (k.Length == 0 || k == "*" || k == "*.*")
+                    return new Regex("^.*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-            var escaped = Regex.Escape(pattern).Replace("\\*", ".*");
-            return new Regex("^" + escaped + "$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                var escaped = Regex.Escape(k).Replace("\\*", ".*");
+                return new Regex("^" + escaped + "$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+            });
         }
 
         public static void ValidateName(string name)

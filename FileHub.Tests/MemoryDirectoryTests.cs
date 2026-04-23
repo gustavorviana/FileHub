@@ -733,4 +733,67 @@ public class MemoryDirectoryTests
 
         Assert.InRange(root.CreationTimeUtc, before, DateTime.UtcNow.AddSeconds(1));
     }
+
+    // === Nested-path directory creation / lookup ===
+
+    [Fact]
+    public void CreateDirectory_ForwardSlash_CreatesIntermediate()
+    {
+        var root = NewRoot();
+        var leaf = root.CreateDirectory("a/b/c");
+
+        Assert.Equal("c", leaf.Name);
+        Assert.True(root.TryOpenDirectory("a", out _));
+        Assert.True(root.TryOpenDirectory("a/b", out _));
+        Assert.True(root.TryOpenDirectory("a/b/c", out var reopened));
+        Assert.Equal("c", reopened.Name);
+    }
+
+    [Fact]
+    public void CreateDirectory_Backslash_CreatesIntermediate()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("x\\y");
+
+        Assert.True(root.TryOpenDirectory("x", out _));
+        Assert.True(root.TryOpenDirectory("x/y", out _));
+    }
+
+    [Fact]
+    public void CreateDirectory_Nested_ReusesExistingIntermediate()
+    {
+        var root = NewRoot();
+        var firstA = root.CreateDirectory("a");
+        firstA.CreateFile("keep.txt");
+
+        root.CreateDirectory("a/b");
+
+        Assert.True(root.TryOpenDirectory("a", out var reopenedA));
+        Assert.True(reopenedA.ItemExists("keep.txt"));
+        Assert.True(root.TryOpenDirectory("a/b", out _));
+    }
+
+    [Fact]
+    public void TryOpenDirectory_NestedPath_ReturnsFalseWhenIntermediateMissing()
+    {
+        var root = NewRoot();
+        Assert.False(root.TryOpenDirectory("missing/child", out var dir));
+        Assert.Null(dir);
+    }
+
+    [Fact]
+    public void CreateDirectory_AbsolutePath_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("/abs"));
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("\\abs"));
+    }
+
+    [Fact]
+    public void CreateDirectory_ParentTraversal_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
+    }
 }

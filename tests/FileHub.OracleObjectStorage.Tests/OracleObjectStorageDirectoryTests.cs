@@ -169,4 +169,129 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         Assert.Throws<ArgumentException>(() => scope.CreateFile("a/b.txt"));
         Assert.Throws<ArgumentException>(() => scope.CreateFile(".."));
     }
+
+    // === Nested-path directory creation / lookup ===
+
+    [Fact]
+    public void CreateDirectory_ForwardSlash_CreatesIntermediate()
+    {
+        var scope = Scope(nameof(CreateDirectory_ForwardSlash_CreatesIntermediate));
+
+        var leaf = scope.CreateDirectory("a/b/c");
+
+        Assert.Equal("c", leaf.Name);
+        Assert.True(scope.TryOpenDirectory("a", out _));
+        Assert.True(scope.TryOpenDirectory("a/b", out _));
+        Assert.True(scope.TryOpenDirectory("a/b/c", out _));
+    }
+
+    [Fact]
+    public void CreateDirectory_Backslash_CreatesIntermediate()
+    {
+        var scope = Scope(nameof(CreateDirectory_Backslash_CreatesIntermediate));
+
+        scope.CreateDirectory("x\\y");
+
+        Assert.True(scope.TryOpenDirectory("x/y", out _));
+    }
+
+    [Fact]
+    public void CreateDirectory_Nested_ReusesExistingIntermediate()
+    {
+        var scope = Scope(nameof(CreateDirectory_Nested_ReusesExistingIntermediate));
+        var firstA = scope.CreateDirectory("a");
+        firstA.CreateFile("keep.txt");
+
+        scope.CreateDirectory("a/b");
+
+        Assert.True(scope.TryOpenDirectory("a", out var reopenedA));
+        Assert.True(reopenedA.ItemExists("keep.txt"));
+        Assert.True(scope.TryOpenDirectory("a/b", out _));
+    }
+
+    [Fact]
+    public void TryOpenDirectory_NestedPath_ReturnsFalseWhenIntermediateMissing()
+    {
+        var scope = Scope(nameof(TryOpenDirectory_NestedPath_ReturnsFalseWhenIntermediateMissing));
+        Assert.False(scope.TryOpenDirectory("missing/child", out var dir));
+        Assert.Null(dir);
+    }
+
+    [Fact]
+    public void CreateDirectory_AbsolutePath_Throws()
+    {
+        var scope = Scope(nameof(CreateDirectory_AbsolutePath_Throws));
+        Assert.Throws<FileHubException>(() => scope.CreateDirectory("/abs"));
+        Assert.Throws<FileHubException>(() => scope.CreateDirectory("\\abs"));
+    }
+
+    [Fact]
+    public void CreateDirectory_ParentTraversal_Throws()
+    {
+        var scope = Scope(nameof(CreateDirectory_ParentTraversal_Throws));
+        Assert.Throws<FileHubException>(() => scope.CreateDirectory("../escape"));
+        Assert.Throws<FileHubException>(() => scope.CreateDirectory("a/../escape"));
+    }
+
+    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+
+    [Fact]
+    public void CreateDirectory_DirectMode_CreatesOnlyLeafMarker()
+    {
+        // Default for OCI is Direct — only the leaf prefix is PUT.
+        using var client = new InMemoryOciClient();
+        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+
+        hub.Root.CreateDirectory("a/b/c");
+
+        Assert.Equal(1, client.ObjectCount);
+        Assert.Contains("a/b/c/", client.Keys);
+        Assert.DoesNotContain("a/", client.Keys);
+        Assert.DoesNotContain("a/b/", client.Keys);
+    }
+
+    [Fact]
+    public void CreateDirectory_OpenIntermediatesMode_CreatesEachMarker()
+    {
+        using var client = new InMemoryOciClient();
+        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client, "", DirectoryPathMode.OpenIntermediates);
+
+        hub.Root.CreateDirectory("a/b/c");
+
+        Assert.Equal(3, client.ObjectCount);
+        Assert.Contains("a/", client.Keys);
+        Assert.Contains("a/b/", client.Keys);
+        Assert.Contains("a/b/c/", client.Keys);
+    }
+
+    [Fact]
+    public void TryOpenDirectory_DirectMode_ResolvesExistingNestedPath()
+    {
+        using var client = new InMemoryOciClient();
+        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+
+        hub.Root.CreateDirectory("a/b/c");
+
+        Assert.True(hub.Root.TryOpenDirectory("a/b/c", out var reopened));
+        Assert.Equal("c", reopened.Name);
+    }
+
+    [Fact]
+    public void TryOpenDirectory_DirectMode_MissingPath_ReturnsFalse()
+    {
+        using var client = new InMemoryOciClient();
+        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+
+        Assert.False(hub.Root.TryOpenDirectory("x/y/z", out var dir));
+        Assert.Null(dir);
+    }
+
+    [Fact]
+    public void CreateDirectory_DirectMode_ParentTraversal_Throws()
+    {
+        using var client = new InMemoryOciClient();
+        using var hub = OracleObjectStorageFileHub_TestAccess.FromOciClient(client);
+
+        Assert.Throws<FileHubException>(() => hub.Root.CreateDirectory("a/../escape"));
+    }
 }

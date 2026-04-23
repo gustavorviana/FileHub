@@ -36,4 +36,7 @@ internal static class OracleObjectStorageFileHub_TestAccess
 {
     public static OracleObjectStorageFileHub FromOciClient(IOciClient client, string rootPath = "")
         => OracleObjectStorageFileHub.FromOciClient(client, rootPath);
+
+    public static OracleObjectStorageFileHub FromOciClient(IOciClient client, string rootPath, DirectoryPathMode pathMode)
+        => OracleObjectStorageFileHub.FromOciClient(client, rootPath, pathMode);
 }

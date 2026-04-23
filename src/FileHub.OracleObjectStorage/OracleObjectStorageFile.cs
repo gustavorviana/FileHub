@@ -101,6 +101,8 @@ namespace FileHub.OracleObjectStorage
 
         private OciObjectStream OpenStream(bool isWrite)
         {
+            if (Disposed)
+                throw new ObjectDisposedException(nameof(OracleObjectStorageFile));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
 

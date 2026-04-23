@@ -525,4 +525,109 @@ public class LocalDirectoryTests
 
         Assert.True(await root.ExistsAsync());
     }
+
+    // === Nested-path directory creation / lookup ===
+
+    [Fact]
+    public void CreateDirectory_ForwardSlash_CreatesIntermediate()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        var leaf = root.CreateDirectory("a/b/c");
+
+        Assert.Equal("c", leaf.Name);
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "a", "b", "c")));
+        Assert.True(root.TryOpenDirectory("a/b/c", out _));
+    }
+
+    [Fact]
+    public void CreateDirectory_Backslash_CreatesIntermediate()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        root.CreateDirectory("x\\y");
+
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "x", "y")));
+    }
+
+    [Fact]
+    public void CreateDirectory_Nested_ReusesExistingIntermediate()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var firstA = root.CreateDirectory("a");
+        firstA.CreateFile("keep.txt");
+
+        root.CreateDirectory("a/b");
+
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a", "keep.txt")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "a", "b")));
+    }
+
+    [Fact]
+    public void TryOpenDirectory_NestedPath_ReturnsFalseWhenIntermediateMissing()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.False(root.TryOpenDirectory("missing/child", out var dir));
+        Assert.Null(dir);
+    }
+
+    [Fact]
+    public void CreateDirectory_AbsolutePath_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("/abs"));
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("\\abs"));
+    }
+
+    [Fact]
+    public void CreateDirectory_ParentTraversal_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
+    }
+
+    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+
+    [Fact]
+    public void CreateDirectory_DirectMode_CreatesFullTreeInSingleCall()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+
+        var leaf = root.CreateDirectory("a/b/c");
+
+        Assert.Equal("c", leaf.Name);
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "a", "b", "c")));
+        Assert.True(root.TryOpenDirectory("a/b/c", out _));
+    }
+
+    [Fact]
+    public void CreateDirectory_DirectMode_ParentTraversal_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
+    }
+
+    [Fact]
+    public void TryOpenDirectory_DirectMode_Missing_ReturnsFalse()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+
+        Assert.False(root.TryOpenDirectory("x/y/z", out var dir));
+        Assert.Null(dir);
+    }
 }

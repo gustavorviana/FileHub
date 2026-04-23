@@ -20,6 +20,27 @@ namespace FileHub.Local
             _rootPath = rootPath;
         }
 
+        /// <summary>
+        /// Create a <see cref="LocalFile"/> reference pointing at <paramref name="fileName"/>
+        /// inside <paramref name="directory"/>. The file itself is not created on
+        /// disk — call <see cref="FileEntry.SetText(string)"/>, <c>SetBytes</c> or
+        /// <see cref="GetWriteStream"/> to materialise it, or <see cref="Exists"/>
+        /// to test whether it already exists.
+        /// </summary>
+        /// <remarks>
+        /// This is the only way to construct a <see cref="LocalFile"/> outside of
+        /// the driver — it always anchors the file to a <see cref="LocalDirectory"/>
+        /// so the hub's sandbox root travels with the reference. Raw disk paths
+        /// are deliberately not accepted.
+        /// </remarks>
+        public LocalFile(LocalDirectory directory, string fileName) : base(fileName)
+        {
+            if (directory == null) throw new ArgumentNullException(nameof(directory));
+            ValidateName(fileName);
+            Parent = directory;
+            _rootPath = directory.RootPathInternal;
+        }
+
         public override bool Exists() => File.Exists(Path);
 
         public override void Delete()
