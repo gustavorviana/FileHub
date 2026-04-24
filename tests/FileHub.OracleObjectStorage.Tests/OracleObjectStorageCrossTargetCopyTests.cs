@@ -1,4 +1,7 @@
+using System;
+using System.IO;
 using System.Linq;
+using FileHub;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 
 namespace FileHub.OracleObjectStorage.Tests;
@@ -140,5 +143,79 @@ public class OracleObjectStorageCrossTargetCopyTests
         Assert.False(clientA.TryGetBody("m.txt", out _));
         Assert.True(clientB.TryGetBody("m.txt", out var body));
         Assert.Equal("moving", System.Text.Encoding.UTF8.GetString(body));
+        Assert.Equal(0, clientA.RenameInvocationCount);
+    }
+
+    [Fact]
+    public void File_MoveTo_SameBucket_UsesRenameObject()
+    {
+        var client = new InMemoryOciClient(bucket: "same", @namespace: "ns");
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
+
+        var srcDir = hub.Root.CreateDirectory("src");
+        var dstDir = hub.Root.CreateDirectory("dst");
+        srcDir.CreateFile("m.txt").SetText("moving");
+
+        srcDir.OpenFile("m.txt").MoveTo(dstDir, "m.txt");
+
+        Assert.True(client.TryGetBody("dst/m.txt", out var body));
+        Assert.Equal("moving", System.Text.Encoding.UTF8.GetString(body));
+        Assert.False(client.TryGetBody("src/m.txt", out _));
+        Assert.Equal(1, client.RenameInvocationCount);
+        Assert.Equal(0, client.CopyInvocationCount);
+    }
+
+    [Fact]
+    public void File_MoveTo_SameBucket_DifferentPrefix_DestinationKeyIsFullObjectName()
+    {
+        var client = new InMemoryOciClient(bucket: "same", @namespace: "ns");
+        using var hub = OracleObjectStorageFileHub.FromOciClient(client);
+
+        var srcDir = hub.Root.CreateDirectory("a");
+        var dstDir = hub.Root.CreateDirectory("deep").CreateDirectory("nested");
+        srcDir.CreateFile("x.txt").SetText("payload");
+
+        srcDir.OpenFile("x.txt").MoveTo(dstDir, "renamed.txt");
+
+        Assert.Contains("deep/nested/renamed.txt", client.Keys);
+        Assert.DoesNotContain("a/x.txt", client.Keys);
+        Assert.Equal(1, client.RenameInvocationCount);
+    }
+
+    [Fact]
+    public void File_MoveTo_CrossBucket_DeleteFails_ThrowsPartialMoveException()
+    {
+        var (hubA, clientA, hubB, clientB) = SharedWorldHubs();
+
+        hubA.Root.CreateFile("p.txt").SetText("partial");
+        clientA.DeleteFailureInjector = _ => new UnauthorizedAccessException("permission denied");
+
+        var sourceFile = hubA.Root.OpenFile("p.txt");
+
+        var ex = Assert.Throws<PartialMoveException>(() => sourceFile.MoveTo(hubB.Root, "p.txt"));
+
+        Assert.Equal("/p.txt", ex.SourcePath);
+        Assert.Equal("/p.txt", ex.DestinationPath);
+        Assert.IsType<UnauthorizedAccessException>(ex.InnerException);
+        Assert.Contains("remove the source manually", ex.Message);
+
+        // Copy succeeded, delete failed: file exists in both places.
+        Assert.True(clientA.TryGetBody("p.txt", out _));
+        Assert.True(clientB.TryGetBody("p.txt", out _));
+    }
+
+    [Fact]
+    public void File_MoveTo_CrossBucket_DeleteReturnsNotFound_SucceedsSilently()
+    {
+        var (hubA, clientA, hubB, clientB) = SharedWorldHubs();
+
+        hubA.Root.CreateFile("g.txt").SetText("ghost");
+        clientA.DeleteFailureInjector = name => new FileNotFoundException($"Object \"{name}\" not found.");
+
+        // Should not throw — FileNotFound on delete means source is already gone.
+        hubA.Root.OpenFile("g.txt").MoveTo(hubB.Root, "g.txt");
+
+        Assert.True(clientB.TryGetBody("g.txt", out var body));
+        Assert.Equal("ghost", System.Text.Encoding.UTF8.GetString(body));
     }
 }

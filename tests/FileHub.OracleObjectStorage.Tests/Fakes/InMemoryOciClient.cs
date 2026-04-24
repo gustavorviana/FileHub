@@ -35,6 +35,7 @@ internal sealed class InMemoryOciClient : IOciClient
     private readonly InMemoryBucketStore _store;
     private bool _disposed;
     private int _copyInvocationCount;
+    private int _renameInvocationCount;
 
     public string Namespace { get; }
     public string Bucket { get; }
@@ -44,6 +45,17 @@ internal sealed class InMemoryOciClient : IOciClient
 
     /// <summary>Number of times <see cref="CopyObjectAsync"/> was invoked on this client instance.</summary>
     public int CopyInvocationCount => _copyInvocationCount;
+
+    /// <summary>Number of times <see cref="RenameObjectAsync"/> was invoked on this client instance.</summary>
+    public int RenameInvocationCount => _renameInvocationCount;
+
+    /// <summary>
+    /// Optional hook to inject a failure into <see cref="DeleteObjectAsync"/>.
+    /// Returns an <see cref="Exception"/> to throw instead of deleting, or
+    /// <c>null</c> to let the delete proceed normally. Used by tests that
+    /// need to simulate delete failures after a successful copy.
+    /// </summary>
+    public Func<string, Exception?>? DeleteFailureInjector { get; set; }
 
     public InMemoryOciClient(string bucket = "test-bucket", string @namespace = "test-ns", string region = "us-test-1")
     {
@@ -173,6 +185,9 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        var injected = DeleteFailureInjector?.Invoke(objectName);
+        if (injected is not null)
+            throw injected;
         if (!_store.Objects.TryRemove(objectName, out _))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
         return Task.CompletedTask;
@@ -182,6 +197,7 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _renameInvocationCount);
         if (!_store.Objects.TryRemove(sourceName, out var obj))
             throw new FileNotFoundException($"Object \"{sourceName}\" not found.");
 

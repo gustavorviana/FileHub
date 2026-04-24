@@ -189,8 +189,36 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            if (directory is OracleObjectStorageDirectory ociDir
+                && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client)
+                && string.Equals(ociDir.SessionInternal.Client.Namespace, SessionInternal.Client.Namespace, StringComparison.Ordinal)
+                && string.Equals(ociDir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal))
+            {
+                OciPathUtil.ValidateName(name);
+                var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
+                await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
+                return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
+            }
+
             var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-            await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+                // Source gone already — move is effectively complete.
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"File was copied to \"{newFile.Path}\" but the original at \"{Path}\" could not be deleted. " +
+                    $"The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newFile.Path,
+                    innerException: ex);
+            }
             return newFile;
         }
 
