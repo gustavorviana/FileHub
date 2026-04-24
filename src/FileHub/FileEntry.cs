@@ -63,15 +63,27 @@ namespace FileHub
         }
 
         public void CopyToStream(Stream destination)
+            => CopyToStream(destination, progress: null);
+
+        public void CopyToStream(Stream destination, IProgress<TransferStatus> progress)
         {
             if (destination == null) throw new ArgumentNullException(nameof(destination));
             if (!destination.CanWrite) throw new NotSupportedException("The destination stream does not support writing.");
 
             byte[] buffer = new byte[81920];
+            long total = progress != null ? Length : 0;
+            long transferred = 0;
             int bytesRead;
             using (var source = GetReadStream())
                 while ((bytesRead = source.Read(buffer, 0, buffer.Length)) > 0)
+                {
                     destination.Write(buffer, 0, bytesRead);
+                    if (progress != null)
+                    {
+                        transferred += bytesRead;
+                        progress.Report(new TransferStatus(transferred, total));
+                    }
+                }
         }
 
         public virtual FileEntry CopyTo(string newName)
@@ -147,14 +159,37 @@ namespace FileHub
                 await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual async Task CopyToStreamAsync(Stream destination, CancellationToken cancellationToken = default)
+        public virtual Task CopyToStreamAsync(Stream destination, CancellationToken cancellationToken = default)
+            => CopyToStreamAsync(destination, progress: null, cancellationToken);
+
+        public virtual async Task CopyToStreamAsync(
+            Stream destination,
+            IProgress<TransferStatus> progress,
+            CancellationToken cancellationToken = default)
         {
             if (destination == null) throw new ArgumentNullException(nameof(destination));
             if (!destination.CanWrite) throw new NotSupportedException("The destination stream does not support writing.");
 
             var source = await GetReadStreamAsync(cancellationToken).ConfigureAwait(false);
             using (source)
-                await source.CopyToAsync(destination, 81920, cancellationToken).ConfigureAwait(false);
+            {
+                if (progress == null)
+                {
+                    await source.CopyToAsync(destination, 81920, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                var total = Length;
+                long transferred = 0;
+                var buffer = new byte[81920];
+                int read;
+                while ((read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    await destination.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
+                    transferred += read;
+                    progress.Report(new TransferStatus(transferred, total));
+                }
+            }
         }
 
         public virtual Task DeleteAsync(CancellationToken cancellationToken = default)
