@@ -35,6 +35,17 @@ jobs:
         env:
           # FTP integration tests rely on Docker; skip when not available.
           DOTNET_ENVIRONMENT: CI
+          # AWS integration tests run only when these are present (the
+          # [RequiresAws*] attributes inspect them and skip otherwise).
+          # They live as repository-level secrets; PRs from forks won't
+          # see them, which is intentional — secrets aren't exposed to
+          # untrusted code.
+          AWS_ACCESS_KEY_ID:    ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION:           ${{ secrets.AWS_REGION }}
+          FILEHUB_S3_BUCKET:    ${{ secrets.FILEHUB_S3_BUCKET }}
+          FILEHUB_S3_BUCKET_B:  ${{ secrets.FILEHUB_S3_BUCKET_B }}
+          AWS_REGION_B:         ${{ secrets.AWS_REGION_B }}
 
       - name: Upload test results
         if: always()
