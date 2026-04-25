@@ -21,11 +21,24 @@ public class FileSystemEntryTests
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
     }
 
+    public static IEnumerable<object[]> InvalidNameChars()
+    {
+        // ValidateName delegates to System.IO.Path.GetInvalidFileNameChars(),
+        // whose set is OS-dependent: Windows includes :, |, ?, *, etc.;
+        // Linux/macOS only NUL and "/". We assert the BCL contract per host
+        // rather than enforcing our own portable set.
+        var invalid = System.IO.Path.GetInvalidFileNameChars();
+        foreach (var c in invalid)
+        {
+            // Skip "/" — the driver treats it as a path separator and routes
+            // to nested-directory creation rather than rejecting the name.
+            if (c == '/' || c == '\\') continue;
+            yield return new object[] { $"a{c}b.txt" };
+        }
+    }
+
     [Theory]
-    [InlineData("a:b.txt")]
-    [InlineData("a|b.txt")]
-    [InlineData("a?b.txt")]
-    [InlineData("a*b.txt")]
+    [MemberData(nameof(InvalidNameChars))]
     public void ValidateName_InvalidCharacters_Throws(string name)
     {
         var root = NewRoot();
