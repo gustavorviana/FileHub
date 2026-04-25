@@ -92,12 +92,34 @@ namespace FileHub.Ftp
             if (candidate == null)
                 throw new FileHubException($"Access denied: null path is outside the root \"{rootPath}\".");
 
-            var normalizedCandidate = candidate.TrimEnd('/');
+            // Collapse runs of `/` so a path like "/root//../etc" cannot pass
+            // the StartsWith check by virtue of the duplicated separator
+            // being treated as an opaque byte. ValidateName already rejects
+            // ".." inside individual segments at the entry points, but
+            // EnsureWithinRoot is the last line of defence and shouldn't
+            // depend on what callers did upstream.
+            var collapsed = CollapseSlashes(candidate);
+            var normalizedCandidate = collapsed.TrimEnd('/');
             if (string.Equals(normalizedCandidate, rootPath, StringComparison.Ordinal)) return;
 
             var rootWithSep = rootPath.EndsWith("/", StringComparison.Ordinal) ? rootPath : rootPath + "/";
             if (!normalizedCandidate.StartsWith(rootWithSep, StringComparison.Ordinal))
                 throw new FileHubException($"Access denied: \"{candidate}\" is outside the root \"{rootPath}\".");
+        }
+
+        private static string CollapseSlashes(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path.IndexOf("//", StringComparison.Ordinal) < 0)
+                return path;
+            var sb = new System.Text.StringBuilder(path.Length);
+            char prev = '\0';
+            foreach (var c in path)
+            {
+                if (c == '/' && prev == '/') continue;
+                sb.Append(c);
+                prev = c;
+            }
+            return sb.ToString();
         }
 
         public static string ResolveSafeChildPath(string rootPath, string currentPath, string relativeName)

@@ -22,6 +22,15 @@ namespace FileHub.Ftp.Internal
         /// </summary>
         object ConnectionScope { get; }
 
+        /// <summary>
+        /// Reflects the current state of the underlying control channel. The
+        /// session uses this to detect FTP idle-timeout drops (servers
+        /// commonly close the channel after 5–15 minutes of inactivity) and
+        /// trigger a fresh <see cref="ConnectAsync"/> instead of failing the
+        /// next operation with a stale-channel error.
+        /// </summary>
+        bool IsConnected { get; }
+
         Task ConnectAsync(CancellationToken cancellationToken = default);
 
         Task<FtpItemInfo> StatAsync(string path, CancellationToken cancellationToken = default);

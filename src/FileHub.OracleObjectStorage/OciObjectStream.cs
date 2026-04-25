@@ -162,9 +162,12 @@ namespace FileHub.OracleObjectStorage
                 }
                 finally
                 {
-                    _writeBuffer?.Dispose();
+                    // Mark disposed and notify the parent file BEFORE touching
+                    // _writeBuffer — if the buffer's Dispose ever throws, the
+                    // parent's _lastOpenStream still gets cleared.
                     _disposed = true;
                     Disposed?.Invoke(this, EventArgs.Empty);
+                    try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
                 }
             }
             else
@@ -194,9 +197,9 @@ namespace FileHub.OracleObjectStorage
             }
             finally
             {
-                _writeBuffer?.Dispose();
                 _disposed = true;
                 Disposed?.Invoke(this, EventArgs.Empty);
+                try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
             }
 
             await base.DisposeAsync().ConfigureAwait(false);

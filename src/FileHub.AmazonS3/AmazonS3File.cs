@@ -282,6 +282,12 @@ namespace FileHub.AmazonS3
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
             {
                 S3PathUtil.ValidateName(name);
+                // Ensure we know the source size — without this, a stub created
+                // via OpenFile(name, createIfNotExists: true) that was never
+                // refreshed would propagate _length = -1 into the new file,
+                // making consumers see a "missing" object.
+                if (!_isLoaded)
+                    await RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var destinationKey = S3PathUtil.CombineObjectKey(s3Dir.PrefixInternal, name);
                 var sourceClient = SessionInternal.Client;
                 var destClient = s3Dir.SessionInternal.Client;

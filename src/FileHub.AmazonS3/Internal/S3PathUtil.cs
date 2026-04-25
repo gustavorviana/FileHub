@@ -57,7 +57,11 @@ namespace FileHub.AmazonS3.Internal
                 if (k.Length == 0 || k == "*" || k == "*.*")
                     return new Regex("^.*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-                var escaped = Regex.Escape(k).Replace("\\*", ".*");
+                // Glob → regex: `*` matches any sequence, `?` matches a single
+                // character. FtpPathUtil follows the same contract; the three
+                // drivers must agree so a pattern like "report_?.csv" yields
+                // the same result everywhere.
+                var escaped = Regex.Escape(k).Replace("\\*", ".*").Replace("\\?", ".");
                 return new Regex("^" + escaped + "$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
             });
         }

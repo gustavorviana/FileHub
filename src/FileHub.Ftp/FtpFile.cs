@@ -186,7 +186,23 @@ namespace FileHub.Ftp
             }
 
             var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-            await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+                // Source already gone — move is effectively complete.
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"File was copied to \"{newFile.Path}\" but the original at \"{Path}\" could not be deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newFile.Path,
+                    innerException: ex);
+            }
             return newFile;
         }
 

@@ -142,11 +142,16 @@ namespace FileHub.Ftp
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, head);
-            var stream = await _session.Client.OpenWriteAsync(fullPath, cancellationToken).ConfigureAwait(false);
 #if NET8_0_OR_GREATER
-            await stream.DisposeAsync().ConfigureAwait(false);
+            await using (var stream = await _session.Client.OpenWriteAsync(fullPath, cancellationToken).ConfigureAwait(false))
+            {
+                // Empty file — the using block disposes the stream and closes
+                // the data channel even if the close itself throws.
+            }
 #else
-            stream.Dispose();
+            using (var stream = await _session.Client.OpenWriteAsync(fullPath, cancellationToken).ConfigureAwait(false))
+            {
+            }
 #endif
             return new FtpFile(this, head, length: 0, modifiedUtc: DateTime.UtcNow, createdUtc: DateTime.UtcNow);
         }
@@ -221,7 +226,7 @@ namespace FileHub.Ftp
                 .OrderBy(i => i.Name, StringComparer.Ordinal);
 
             if (offset.IsNamed)
-                filtered = filtered.Where(i => string.CompareOrdinal(i.Name, offset.Name) >= 0);
+                filtered = filtered.Where(i => string.CompareOrdinal(i.Name, offset.Name) > 0);
 
             int skipped = 0;
             int yielded = 0;
@@ -509,7 +514,19 @@ namespace FileHub.Ftp
             }
 
             var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-            await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"Directory was copied to \"{newDir.Path}\" but the original at \"{Path}\" could not be fully deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newDir.Path,
+                    innerException: ex);
+            }
             return newDir;
         }
 

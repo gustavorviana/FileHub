@@ -43,7 +43,7 @@ namespace FileHub.Ftp
             string password = "",
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => ConnectAsync(host, port, user, password, rootPath, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => ConnectAsync(host, port, user, password, rootPath, pathMode, ct));
 
         public static async Task<FtpFileHub> ConnectAsync(
             string host,
@@ -70,7 +70,7 @@ namespace FileHub.Ftp
             NetworkCredential credentials,
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => FromCredentialsAsync(host, port, credentials, rootPath, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromCredentialsAsync(host, port, credentials, rootPath, pathMode, ct));
 
         public static Task<FtpFileHub> FromCredentialsAsync(
             string host,
@@ -97,7 +97,7 @@ namespace FileHub.Ftp
             bool ownsClient = false,
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => FromClientAsync(client, ownsClient, rootPath, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromClientAsync(client, ownsClient, rootPath, pathMode, ct));
 
         public static Task<FtpFileHub> FromClientAsync(
             AsyncFtpClient client,
@@ -117,7 +117,7 @@ namespace FileHub.Ftp
             FileHub.Ftp.Internal.IFtpClient client,
             string rootPath = "/",
             DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => FromFtpClientAsync(client, rootPath, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromFtpClientAsync(client, rootPath, pathMode, ct));
 
         internal static Task<FtpFileHub> FromFtpClientAsync(
             FileHub.Ftp.Internal.IFtpClient client,

@@ -209,6 +209,10 @@ namespace FileHub.OracleObjectStorage
                 && string.Equals(ociDir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal))
             {
                 OciPathUtil.ValidateName(name);
+                // Same rationale as CopyToAsync — load the source so the new
+                // file doesn't carry _length = -1.
+                if (!_isLoaded)
+                    await RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
                 await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
@@ -244,6 +248,11 @@ namespace FileHub.OracleObjectStorage
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
                 OciPathUtil.ValidateName(name);
+                // Ensure we know the source size — propagating _length = -1
+                // from an unrefreshed stub would make the new file look
+                // missing to any consumer that reads Length.
+                if (!_isLoaded)
+                    await RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
                 var destClient = ociDir.SessionInternal.Client;
                 await SessionInternal.Client.CopyObjectAsync(

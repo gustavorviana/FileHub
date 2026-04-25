@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace FileHub.OracleObjectStorage.Internal
+namespace FileHub
 {
     /// <summary>
     /// Runs an async delegate synchronously without risk of deadlock on any

@@ -161,9 +161,14 @@ namespace FileHub.AmazonS3
                 }
                 finally
                 {
-                    _writeBuffer?.Dispose();
+                    // Mark disposed and notify the parent file BEFORE touching
+                    // _writeBuffer. If the buffer's Dispose ever throws, we
+                    // still want _lastOpenStream on the parent to be cleared
+                    // — otherwise the file is permanently locked from
+                    // opening another stream.
                     _disposed = true;
                     Disposed?.Invoke(this, EventArgs.Empty);
+                    try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
                 }
             }
             else
@@ -194,9 +199,9 @@ namespace FileHub.AmazonS3
             }
             finally
             {
-                _writeBuffer?.Dispose();
                 _disposed = true;
                 Disposed?.Invoke(this, EventArgs.Empty);
+                try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
             }
 
             await base.DisposeAsync().ConfigureAwait(false);

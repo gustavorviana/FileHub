@@ -611,7 +611,19 @@ namespace FileHub.OracleObjectStorage
         {
             ThrowIfReadOnly();
             var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-            await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"Directory was copied to \"{newDir.Path}\" but the original at \"{Path}\" could not be fully deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newDir.Path,
+                    innerException: ex);
+            }
             return newDir;
         }
 
@@ -623,8 +635,7 @@ namespace FileHub.OracleObjectStorage
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir._session.Client, _session.Client))
             {
-                OciPathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
-                var destinationPrefix = OciPathUtil.CombinePrefix(ociDir._prefix, name);
+                var destinationPrefix = OciPathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
                 await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }
@@ -656,12 +667,27 @@ namespace FileHub.OracleObjectStorage
 
         private async Task DeleteAllUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
         {
+            // Collect per-object failures instead of aborting on the first
+            // one. A single 403 from a granular IAM rule, or a transient
+            // throttle, would otherwise leave the rest of the directory
+            // intact and force the caller to retry from a half-deleted state.
+            List<Exception> failures = null;
             string start = null;
             do
             {
                 var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: null, start: start, cancellationToken).ConfigureAwait(false);
                 foreach (var obj in page.Objects)
-                    await _session.Client.DeleteObjectAsync(obj.Name, cancellationToken).ConfigureAwait(false);
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await _session.Client.DeleteObjectAsync(obj.Name, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (!(ex is OperationCanceledException))
+                    {
+                        (failures ??= new List<Exception>()).Add(ex);
+                    }
+                }
                 start = page.NextStartWith;
             } while (!string.IsNullOrEmpty(start));
 
@@ -675,7 +701,16 @@ namespace FileHub.OracleObjectStorage
                 {
                     // no marker to delete
                 }
+                catch (Exception ex) when (!(ex is OperationCanceledException))
+                {
+                    (failures ??= new List<Exception>()).Add(ex);
+                }
             }
+
+            if (failures != null)
+                throw new AggregateException(
+                    $"One or more objects under \"{prefix}\" could not be deleted ({failures.Count} failure(s)). The directory is partially deleted.",
+                    failures);
         }
 
         private async Task CopyAllObjectsAsync(string sourcePrefix, IOciClient destinationClient, string destinationPrefix, CancellationToken cancellationToken)

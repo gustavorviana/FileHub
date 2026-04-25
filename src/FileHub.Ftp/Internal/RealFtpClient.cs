@@ -27,6 +27,8 @@ namespace FileHub.Ftp.Internal
 
         public object ConnectionScope => _client;
 
+        public bool IsConnected => !_disposed && _client.IsConnected;
+
         public RealFtpClient(AsyncFtpClient client, bool ownsClient)
         {
             _client = client ?? throw new ArgumentNullException(nameof(client));

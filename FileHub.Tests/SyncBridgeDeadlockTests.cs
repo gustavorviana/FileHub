@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
-using FileHub.AmazonS3.Internal;
-using FileHub.AmazonS3.Tests.Fakes;
 
-namespace FileHub.AmazonS3.Tests;
+namespace FileHub.Tests;
 
 /// <summary>
 /// Proves that <see cref="SyncBridge"/> stops sync-over-async code from
@@ -12,7 +10,9 @@ namespace FileHub.AmazonS3.Tests;
 /// <c>ConfigureAwait(false)</c> so the inner Task would try to resume on the
 /// captured context — if <see cref="SyncBridge"/> ever stops pushing the work
 /// through <see cref="Task.Run(Func{Task})"/>, these tests deadlock and the
-/// 10-second watchdog fails them.
+/// 10-second watchdog fails them. The bridge lives in the FileHub core
+/// assembly and is shared by every driver, so its contract is exercised here
+/// rather than in a driver-specific test project.
 /// </summary>
 public class SyncBridgeDeadlockTests
 {
@@ -76,26 +76,6 @@ public class SyncBridgeDeadlockTests
         Assert.Equal("boom", error!.Message);
     }
 
-    [Fact]
-    public void AmazonS3FileSyncApi_UnderSingleThreadContext_DoesNotDeadlock()
-    {
-        using var ctx = new SingleThreadSyncContext();
-
-        var error = ctx.Run(() =>
-        {
-            var client = new InMemoryS3Client();
-            using var hub = AmazonS3FileHub.FromS3Client(client);
-
-            var file = hub.Root.CreateFile("hello.txt");
-            file.SetText("world");
-
-            var roundTrip = hub.Root.OpenFile("hello.txt").ReadAllText();
-            Assert.Equal("world", roundTrip);
-        });
-
-        Assert.Null(error);
-    }
-
     /// <summary>
     /// Serialises posted continuations on one dedicated thread — the minimal
     /// shape of a WinForms / WPF UI thread. <see cref="Run(Action)"/> marshals
@@ -104,7 +84,7 @@ public class SyncBridgeDeadlockTests
     /// doesn't finish within <see cref="DeadlockTimeout"/>, which is how a
     /// real deadlock would manifest.
     /// </summary>
-    private sealed class SingleThreadSyncContext : SynchronizationContext, IDisposable
+    internal sealed class SingleThreadSyncContext : SynchronizationContext, IDisposable
     {
         private readonly BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
         private readonly Thread _worker;

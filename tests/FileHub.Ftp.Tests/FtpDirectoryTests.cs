@@ -127,17 +127,20 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void GetFiles_NamedOffset_StartsAtOrAfterName()
+    public void GetFiles_NamedOffset_StartsStrictlyAfterName()
     {
         foreach (var n in new[] { "a", "b", "c", "d" })
             Root.CreateFile(n);
 
+        // Named offsets are exclusive — same contract as S3 StartAfter and
+        // OCI's `start` parameter. Paginating with the last item of page N
+        // as the cursor for page N+1 must not yield a duplicate.
         var names = Root
             .GetFiles("*", offset: FileListOffset.FromName("c"))
             .Select(f => f.Name)
             .ToArray();
 
-        Assert.Equal(new[] { "c", "d" }, names);
+        Assert.Equal(new[] { "d" }, names);
     }
 
     [Fact]

@@ -50,12 +50,17 @@ namespace FileHub.Ftp.Internal
         public async Task EnsureConnectedAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            if (Volatile.Read(ref _connected) == 1) return;
+            // Cheap fast-path: trust _connected only as long as the underlying
+            // control channel is still up. FTP servers commonly drop idle
+            // connections after a few minutes — without this check the hub
+            // would stay marked "connected" and every operation would fail
+            // with a stale-channel error until the user recreated the hub.
+            if (Volatile.Read(ref _connected) == 1 && Client.IsConnected) return;
 
             await _connectGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (Volatile.Read(ref _connected) == 1) return;
+                if (Volatile.Read(ref _connected) == 1 && Client.IsConnected) return;
                 ThrowIfDisposed();
                 await Client.ConnectAsync(cancellationToken).ConfigureAwait(false);
                 Volatile.Write(ref _connected, 1);
