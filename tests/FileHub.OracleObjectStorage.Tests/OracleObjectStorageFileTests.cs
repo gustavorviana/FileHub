@@ -74,7 +74,7 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
 
         file.Rename("new.txt");
 
-        Assert.False(scope.ItemExists("old.txt"));
+        Assert.False(scope.FileExists("old.txt"));
         Assert.Equal("data", scope.OpenFile("new.txt").ReadAllText());
     }
 
@@ -89,7 +89,7 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
 
         file.MoveTo(dstDir, "m.txt");
 
-        Assert.False(srcDir.ItemExists("m.txt"));
+        Assert.False(srcDir.FileExists("m.txt"));
         Assert.Equal("moving", dstDir.OpenFile("m.txt").ReadAllText());
     }
 
@@ -116,7 +116,7 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
         file.SetText("x");
 
         file.Delete();
-        Assert.False(scope.ItemExists("to-remove.txt"));
+        Assert.False(scope.FileExists("to-remove.txt"));
     }
 
     [Fact]

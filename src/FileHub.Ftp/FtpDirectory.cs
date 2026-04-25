@@ -132,23 +132,44 @@ namespace FileHub.Ftp
         public override async Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            FtpPathUtil.ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
+                return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
+            }
+            FtpPathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
-            var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, name);
+            var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, head);
             var stream = await _session.Client.OpenWriteAsync(fullPath, cancellationToken).ConfigureAwait(false);
 #if NET8_0_OR_GREATER
             await stream.DisposeAsync().ConfigureAwait(false);
 #else
             stream.Dispose();
 #endif
-            return new FtpFile(this, name, length: 0, modifiedUtc: DateTime.UtcNow, createdUtc: DateTime.UtcNow);
+            return new FtpFile(this, head, length: 0, modifiedUtc: DateTime.UtcNow, createdUtc: DateTime.UtcNow);
         }
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {
-            file = TryOpenFileCoreAsync(name).GetAwaiter().GetResult();
-            return file != null;
+            var result = TryOpenFileAsync(name).GetAwaiter().GetResult();
+            file = result.File;
+            return result.Exists;
+        }
+
+        public override async Task<(FileEntry File, bool Exists)> TryOpenFileAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dirResult = await TryOpenDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
+                if (!dirResult.Exists)
+                    return (null, false);
+                return await dirResult.Directory.TryOpenFileAsync(rest, cancellationToken).ConfigureAwait(false);
+            }
+            var file = await TryOpenFileCoreAsync(head, cancellationToken).ConfigureAwait(false);
+            return (file, file != null);
         }
 
         private async Task<FileEntry> TryOpenFileCoreAsync(string name, CancellationToken cancellationToken = default)
@@ -261,6 +282,12 @@ namespace FileHub.Ftp
         {
             directory = TryOpenDirectoryCoreAsync(name).GetAwaiter().GetResult();
             return directory != null;
+        }
+
+        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var dir = await TryOpenDirectoryCoreAsync(name, cancellationToken).ConfigureAwait(false);
+            return (dir, dir != null);
         }
 
         private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
@@ -389,24 +416,25 @@ namespace FileHub.Ftp
 
         // === Common ===
 
-        public override bool ItemExists(string name) => ItemExistsAsync(name).GetAwaiter().GetResult();
+        public override bool FileExists(string name) => FileExistsAsync(name).GetAwaiter().GetResult();
 
-        public override async Task<bool> ItemExistsAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try
-            {
-                FtpPathUtil.ValidateName(name);
-            }
-            catch (ArgumentException)
-            {
-                return false;
-            }
+            try { FtpPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             var fullPath = FtpPathUtil.Combine(_path, name);
+            return await _session.Client.FileExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
+        }
 
-            if (await _session.Client.FileExistsAsync(fullPath, cancellationToken).ConfigureAwait(false))
-                return true;
+        public override bool DirectoryExists(string name) => DirectoryExistsAsync(name).GetAwaiter().GetResult();
+
+        public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            try { FtpPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
+
+            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            var fullPath = FtpPathUtil.Combine(_path, name);
             return await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 

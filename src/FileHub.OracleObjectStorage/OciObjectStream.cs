@@ -53,7 +53,7 @@ namespace FileHub.OracleObjectStorage
             }
         }
 
-        public override void Flush() => FlushAsync(CancellationToken.None).GetAwaiter().GetResult();
+        public override void Flush() => SyncBridge.Run(ct => FlushAsync(ct));
 
         public override async Task FlushAsync(CancellationToken cancellationToken)
         {
@@ -63,7 +63,7 @@ namespace FileHub.OracleObjectStorage
         }
 
         public override int Read(byte[] buffer, int offset, int count)
-            => ReadAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => ReadAsync(buffer, offset, count, ct));
 
         public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
@@ -169,7 +169,11 @@ namespace FileHub.OracleObjectStorage
             }
             else
             {
+                // Finalizer path: no async I/O possible, but notify the parent
+                // file so its "a stream is already open" latch clears. Unflushed
+                // writes are lost — callers must Dispose explicitly to flush.
                 _disposed = true;
+                Disposed?.Invoke(this, EventArgs.Empty);
             }
 
             base.Dispose(disposing);
@@ -204,15 +208,23 @@ namespace FileHub.OracleObjectStorage
             _writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
             var timestamp = DateTime.UtcNow.ToString("O");
+
+            // Build the metadata payload without mutating the file's in-memory
+            // tags — if PutObjectAsync fails, the parent file must stay in its
+            // pre-upload state. OnWriteCommitted (below) is what promotes the
+            // timestamp into TagsInternal after the object is durable.
             _file.EnsureTags();
-            _file.TagsInternal[OracleObjectStorageFile.ChangedAtTag] = timestamp;
+            var meta = new System.Collections.Generic.Dictionary<string, string>(_file.TagsInternal)
+            {
+                [OracleObjectStorageFile.ChangedAtTag] = timestamp
+            };
 
             await client.PutObjectAsync(
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
                 contentType: null,
-                _file.TagsInternal,
+                meta,
                 cancellationToken).ConfigureAwait(false);
 
             _file.OnWriteCommitted(_writeBuffer.Length, timestamp);

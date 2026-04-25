@@ -39,16 +39,32 @@ namespace FileHub.Memory
         public override FileEntry CreateFile(string name)
         {
             ThrowIfReadOnly();
-            ValidateName(name);
-            var data = new MemoryFileData(name);
-            _files[name] = data;
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
+                return dir.CreateFile(rest);
+            }
+            ValidateName(head);
+            var data = new MemoryFileData(head);
+            _files[head] = data;
             return new MemoryFile(this, data);
         }
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir))
+                {
+                    file = null;
+                    return false;
+                }
+                return dir.TryOpenFile(rest, out file);
+            }
             file = null;
-            if (!_files.TryGetValue(name, out var data))
+            if (!_files.TryGetValue(head, out var data))
                 return false;
 
             file = new MemoryFile(this, data);
@@ -118,10 +134,8 @@ namespace FileHub.Memory
 
         // === Common operations ===
 
-        public override bool ItemExists(string name)
-        {
-            return _files.ContainsKey(name) || _directories.ContainsKey(name);
-        }
+        public override bool FileExists(string name) => _files.ContainsKey(name);
+        public override bool DirectoryExists(string name) => _directories.ContainsKey(name);
 
         public override bool Exists() => !Disposed;
 

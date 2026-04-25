@@ -75,6 +75,16 @@ namespace FileHub.OracleObjectStorage.Internal
                 throw new ArgumentException($"Name \"{name}\" contains control characters.", nameof(name));
         }
 
+        /// <summary>
+        /// Verifies that <paramref name="candidate"/> sits inside
+        /// <paramref name="rootPrefix"/>. When <paramref name="rootPrefix"/>
+        /// is null/empty the hub is intentionally unconfined and has full
+        /// access to every object in the bucket — no check is performed.
+        /// Callers that want confinement MUST pass a non-empty <c>rootPath</c>
+        /// to the hub factory; an empty string silently disables the
+        /// safeguard, so a <c>null</c>/empty environment variable piped in
+        /// will grant bucket-wide access.
+        /// </summary>
         public static void EnsureWithinRootPrefix(string rootPrefix, string candidate)
         {
             if (string.IsNullOrEmpty(rootPrefix))

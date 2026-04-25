@@ -43,7 +43,7 @@ namespace FileHub.OracleObjectStorage
             string configFilePath = null,
             string profile = "DEFAULT",
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => FromConfigFileAsync(rootPath, bucketName, configFilePath, profile, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromConfigFileAsync(rootPath, bucketName, configFilePath, profile, pathMode, ct));
 
         public static async Task<OracleObjectStorageFileHub> FromConfigFileAsync(
             string rootPath,
@@ -73,7 +73,7 @@ namespace FileHub.OracleObjectStorage
             IAuthenticationDetailsProvider provider,
             string regionId,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => FromProviderAsync(rootPath, bucketName, provider, regionId, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromProviderAsync(rootPath, bucketName, provider, regionId, pathMode, ct));
 
         public static async Task<OracleObjectStorageFileHub> FromProviderAsync(
             string rootPath,
@@ -136,7 +136,7 @@ namespace FileHub.OracleObjectStorage
             string regionId,
             string @namespace,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => FromClientAsync(bucketName, rootPath, client, regionId, @namespace, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromClientAsync(bucketName, rootPath, client, regionId, @namespace, pathMode, ct));
 
         public static Task<OracleObjectStorageFileHub> FromClientAsync(
             string bucketName,
@@ -170,7 +170,7 @@ namespace FileHub.OracleObjectStorage
             IOciClient client,
             string rootPath = "",
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => FromOciClientAsync(client, rootPath, pathMode).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => FromOciClientAsync(client, rootPath, pathMode, ct));
 
         internal static Task<OracleObjectStorageFileHub> FromOciClientAsync(
             IOciClient client,

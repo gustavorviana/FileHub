@@ -6,12 +6,14 @@
     <Project Path="src/FileHub/FileHub.csproj" />
     <Project Path="src/FileHub.OracleObjectStorage/FileHub.OracleObjectStorage.csproj" />
     <Project Path="src/FileHub.Ftp/FileHub.Ftp.csproj" />
+    <Project Path="src/FileHub.AmazonS3/FileHub.AmazonS3.csproj" />
     <Project Path="src/FileHub.DependencyInjection/FileHub.DependencyInjection.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="FileHub.Tests/FileHub.Tests.csproj" Id="09e0d2a3-b075-4003-b67c-529ce46378ca" />
     <Project Path="tests/FileHub.OracleObjectStorage.Tests/FileHub.OracleObjectStorage.Tests.csproj" Id="07baab13-fd8e-41a0-8b52-0020bb9fdc66" />
     <Project Path="tests/FileHub.Ftp.Tests/FileHub.Ftp.Tests.csproj" />
+    <Project Path="tests/FileHub.AmazonS3.Tests/FileHub.AmazonS3.Tests.csproj" />
     <Project Path="tests/FileHub.DependencyInjection.Tests/FileHub.DependencyInjection.Tests.csproj" />
   </Folder>
 </Solution>

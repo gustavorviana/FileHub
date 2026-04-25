@@ -22,8 +22,6 @@ public class FileSystemEntryTests
     }
 
     [Theory]
-    [InlineData("a/b.txt")]
-    [InlineData("a\\b.txt")]
     [InlineData("a:b.txt")]
     [InlineData("a|b.txt")]
     [InlineData("a?b.txt")]
@@ -32,6 +30,16 @@ public class FileSystemEntryTests
     {
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(name));
+    }
+
+    [Theory]
+    [InlineData("a/b.txt")]
+    [InlineData("a\\b.txt")]
+    public void CreateFile_NestedPath_CreatesIntermediateDirectories(string name)
+    {
+        var root = NewRoot();
+        var file = root.CreateFile(name);
+        Assert.Equal("b.txt", file.Name);
     }
 
     [Fact]

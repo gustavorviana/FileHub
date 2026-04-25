@@ -29,7 +29,8 @@ namespace FileHub
         public abstract bool TryOpenDirectory(string name, out FileDirectory directory);
         public abstract IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*");
 
-        public abstract bool ItemExists(string name);
+        public abstract bool FileExists(string name);
+        public abstract bool DirectoryExists(string name);
         public abstract void Delete();
         public abstract void Delete(string name);
         public abstract FileDirectory Rename(string newName);
@@ -45,12 +46,12 @@ namespace FileHub
             return CreateFile(name);
         }
 
-        public FileEntry OpenFile(string name)
+        public virtual FileEntry OpenFile(string name)
         {
             return OpenFile(name, createIfNotExists: false);
         }
 
-        public FileEntry OpenFile(string name, bool createIfNotExists)
+        public virtual FileEntry OpenFile(string name, bool createIfNotExists)
         {
             var (head, rest) = SplitPath(name);
 
@@ -86,7 +87,7 @@ namespace FileHub
             return directory.OpenDirectory(rest, createIfNotExists);
         }
 
-        private FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
+        protected virtual FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
         {
             if (TryOpenDirectory(segment, out var directory))
                 return directory;
@@ -97,7 +98,7 @@ namespace FileHub
             throw new DirectoryNotFoundException($"The directory \"{System.IO.Path.Combine(Path, segment)}\" was not found.");
         }
 
-        private static (string Head, string Remainder) SplitPath(string path)
+        protected static (string Head, string Remainder) SplitPath(string path)
         {
             if (string.IsNullOrEmpty(path))
                 throw new ArgumentException("Path cannot be null or empty.", nameof(path));
@@ -130,7 +131,7 @@ namespace FileHub
         public void DeleteIfExists(string name)
         {
             ThrowIfReadOnly();
-            if (ItemExists(name))
+            if (FileExists(name) || DirectoryExists(name))
                 Delete(name);
         }
 
@@ -160,6 +161,20 @@ namespace FileHub
             return Task.FromResult(OpenFile(name, createIfNotExists));
         }
 
+        public virtual Task<(FileEntry File, bool Exists)> TryOpenFileAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var ok = TryOpenFile(name, out var file);
+            return Task.FromResult((file, ok));
+        }
+
+        public virtual Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var ok = TryOpenDirectory(name, out var dir);
+            return Task.FromResult((dir, ok));
+        }
+
         public virtual Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -178,10 +193,16 @@ namespace FileHub
             return Task.FromResult(OpenDirectory(name, createIfNotExists));
         }
 
-        public virtual Task<bool> ItemExistsAsync(string name, CancellationToken cancellationToken = default)
+        public virtual Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(ItemExists(name));
+            return Task.FromResult(FileExists(name));
+        }
+
+        public virtual Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(DirectoryExists(name));
         }
 
         public virtual Task DeleteAsync(CancellationToken cancellationToken = default)

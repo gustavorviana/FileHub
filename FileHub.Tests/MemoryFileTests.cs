@@ -167,8 +167,8 @@ public class MemoryFileTests
         file.Rename("b.txt");
 
         Assert.Equal("b.txt", file.Name);
-        Assert.True(root.ItemExists("b.txt"));
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.True(root.FileExists("b.txt"));
+        Assert.False(root.FileExists("a.txt"));
         Assert.Equal("keep", file.ReadAllText());
     }
 
@@ -192,8 +192,8 @@ public class MemoryFileTests
         var moved = file.MoveTo(dst, "moved.txt");
 
         Assert.Equal("moved.txt", moved.Name);
-        Assert.False(root.ItemExists("a.txt"));
-        Assert.True(dst.ItemExists("moved.txt"));
+        Assert.False(root.FileExists("a.txt"));
+        Assert.True(dst.FileExists("moved.txt"));
         Assert.Equal("x", moved.ReadAllText());
     }
 
@@ -207,7 +207,7 @@ public class MemoryFileTests
 
         file.Delete();
 
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.False(root.FileExists("a.txt"));
         Assert.False(file.Exists());
     }
 
@@ -399,7 +399,7 @@ public class MemoryFileTests
 
         await file.DeleteAsync();
 
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.False(root.FileExists("a.txt"));
     }
 
     [Fact]
@@ -437,8 +437,8 @@ public class MemoryFileTests
 
         var moved = await file.MoveToAsync(dst, "moved.txt");
 
-        Assert.False(root.ItemExists("a.txt"));
-        Assert.True(dst.ItemExists("moved.txt"));
+        Assert.False(root.FileExists("a.txt"));
+        Assert.True(dst.FileExists("moved.txt"));
         Assert.Equal("x", moved.ReadAllText());
     }
 
@@ -488,10 +488,10 @@ public class MemoryFileTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => file.ReadAllTextAsync(cts.Token));
         await Assert.ThrowsAsync<OperationCanceledException>(() => file.ReadAllBytesAsync(cts.Token));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => file.SetTextAsync("x", null, cts.Token));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => file.SetBytesAsync(new byte[] { 1 }, cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => file.SetTextAsync("x", encoding: null, cancellationToken: cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => file.SetBytesAsync(new byte[] { 1 }, cancellationToken: cts.Token));
         await Assert.ThrowsAsync<OperationCanceledException>(() => file.DeleteAsync(cts.Token));
         await Assert.ThrowsAsync<OperationCanceledException>(() => file.GetReadStreamAsync(cts.Token));
-        await Assert.ThrowsAsync<OperationCanceledException>(() => file.GetWriteStreamAsync(cts.Token));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => file.GetWriteStreamAsync(cancellationToken: cts.Token));
     }
 }

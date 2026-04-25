@@ -262,9 +262,9 @@ namespace FileHub.OracleObjectStorage.Internal
             {
                 return await work(cancellationToken).ConfigureAwait(false);
             }
-            catch (OciException oe)
+            catch (Exception ex) when (ShouldTranslate(ex))
             {
-                throw Translate(oe, contextObject);
+                throw Translate(ex, contextObject);
             }
         }
 
@@ -274,39 +274,55 @@ namespace FileHub.OracleObjectStorage.Internal
             {
                 await work(cancellationToken).ConfigureAwait(false);
             }
-            catch (OciException oe)
+            catch (Exception ex) when (ShouldTranslate(ex))
             {
-                throw Translate(oe, contextObject);
+                throw Translate(ex, contextObject);
             }
+        }
+
+        private static bool ShouldTranslate(Exception ex)
+        {
+            // Let cancellation and programmer errors bubble through untouched;
+            // translate everything else at the SDK boundary so no OCI type
+            // leaks out of this class.
+            return !(ex is OperationCanceledException)
+                && !(ex is ArgumentException)
+                && !(ex is ObjectDisposedException);
         }
 
         private Exception Translate(Exception raw, string contextObject)
         {
-            if (raw is OciException oe)
-            {
-                if (oe.StatusCode == HttpStatusCode.NotFound || MessageIndicatesNotFound(oe.Message))
-                    return new FileNotFoundException(
-                        $"Object \"{contextObject}\" not found in bucket \"{Bucket}\" (namespace \"{Namespace}\").",
-                        oe);
+            var oe = raw as OciException;
+            var status = oe?.StatusCode;
+            var serviceCode = oe?.ServiceCode;
+            var opcRequestId = oe?.OpcRequestId;
 
-                if (oe.StatusCode == HttpStatusCode.Unauthorized || oe.StatusCode == HttpStatusCode.Forbidden)
-                    return new UnauthorizedAccessException(
-                        $"Access denied for \"{contextObject}\" in bucket \"{Bucket}\": {oe.Message}",
-                        oe);
-
-                var requestId = string.IsNullOrEmpty(oe.OpcRequestId) ? "" : $" (opc-request-id={oe.OpcRequestId})";
-                return new FileHubException(
-                    $"OCI request failed for \"{contextObject}\" in bucket \"{Bucket}\": {oe.Message}{requestId}",
-                    oe);
-            }
-
-            if (MessageIndicatesNotFound(raw.Message))
+            if (status == HttpStatusCode.NotFound
+                || string.Equals(serviceCode, "BucketNotFound", StringComparison.Ordinal)
+                || string.Equals(serviceCode, "NamespaceNotFound", StringComparison.Ordinal)
+                || string.Equals(serviceCode, "ObjectNotFound", StringComparison.Ordinal)
+                || MessageIndicatesNotFound(raw.Message))
                 return new FileNotFoundException(
                     $"Object \"{contextObject}\" not found in bucket \"{Bucket}\" (namespace \"{Namespace}\").",
                     raw);
 
-            return new FileHubException(
-                $"OCI operation failed for \"{contextObject}\" in bucket \"{Bucket}\": {raw.Message}",
+            if (status == HttpStatusCode.Unauthorized
+                || status == HttpStatusCode.Forbidden
+                || string.Equals(serviceCode, "NotAuthenticated", StringComparison.Ordinal)
+                || string.Equals(serviceCode, "NotAuthorized", StringComparison.Ordinal)
+                || string.Equals(serviceCode, "NotAuthorizedOrNotFound", StringComparison.Ordinal)
+                || string.Equals(serviceCode, "SignatureDoesNotMatch", StringComparison.Ordinal))
+                return new UnauthorizedAccessException(
+                    $"Access denied for \"{contextObject}\" in bucket \"{Bucket}\": {raw.Message}",
+                    raw);
+
+            var requestIdSuffix = string.IsNullOrEmpty(opcRequestId) ? "" : $" (opc-request-id={opcRequestId})";
+            var codeSuffix = string.IsNullOrEmpty(serviceCode) ? "" : $"[{serviceCode}] ";
+            return new OciDriverException(
+                $"OCI request failed for \"{contextObject}\" in bucket \"{Bucket}\": {codeSuffix}{raw.Message}{requestIdSuffix}",
+                status,
+                serviceCode,
+                opcRequestId,
                 raw);
         }
 

@@ -165,7 +165,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
         file.SetText("payload");
         file.Rename("new.txt");
 
-        Assert.False(scope.ItemExists("old.txt"));
+        Assert.False(scope.FileExists("old.txt"));
         Assert.Equal("payload", scope.OpenFile("new.txt").ReadAllText());
     }
 
@@ -183,7 +183,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
 
         file.MoveTo(dst, "m.txt");
 
-        Assert.False(scope.ItemExists("m.txt"));
+        Assert.False(scope.FileExists("m.txt"));
         Assert.Equal("moving", dst.OpenFile("m.txt").ReadAllText());
     }
 
@@ -215,10 +215,10 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
         var scope = await ScopeAsync(hub, nameof(Delete_File_RemovesIt));
 
         scope.CreateFile("victim.txt").SetText("x");
-        Assert.True(scope.ItemExists("victim.txt"));
+        Assert.True(scope.FileExists("victim.txt"));
 
         scope.OpenFile("victim.txt").Delete();
-        Assert.False(scope.ItemExists("victim.txt"));
+        Assert.False(scope.FileExists("victim.txt"));
     }
 
     [RequiresDockerFact]
@@ -235,7 +235,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
 
         sub.Delete();
 
-        Assert.False(scope.ItemExists("to-delete"));
+        Assert.False(scope.DirectoryExists("to-delete"));
     }
 
     [RequiresDockerFact]

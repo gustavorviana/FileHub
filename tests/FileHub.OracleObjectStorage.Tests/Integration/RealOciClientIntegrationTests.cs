@@ -4,15 +4,15 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 
-namespace FileHub.OracleObjectStorage.Tests;
+namespace FileHub.OracleObjectStorage.Tests.Integration;
 
 /// <summary>
-/// Minimal smoke tests that actually hit OCI. They validate that
+/// Minimal integration tests that actually hit OCI. They validate that
 /// <c>RealOciClient</c> behaves the same as <c>InMemoryOciClient</c> on the
 /// happy path + key error translations (404 → FileNotFoundException).
 /// Skipped when OCI env vars are missing.
 /// </summary>
-public class RealOciClientSmokeTests
+public class RealOciClientIntegrationTests
 {
     private static OracleObjectStorageFileHub NewHub(string subfolder)
     {
@@ -23,7 +23,7 @@ public class RealOciClientSmokeTests
         if (!basePrefix.EndsWith("/")) basePrefix += "/";
 
         return OracleObjectStorageFileHub.FromConfigFile(
-            rootPath: basePrefix + "smoke/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/",
+            rootPath: basePrefix + "integration/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/",
             bucket,
             configFilePath: configFile,
             profile: profile);
@@ -35,13 +35,13 @@ public class RealOciClientSmokeTests
         using var hub = NewHub("roundtrip");
         try
         {
-            var file = hub.Root.CreateFile("smoke.txt");
+            var file = hub.Root.CreateFile("integration.txt");
             file.SetText("round-trip");
 
-            var reopened = hub.Root.OpenFile("smoke.txt");
+            var reopened = hub.Root.OpenFile("integration.txt");
             Assert.Equal("round-trip", reopened.ReadAllText());
             reopened.Delete();
-            Assert.False(hub.Root.ItemExists("smoke.txt"));
+            Assert.False(hub.Root.FileExists("integration.txt"));
         }
         finally
         {

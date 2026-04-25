@@ -7,7 +7,7 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable
+    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable, ILazyLoad
     {
         internal const string ChangedAtTag = "_changedAt";
 
@@ -15,7 +15,18 @@ namespace FileHub.OracleObjectStorage
         private long _length;
         private DateTime _creationTimeUtc;
         private Dictionary<string, string> _tags;
+        private bool _isLoaded;
         private OciObjectStream _lastOpenStream;
+
+        /// <summary>
+        /// <c>true</c> once the file's state has been loaded from OCI.
+        /// <c>false</c> on pending stubs from
+        /// <c>OpenFile(name, createIfNotExists: true)</c>.
+        /// </summary>
+        public bool IsLoaded => _isLoaded;
+
+        /// <summary>Driver-internal: flip <see cref="IsLoaded"/> to <c>true</c> without HEAD.</summary>
+        internal void MarkLoaded() => _isLoaded = true;
 
         public override FileDirectory Parent => _parent;
         public override string Path => ConcatPath(_parent.Path, Name);
@@ -70,7 +81,7 @@ namespace FileHub.OracleObjectStorage
 
         // === IRefreshable ===
 
-        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+        public void Refresh() => SyncBridge.Run(ct => RefreshAsync(ct));
 
         public async Task RefreshAsync(CancellationToken cancellationToken = default)
         {
@@ -81,11 +92,12 @@ namespace FileHub.OracleObjectStorage
             _tags = head.OpcMeta != null
                 ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
                 : null;
+            _isLoaded = true;
         }
 
         // === Exists (sync delegates to async) ===
 
-        public override bool Exists() => ExistsAsync().GetAwaiter().GetResult();
+        public override bool Exists() => SyncBridge.Run(ct => ExistsAsync(ct));
 
         public override async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
         {
@@ -156,11 +168,12 @@ namespace FileHub.OracleObjectStorage
             _length = bytesWritten;
             EnsureTags();
             _tags[ChangedAtTag] = timestampTagValue;
+            _isLoaded = true;
         }
 
         // === Mutations (sync delegates to async) ===
 
-        public override void Delete() => DeleteAsync().GetAwaiter().GetResult();
+        public override void Delete() => SyncBridge.Run(ct => DeleteAsync(ct));
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
@@ -169,7 +182,7 @@ namespace FileHub.OracleObjectStorage
             _length = -1;
         }
 
-        public override FileEntry Rename(string newName) => RenameAsync(newName).GetAwaiter().GetResult();
+        public override FileEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
@@ -184,7 +197,7 @@ namespace FileHub.OracleObjectStorage
         }
 
         public override FileEntry MoveTo(FileDirectory directory, string name)
-            => MoveToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
 
         public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
@@ -223,7 +236,7 @@ namespace FileHub.OracleObjectStorage
         }
 
         public override FileEntry CopyTo(FileDirectory directory, string name)
-            => CopyToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
 
         public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
@@ -263,7 +276,7 @@ namespace FileHub.OracleObjectStorage
         }
 
         public Uri GetSignedUrl(TimeSpan expiresIn)
-            => GetSignedUrlAsync(expiresIn).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => GetSignedUrlAsync(expiresIn, ct));
 
         public async Task<Uri> GetSignedUrlAsync(TimeSpan expiresIn, CancellationToken cancellationToken = default)
         {

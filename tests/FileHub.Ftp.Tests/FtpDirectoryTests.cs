@@ -17,9 +17,13 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void CreateFile_RejectsInvalidName()
+    public void CreateFile_NestedPath_CreatesIntermediateDirectories()
     {
-        Assert.Throws<ArgumentException>(() => Root.CreateFile("a/b.txt"));
+        var file = Root.CreateFile("a/b/c.txt");
+
+        Assert.Equal("c.txt", file.Name);
+        Assert.Equal("/a/b/c.txt", file.Path);
+        Assert.NotNull(Client.Server.Find("/a/b/c.txt"));
     }
 
     [Fact]
@@ -154,9 +158,9 @@ public class FtpDirectoryTests : FtpTestBase
         Root.CreateFile("f.txt");
         Root.CreateDirectory("d");
 
-        Assert.True(Root.ItemExists("f.txt"));
-        Assert.True(Root.ItemExists("d"));
-        Assert.False(Root.ItemExists("missing"));
+        Assert.True(Root.FileExists("f.txt"));
+        Assert.True(Root.DirectoryExists("d"));
+        Assert.False(Root.DirectoryExists("missing"));
     }
 
     [Fact]
@@ -250,6 +254,6 @@ public class FtpDirectoryTests : FtpTestBase
         using var client = new InMemoryFtpClient();
         using var hub = FtpFileHub.FromFtpClient(client, "/sandbox");
 
-        Assert.Throws<ArgumentException>(() => hub.Root.CreateFile("../etc/passwd"));
+        Assert.Throws<FileHubException>(() => hub.Root.CreateFile("../etc/passwd"));
     }
 }

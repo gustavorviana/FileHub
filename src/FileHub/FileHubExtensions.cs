@@ -65,7 +65,8 @@ namespace FileHub
         }
 
         public override bool Exists() => _inner.Exists();
-        public override bool ItemExists(string name) => _inner.ItemExists(name);
+        public override bool FileExists(string name) => _inner.FileExists(name);
+        public override bool DirectoryExists(string name) => _inner.DirectoryExists(name);
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {

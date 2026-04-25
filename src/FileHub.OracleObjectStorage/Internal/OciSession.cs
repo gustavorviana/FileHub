@@ -51,7 +51,7 @@ namespace FileHub.OracleObjectStorage.Internal
             Client = client ?? throw new ArgumentNullException(nameof(client));
         }
 
-        public bool GetIsPublic() => GetIsPublicAsync().GetAwaiter().GetResult();
+        public bool GetIsPublic() => SyncBridge.Run(ct => GetIsPublicAsync(ct));
 
         public async Task<bool> GetIsPublicAsync(CancellationToken cancellationToken = default)
         {

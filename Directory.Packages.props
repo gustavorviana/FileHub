@@ -17,6 +17,9 @@
     <PackageVersion Include="FluentFTP" Version="52.*" />
   </ItemGroup>
   <ItemGroup>
+    <PackageVersion Include="AWSSDK.S3" Version="3.7.*" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
   </ItemGroup>

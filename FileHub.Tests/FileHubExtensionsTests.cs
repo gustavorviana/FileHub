@@ -130,7 +130,7 @@ public class FileHubExtensionsTests
 
         var ro = root.AsReadOnly();
 
-        Assert.True(ro.ItemExists("a.txt"));
+        Assert.True(ro.FileExists("a.txt"));
         Assert.True(ro.Exists());
         Assert.True(ro.TryOpenFile("a.txt", out var f));
         Assert.True(f.IsReadOnly);

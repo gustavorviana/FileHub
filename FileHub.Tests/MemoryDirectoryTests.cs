@@ -15,7 +15,7 @@ public class MemoryDirectoryTests
         var file = root.CreateFile("hello.txt");
 
         Assert.Equal("hello.txt", file.Name);
-        Assert.True(root.ItemExists("hello.txt"));
+        Assert.True(root.FileExists("hello.txt"));
         Assert.True(file.Exists());
     }
 
@@ -25,7 +25,6 @@ public class MemoryDirectoryTests
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
         Assert.Throws<ArgumentException>(() => root.CreateFile(null));
-        Assert.Throws<ArgumentException>(() => root.CreateFile("bad/name.txt"));
     }
 
     [Fact]
@@ -37,7 +36,7 @@ public class MemoryDirectoryTests
 
         var second = root.CreateFile("x.txt", overwrite: true);
 
-        Assert.True(root.ItemExists("x.txt"));
+        Assert.True(root.FileExists("x.txt"));
         Assert.Equal(0, second.Length);
     }
 
@@ -92,7 +91,7 @@ public class MemoryDirectoryTests
         var file = root.OpenFile("new.txt", createIfNotExists: true);
 
         Assert.NotNull(file);
-        Assert.True(root.ItemExists("new.txt"));
+        Assert.True(root.FileExists("new.txt"));
     }
 
     [Fact]
@@ -116,7 +115,7 @@ public class MemoryDirectoryTests
         var sub = root.CreateDirectory("child");
 
         Assert.Equal("child", sub.Name);
-        Assert.True(root.ItemExists("child"));
+        Assert.True(root.DirectoryExists("child"));
         Assert.Same(root, sub.Parent);
     }
 
@@ -164,7 +163,7 @@ public class MemoryDirectoryTests
         var dir = root.OpenDirectory("auto", createIfNotExists: true);
 
         Assert.NotNull(dir);
-        Assert.True(root.ItemExists("auto"));
+        Assert.True(root.DirectoryExists("auto"));
     }
 
     [Fact]
@@ -382,9 +381,9 @@ public class MemoryDirectoryTests
         root.CreateFile("a.txt");
         root.CreateDirectory("sub");
 
-        Assert.True(root.ItemExists("a.txt"));
-        Assert.True(root.ItemExists("sub"));
-        Assert.False(root.ItemExists("other"));
+        Assert.True(root.FileExists("a.txt"));
+        Assert.True(root.DirectoryExists("sub"));
+        Assert.False(root.DirectoryExists("other"));
     }
 
     [Fact]
@@ -408,7 +407,7 @@ public class MemoryDirectoryTests
 
         root.Delete("a.txt");
 
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.False(root.FileExists("a.txt"));
     }
 
     [Fact]
@@ -419,7 +418,7 @@ public class MemoryDirectoryTests
 
         root.Delete("sub");
 
-        Assert.False(root.ItemExists("sub"));
+        Assert.False(root.DirectoryExists("sub"));
     }
 
     [Fact]
@@ -447,7 +446,7 @@ public class MemoryDirectoryTests
 
         root.DeleteIfExists("a.txt");
 
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.False(root.FileExists("a.txt"));
     }
 
     // === Rename ===
@@ -462,8 +461,8 @@ public class MemoryDirectoryTests
         var renamed = sub.Rename("new");
 
         Assert.Equal("new", renamed.Name);
-        Assert.True(root.ItemExists("new"));
-        Assert.False(root.ItemExists("old"));
+        Assert.True(root.DirectoryExists("new"));
+        Assert.False(root.DirectoryExists("old"));
         Assert.True(renamed.TryOpenFile("keep.txt", out _));
     }
 
@@ -487,8 +486,8 @@ public class MemoryDirectoryTests
 
         var moved = src.MoveTo(dst, "moved");
 
-        Assert.True(dst.ItemExists("moved"));
-        Assert.False(root.ItemExists("src"));
+        Assert.True(dst.DirectoryExists("moved"));
+        Assert.False(root.DirectoryExists("src"));
         Assert.True(moved.TryOpenFile("f.txt", out _));
     }
 
@@ -505,7 +504,7 @@ public class MemoryDirectoryTests
 
         var copy = src.CopyTo(root, "copy");
 
-        Assert.True(root.ItemExists("copy"));
+        Assert.True(root.DirectoryExists("copy"));
         Assert.True(copy.TryOpenFile("f.txt", out var f));
         Assert.Equal("hello", f.ReadAllText());
         Assert.True(copy.TryOpenDirectory("inner", out var innerCopy));
@@ -562,7 +561,7 @@ public class MemoryDirectoryTests
         var file = await root.CreateFileAsync("a.txt");
 
         Assert.NotNull(file);
-        Assert.True(root.ItemExists("a.txt"));
+        Assert.True(root.FileExists("a.txt"));
     }
 
     [Fact]
@@ -611,8 +610,8 @@ public class MemoryDirectoryTests
         var root = NewRoot();
         await root.CreateFileAsync("a.txt");
 
-        Assert.True(await root.ItemExistsAsync("a.txt"));
-        Assert.False(await root.ItemExistsAsync("b.txt"));
+        Assert.True(await root.FileExistsAsync("a.txt"));
+        Assert.False(await root.FileExistsAsync("b.txt"));
     }
 
     [Fact]
@@ -623,7 +622,7 @@ public class MemoryDirectoryTests
 
         await root.DeleteAsync("a.txt");
 
-        Assert.False(root.ItemExists("a.txt"));
+        Assert.False(root.FileExists("a.txt"));
     }
 
     [Fact]
@@ -653,7 +652,7 @@ public class MemoryDirectoryTests
 
         var moved = await src.MoveToAsync(dst, "moved");
 
-        Assert.True(dst.ItemExists("moved"));
+        Assert.True(dst.DirectoryExists("moved"));
         Assert.Equal("moved", moved.Name);
     }
 
@@ -769,7 +768,7 @@ public class MemoryDirectoryTests
         root.CreateDirectory("a/b");
 
         Assert.True(root.TryOpenDirectory("a", out var reopenedA));
-        Assert.True(reopenedA.ItemExists("keep.txt"));
+        Assert.True(reopenedA.FileExists("keep.txt"));
         Assert.True(root.TryOpenDirectory("a/b", out _));
     }
 

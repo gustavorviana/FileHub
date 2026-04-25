@@ -256,9 +256,9 @@ public class LocalDirectoryTests
         root.CreateFile("a.txt");
         root.CreateDirectory("sub");
 
-        Assert.True(root.ItemExists("a.txt"));
-        Assert.True(root.ItemExists("sub"));
-        Assert.False(root.ItemExists("ghost"));
+        Assert.True(root.FileExists("a.txt"));
+        Assert.True(root.DirectoryExists("sub"));
+        Assert.False(root.DirectoryExists("ghost"));
     }
 
     // === Delete ===
@@ -376,14 +376,13 @@ public class LocalDirectoryTests
     // === Path traversal protection ===
 
     [Fact]
-    public void CreateFile_WithPathSeparator_Throws()
+    public void CreateFile_WithParentTraversal_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
 
-        // path-separator character is an invalid filename character on Windows and
-        // should be rejected by ValidateName long before any filesystem call.
-        Assert.Throws<ArgumentException>(() => root.CreateFile("..\\escape.txt"));
+        // Parent-directory traversal is rejected by SplitPath before any filesystem call.
+        Assert.Throws<FileHubException>(() => root.CreateFile("..\\escape.txt"));
     }
 
     [Fact]

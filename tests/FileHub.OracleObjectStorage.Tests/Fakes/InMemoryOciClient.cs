@@ -36,6 +36,8 @@ internal sealed class InMemoryOciClient : IOciClient
     private bool _disposed;
     private int _copyInvocationCount;
     private int _renameInvocationCount;
+    private int _headInvocationCount;
+    private int _putInvocationCount;
 
     public string Namespace { get; }
     public string Bucket { get; }
@@ -48,6 +50,9 @@ internal sealed class InMemoryOciClient : IOciClient
 
     /// <summary>Number of times <see cref="RenameObjectAsync"/> was invoked on this client instance.</summary>
     public int RenameInvocationCount => _renameInvocationCount;
+
+    public int HeadInvocationCount => _headInvocationCount;
+    public int PutInvocationCount => _putInvocationCount;
 
     /// <summary>
     /// Optional hook to inject a failure into <see cref="DeleteObjectAsync"/>.
@@ -101,6 +106,7 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _headInvocationCount);
         if (!_store.Objects.TryGetValue(objectName, out var obj))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
 
@@ -152,6 +158,7 @@ internal sealed class InMemoryOciClient : IOciClient
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _putInvocationCount);
 
         byte[] bytes;
         if (body is null)

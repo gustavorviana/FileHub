@@ -35,23 +35,39 @@ namespace FileHub.Local
         public override FileEntry CreateFile(string name)
         {
             ThrowIfReadOnly();
-            ValidateName(name);
-            var filePath = ResolveSafePath(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
+                return dir.CreateFile(rest);
+            }
+            ValidateName(head);
+            var filePath = ResolveSafePath(head);
             File.Create(filePath).Dispose();
             InvalidateInfo();
-            return new LocalFile(this, name, RootPath);
+            return new LocalFile(this, head, RootPath);
         }
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {
-            ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir))
+                {
+                    file = null;
+                    return false;
+                }
+                return dir.TryOpenFile(rest, out file);
+            }
+            ValidateName(head);
             file = null;
 
-            var filePath = ResolveSafePath(name);
+            var filePath = ResolveSafePath(head);
             if (!File.Exists(filePath))
                 return false;
 
-            file = new LocalFile(this, name, RootPath);
+            file = new LocalFile(this, head, RootPath);
             return true;
         }
 
@@ -203,11 +219,16 @@ namespace FileHub.Local
 
         // === Common operations ===
 
-        public override bool ItemExists(string name)
+        public override bool FileExists(string name)
         {
             ValidateName(name);
-            var fullPath = ResolveSafePath(name);
-            return File.Exists(fullPath) || Directory.Exists(fullPath);
+            return File.Exists(ResolveSafePath(name));
+        }
+
+        public override bool DirectoryExists(string name)
+        {
+            ValidateName(name);
+            return Directory.Exists(ResolveSafePath(name));
         }
 
         public override bool Exists() => Directory.Exists(Path);

@@ -23,7 +23,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
 
         Assert.NotNull(child);
         Assert.Equal("alpha", child.Name);
-        Assert.True(scope.ItemExists("alpha"));
+        Assert.True(scope.DirectoryExists("alpha"));
         Assert.True(_fixture.Client.TryGetBody($"{nameof(CreateDirectory_CreatesMarkerObject)}/alpha/", out _));
     }
 
@@ -68,7 +68,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void ItemExists_ReturnsFalseForMissing()
     {
         var scope = Scope(nameof(ItemExists_ReturnsFalseForMissing));
-        Assert.False(scope.ItemExists("missing"));
+        Assert.False(scope.DirectoryExists("missing"));
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
 
         sub.Delete();
 
-        Assert.False(scope.ItemExists("to-delete"));
+        Assert.False(scope.DirectoryExists("to-delete"));
         Assert.Empty(_fixture.Client.Keys.Where(k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/")));
     }
 
@@ -101,8 +101,8 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
 
         var renamed = original.Rename("after");
 
-        Assert.False(scope.ItemExists("before"));
-        Assert.True(scope.ItemExists("after"));
+        Assert.False(scope.DirectoryExists("before"));
+        Assert.True(scope.DirectoryExists("after"));
         Assert.Equal(2, renamed.GetFiles().Count());
         Assert.Equal("1", renamed.OpenFile("one.txt").ReadAllText());
         Assert.Equal("2", renamed.OpenFile("two.txt").ReadAllText());
@@ -166,8 +166,18 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void CreateFile_WithInvalidName_Throws()
     {
         var scope = Scope(nameof(CreateFile_WithInvalidName_Throws));
-        Assert.Throws<ArgumentException>(() => scope.CreateFile("a/b.txt"));
-        Assert.Throws<ArgumentException>(() => scope.CreateFile(".."));
+        Assert.Throws<FileHubException>(() => scope.CreateFile(".."));
+    }
+
+    [Fact]
+    public void CreateFile_NestedPath_CreatesIntermediateDirectories()
+    {
+        var scope = Scope(nameof(CreateFile_NestedPath_CreatesIntermediateDirectories));
+        var file = scope.CreateFile("a/b/c.txt");
+
+        Assert.Equal("c.txt", file.Name);
+        Assert.True(scope.TryOpenFile("a/b/c.txt", out var reopened));
+        Assert.Equal(0, reopened.Length);
     }
 
     // === Nested-path directory creation / lookup ===
@@ -205,7 +215,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         scope.CreateDirectory("a/b");
 
         Assert.True(scope.TryOpenDirectory("a", out var reopenedA));
-        Assert.True(reopenedA.ItemExists("keep.txt"));
+        Assert.True(reopenedA.FileExists("keep.txt"));
         Assert.True(scope.TryOpenDirectory("a/b", out _));
     }
 
