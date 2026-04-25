@@ -2,9 +2,9 @@ namespace FileHub
 {
     /// <summary>
     /// Registry of <see cref="IFileHub"/> instances keyed by a string name.
-    /// Built up through <see cref="NamedFileHubs.Register"/>; queried here.
-    /// Lookups return <c>null</c> when the name is unknown, null, or empty —
-    /// they never throw.
+    /// Built up through <see cref="NamedFileHubsBuilder.Register"/>; queried
+    /// here. Lookups return <c>null</c> when the name is unknown, null, or
+    /// empty — they never throw.
     /// </summary>
     public interface INamedFileHubs
     {

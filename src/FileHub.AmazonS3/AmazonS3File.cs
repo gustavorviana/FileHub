@@ -55,7 +55,7 @@ namespace FileHub.AmazonS3
         /// class, content-type, SSE). Populated by
         /// <see cref="Refresh"/> / <see cref="RefreshAsync"/> and by
         /// <see cref="AmazonS3Directory.TryOpenFile"/>. Mutate freely — on
-        /// the next alteration op (<see cref="SetBytes"/>,
+        /// the next alteration op (<see cref="FileEntry.SetBytes"/>,
         /// <see cref="CopyTo(FileDirectory, string)"/>,
         /// <see cref="MoveTo(FileDirectory, string)"/>, stream commit),
         /// if <see cref="FileMetadata.IsModified"/> is <c>true</c>, the

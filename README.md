@@ -63,4 +63,4 @@ Full docs live in the [wiki](FileHub.wiki/Home.md):
 
 ## License
 
-See [LICENSE](LICENSE).
+MIT — see [LICENSE.txt](LICENSE.txt).

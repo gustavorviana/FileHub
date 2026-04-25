@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore FileHub.slnx
+
+      - name: Build
+        run: dotnet build FileHub.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test FileHub.slnx --configuration Release --no-build --logger "trx" --results-directory TestResults
+        env:
+          # FTP integration tests rely on Docker; skip when not available.
+          DOTNET_ENVIRONMENT: CI
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore

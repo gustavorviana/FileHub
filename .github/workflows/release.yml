@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Pack & publish to NuGet
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Derive version from tag
+        id: version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          # v1.2.3        -> prefix=1.2.3        suffix=
+          # v1.2.3-rc.1   -> prefix=1.2.3        suffix=rc.1
+          version="${tag#v}"
+          if [[ "$version" == *-* ]]; then
+            prefix="${version%%-*}"
+            suffix="${version#*-}"
+          else
+            prefix="$version"
+            suffix=""
+          fi
+          echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: prefix=$prefix suffix=$suffix"
+
+      - name: Restore
+        run: dotnet restore FileHub.slnx
+
+      - name: Build
+        run: dotnet build FileHub.slnx --configuration Release --no-restore /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      - name: Test
+        run: dotnet test FileHub.slnx --configuration Release --no-build
+
+      - name: Pack
+        run: |
+          dotnet pack src/FileHub/FileHub.csproj                                 --configuration Release --no-build --output artifacts /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+          dotnet pack src/FileHub.AmazonS3/FileHub.AmazonS3.csproj               --configuration Release --no-build --output artifacts /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+          dotnet pack src/FileHub.OracleObjectStorage/FileHub.OracleObjectStorage.csproj --configuration Release --no-build --output artifacts /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+          dotnet pack src/FileHub.Ftp/FileHub.Ftp.csproj                         --configuration Release --no-build --output artifacts /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+          dotnet pack src/FileHub.DependencyInjection/FileHub.DependencyInjection.csproj --configuration Release --no-build --output artifacts /p:VersionPrefix=${{ steps.version.outputs.prefix }} /p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      - name: Upload packages as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts/*.*nupkg
+
+      - name: Push to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY secret is not set; aborting publish."
+            exit 1
+          fi
+          dotnet nuget push "artifacts/*.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.*nupkg
+          generate_release_notes: true
+          prerelease: ${{ steps.version.outputs.suffix != '' }}

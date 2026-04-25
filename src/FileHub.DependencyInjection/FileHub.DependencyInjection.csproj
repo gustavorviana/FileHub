@@ -2,11 +2,16 @@
 
   <PropertyGroup>
     <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
-    <LangVersion>latest</LangVersion>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>disable</Nullable>
     <RootNamespace>FileHub.DependencyInjection</RootNamespace>
     <AssemblyName>FileHub.DependencyInjection</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>FileHub.DependencyInjection</PackageId>
+    <Description>Microsoft.Extensions.DependencyInjection integration for FileHub — register named
+      hubs (IFileHub) on IServiceCollection and resolve them by name at runtime, with sane defaults
+      for service lifetimes.</Description>
+    <PackageTags>$(PackageTags);dependency-injection;di;microsoft-extensions</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

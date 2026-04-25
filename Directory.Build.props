@@ -1,0 +1,57 @@
+<Project>
+
+  <!--
+    Shared MSBuild + NuGet metadata for every FileHub project.
+
+    Per-project files only override what's truly project-specific:
+      - PackageId
+      - Description
+      - PackageTags (extras beyond the shared ones below)
+  -->
+
+  <PropertyGroup Label="Build">
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Build (packable only)" Condition="'$(IsPackable)' != 'false'">
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: missing XML doc on public member. Re-enable per-project once
+         every public surface is documented. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Versioning">
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <!-- Bump VersionSuffix to e.g. "preview.1" for pre-releases; leave empty
+         for stable. The release workflow may override this from a git tag. -->
+    <VersionSuffix></VersionSuffix>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package metadata" Condition="'$(IsPackable)' != 'false'">
+    <Authors>Gustavo Reis Viana</Authors>
+    <Company>Gustavo Reis Viana</Company>
+    <Copyright>Copyright (c) 2026 Gustavo Reis Viana</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/gustavorviana/FileHub</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gustavorviana/FileHub</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>filesystem;storage;abstraction;s3;ftp;oci;object-storage</PackageTags>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+</Project>

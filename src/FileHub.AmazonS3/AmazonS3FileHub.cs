@@ -137,7 +137,7 @@ namespace FileHub.AmazonS3
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="AmazonS3Client"/>.
-        /// The region is taken from the client's <see cref="AmazonS3Client.Config"/>,
+        /// The region is taken from the client's <c>Config.RegionEndpoint</c>,
         /// so callers don't need to repeat it. The caller retains ownership
         /// of the client — disposing this FileHub does <b>not</b> dispose it.
         /// </summary>

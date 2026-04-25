@@ -1,4 +1,7 @@
 using System;
+#if !NET8_0_OR_GREATER
+using System.Runtime.Serialization;
+#endif
 
 namespace FileHub
 {
@@ -7,6 +10,9 @@ namespace FileHub
     /// destination but failed to delete the source. The file now exists in
     /// both places; the source must be removed manually by the caller.
     /// </summary>
+#if !NET8_0_OR_GREATER
+    [Serializable]
+#endif
     public sealed class PartialMoveException : FileHubException
     {
         public string SourcePath { get; }
@@ -18,5 +24,22 @@ namespace FileHub
             SourcePath = sourcePath;
             DestinationPath = destinationPath;
         }
+
+#if !NET8_0_OR_GREATER
+        private PartialMoveException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        {
+            SourcePath = info.GetString(nameof(SourcePath));
+            DestinationPath = info.GetString(nameof(DestinationPath));
+        }
+
+        public override void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            if (info == null) throw new ArgumentNullException(nameof(info));
+            base.GetObjectData(info, context);
+            info.AddValue(nameof(SourcePath), SourcePath);
+            info.AddValue(nameof(DestinationPath), DestinationPath);
+        }
+#endif
     }
 }

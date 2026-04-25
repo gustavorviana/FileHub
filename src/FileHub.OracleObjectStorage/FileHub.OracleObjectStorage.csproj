@@ -1,12 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-	  <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
-    <LangVersion>latest</LangVersion>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <TargetFrameworks>netstandard2.0;net8.0</TargetFrameworks>
     <RootNamespace>FileHub.OracleObjectStorage</RootNamespace>
     <AssemblyName>FileHub.OracleObjectStorage</AssemblyName>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>FileHub.OracleObjectStorage</PackageId>
+    <Description>Oracle Cloud Object Storage driver for FileHub — exposes any OCI Object Storage
+      bucket as an IFileHub with the same API as the Local and Memory drivers. Supports server-side
+      rename/copy, pre-authenticated read URLs, and cross-region copy.</Description>
+    <PackageTags>$(PackageTags);oracle;oci;object-storage</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,6 +1,9 @@
 using System;
 using System.Net;
 using FileHub;
+#if !NET8_0_OR_GREATER
+using System.Runtime.Serialization;
+#endif
 
 namespace FileHub.AmazonS3
 {
@@ -12,6 +15,9 @@ namespace FileHub.AmazonS3
     /// exception is available through <see cref="Exception.InnerException"/>
     /// but its type is not part of the public contract.
     /// </summary>
+#if !NET8_0_OR_GREATER
+    [Serializable]
+#endif
     public sealed class S3DriverException : FileHubException
     {
         public HttpStatusCode? StatusCode { get; }
@@ -25,5 +31,25 @@ namespace FileHub.AmazonS3
             ErrorCode = errorCode;
             RequestId = requestId;
         }
+
+#if !NET8_0_OR_GREATER
+        private S3DriverException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        {
+            var status = info.GetInt32(nameof(StatusCode));
+            StatusCode = status < 0 ? null : (HttpStatusCode?)status;
+            ErrorCode = info.GetString(nameof(ErrorCode));
+            RequestId = info.GetString(nameof(RequestId));
+        }
+
+        public override void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            if (info == null) throw new ArgumentNullException(nameof(info));
+            base.GetObjectData(info, context);
+            info.AddValue(nameof(StatusCode), StatusCode.HasValue ? (int)StatusCode.Value : -1);
+            info.AddValue(nameof(ErrorCode), ErrorCode);
+            info.AddValue(nameof(RequestId), RequestId);
+        }
+#endif
     }
 }

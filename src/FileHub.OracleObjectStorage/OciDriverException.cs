@@ -1,6 +1,9 @@
 using System;
 using System.Net;
 using FileHub;
+#if !NET8_0_OR_GREATER
+using System.Runtime.Serialization;
+#endif
 
 namespace FileHub.OracleObjectStorage
 {
@@ -11,6 +14,9 @@ namespace FileHub.OracleObjectStorage
     /// available through <see cref="Exception.InnerException"/> but its type
     /// is not part of the public contract.
     /// </summary>
+#if !NET8_0_OR_GREATER
+    [Serializable]
+#endif
     public sealed class OciDriverException : FileHubException
     {
         public HttpStatusCode? StatusCode { get; }
@@ -24,5 +30,25 @@ namespace FileHub.OracleObjectStorage
             ServiceCode = serviceCode;
             OpcRequestId = opcRequestId;
         }
+
+#if !NET8_0_OR_GREATER
+        private OciDriverException(SerializationInfo info, StreamingContext context)
+            : base(info, context)
+        {
+            var status = info.GetInt32(nameof(StatusCode));
+            StatusCode = status < 0 ? null : (HttpStatusCode?)status;
+            ServiceCode = info.GetString(nameof(ServiceCode));
+            OpcRequestId = info.GetString(nameof(OpcRequestId));
+        }
+
+        public override void GetObjectData(SerializationInfo info, StreamingContext context)
+        {
+            if (info == null) throw new ArgumentNullException(nameof(info));
+            base.GetObjectData(info, context);
+            info.AddValue(nameof(StatusCode), StatusCode.HasValue ? (int)StatusCode.Value : -1);
+            info.AddValue(nameof(ServiceCode), ServiceCode);
+            info.AddValue(nameof(OpcRequestId), OpcRequestId);
+        }
+#endif
     }
 }
