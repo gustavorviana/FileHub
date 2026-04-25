@@ -1,7 +1,11 @@
 # FileHub
 
 [![CI](https://github.com/gustavorviana/FileHub/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gustavorviana/FileHub/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/v/FileHub.svg)](https://www.nuget.org/packages/FileHub)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/FileHub.svg)](https://www.nuget.org/packages/FileHub)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
+
+> **Heads up:** FileHub is a young library. The API is stabilizing but rough edges are likely — bug reports, feedback, and PRs are very welcome on the [issue tracker](https://github.com/gustavorviana/FileHub/issues).
 
 A .NET storage abstraction. One API (`IFileHub` → `FileDirectory` → `FileEntry`) across local disk, in-memory, and cloud object storage — swap the driver, keep the code.
 
