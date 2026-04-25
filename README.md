@@ -1,5 +1,8 @@
 # FileHub
 
+[![CI](https://github.com/gustavorviana/FileHub/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gustavorviana/FileHub/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.txt)
+
 A .NET storage abstraction. One API (`IFileHub` → `FileDirectory` → `FileEntry`) across local disk, in-memory, and cloud object storage — swap the driver, keep the code.
 
 ```csharp
