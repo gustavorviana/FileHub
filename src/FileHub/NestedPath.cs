@@ -16,9 +16,12 @@ namespace FileHub
         /// Returns <c>true</c> when the input is a genuinely nested path and
         /// exposes the first segment via <paramref name="head"/> and the rest
         /// (leading/trailing separators trimmed) via <paramref name="rest"/>.
-        /// Returns <c>false</c> for single-segment names (no separator, empty,
-        /// or trailing-separator-only) — callers should fall through to their
-        /// normal single-segment code path in that case.
+        /// Returns <c>false</c> for single-segment names — including those with
+        /// a trailing <c>/</c> or <c>\</c> (e.g. <c>"foo/"</c>) — and exposes
+        /// the normalized leaf via <paramref name="head"/> so callers can pass
+        /// it straight to <c>ValidateName</c> without the separator. Also
+        /// returns <c>false</c> for <c>null</c> or empty input, with
+        /// <paramref name="head"/> set to <c>null</c>.
         /// </summary>
         /// <exception cref="FileHubException">
         /// Thrown when <paramref name="path"/> is absolute (starts with a
@@ -32,16 +35,32 @@ namespace FileHub
             if (path[0] == '/' || path[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed: \"{path}\".");
 
-            var sep = path.IndexOfAny(new[] { '/', '\\' });
-            if (sep < 0) return false;
+            // Strip trailing separators so "foo/" and "foo\\" collapse to a
+            // single-segment name and "a/b/" still nests on "a" + "b".
+            var trimmed = path.TrimEnd('/', '\\');
+            if (trimmed.Length == 0)
+                throw new FileHubException($"Absolute paths are not allowed: \"{path}\".");
 
-            var h = path.Substring(0, sep);
-            var r = path.Substring(sep + 1).Trim('/', '\\');
+            var sep = trimmed.IndexOfAny(new[] { '/', '\\' });
+            if (sep < 0)
+            {
+                if (trimmed == "." || trimmed == "..")
+                    throw new FileHubException($"Path \"{path}\" contains invalid segment \"{trimmed}\".");
+                head = trimmed;
+                return false;
+            }
+
+            var h = trimmed.Substring(0, sep);
+            var r = trimmed.Substring(sep + 1).Trim('/', '\\');
 
             if (h == "." || h == "..")
                 throw new FileHubException($"Path \"{path}\" contains invalid segment \"{h}\".");
 
-            if (r.Length == 0) return false;
+            if (r.Length == 0)
+            {
+                head = h;
+                return false;
+            }
 
             head = h;
             rest = r;

@@ -106,19 +106,25 @@ namespace FileHub
             if (path[0] == '/' || path[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed; path \"{path}\" must be relative.");
 
-            var idx = path.IndexOfAny(new[] { '/', '\\' });
+            // Strip trailing separators so "foo/" and "foo\\" collapse to a
+            // single-segment head with null remainder.
+            var trimmed = path.TrimEnd('/', '\\');
+            if (trimmed.Length == 0)
+                throw new FileHubException($"Absolute paths are not allowed; path \"{path}\" must be relative.");
+
+            var idx = trimmed.IndexOfAny(new[] { '/', '\\' });
 
             string head;
             string remainder;
             if (idx < 0)
             {
-                head = path;
+                head = trimmed;
                 remainder = null;
             }
             else
             {
-                head = path.Substring(0, idx);
-                var rest = path.Substring(idx + 1).Trim('/', '\\');
+                head = trimmed.Substring(0, idx);
+                var rest = trimmed.Substring(idx + 1).Trim('/', '\\');
                 remainder = rest.Length == 0 ? null : rest;
             }
 

@@ -27,12 +27,12 @@ FileHub draws it once. A service like `ReportService(IFileHub hub)` is written o
 
 ## What's in the box
 
-- **Drivers**: `FileHub.Local` (disk), `FileHub.Memory` (in-process), `FileHub.OracleObjectStorage` (OCI), `FileHub.Ftp` (FTP server). Custom drivers implement two abstract classes.
+- **Drivers**: `FileHub.Local` (disk), `FileHub.Memory` (in-process), `FileHub.AmazonS3` (S3), `FileHub.OracleObjectStorage` (OCI), `FileHub.Ftp` (FTP server). Custom drivers implement two abstract classes.
 - **Sync + async** on the same types. Async is the source of truth; sync delegates.
 - **Sandboxed by default** — every hub has a root. `..`, absolute paths, and symlink escapes are rejected.
 - **Read-only on demand** — `dir.AsReadOnly()` / `file.AsReadOnly()` wraps anything and blocks writes at runtime.
 - **DI integration** — `FileHub.DependencyInjection` ships `AddFileHub` / `AddNamedFileHubs` with lifetime + `IServiceProvider` support for tenant scoping.
-- **Nested paths** — `CreateDirectory("a/b/c")` and `TryOpenDirectory("a/b/c", out _)` work on every driver. `DirectoryPathMode.Direct` (default on cloud drivers) collapses it to a single API call.
+- **Nested paths** — every method that takes a `name` (`CreateFile`/`OpenFile`, `CreateDirectory`/`OpenDirectory`, `FileExists`, `DirectoryExists`, `Delete`) accepts subpaths like `"a/b/c.txt"` and tolerates a trailing `/` or `\`. `/` and `\` are interchangeable as separators. `DirectoryPathMode.Direct` (default on cloud drivers) collapses nested directory creation to a single API call.
 - **Zero external deps in core**. Multi-targets `netstandard2.0;net8.0`.
 
 ## Install
@@ -40,6 +40,7 @@ FileHub draws it once. A service like `ReportService(IFileHub hub)` is written o
 ```bash
 dotnet add package FileHub
 dotnet add package FileHub.DependencyInjection    # optional
+dotnet add package FileHub.AmazonS3                # optional
 dotnet add package FileHub.OracleObjectStorage    # optional
 dotnet add package FileHub.Ftp                    # optional
 ```

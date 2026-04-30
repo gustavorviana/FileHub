@@ -115,8 +115,9 @@ namespace FileHub.Local
                     : CreateDirectory(head);
                 return intermediate.CreateDirectory(rest);
             }
-            ValidateName(name);
-            var dirPath = ResolveSafePath(name);
+            var leaf = head ?? name;
+            ValidateName(leaf);
+            var dirPath = ResolveSafePath(leaf);
             InvalidateInfo();
             return new LocalDirectory(dirPath, RootPath, this, _pathMode);
         }
@@ -135,10 +136,11 @@ namespace FileHub.Local
                 }
                 return child.TryOpenDirectory(rest, out directory);
             }
-            ValidateName(name);
+            var leaf = head ?? name;
+            ValidateName(leaf);
             directory = null;
 
-            var dirPath = ResolveSafePath(name);
+            var dirPath = ResolveSafePath(leaf);
             if (!Directory.Exists(dirPath))
                 return false;
 
@@ -221,14 +223,26 @@ namespace FileHub.Local
 
         public override bool FileExists(string name)
         {
-            ValidateName(name);
-            return File.Exists(ResolveSafePath(name));
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir)) return false;
+                return dir.FileExists(rest);
+            }
+            ValidateName(head);
+            return File.Exists(ResolveSafePath(head));
         }
 
         public override bool DirectoryExists(string name)
         {
-            ValidateName(name);
-            return Directory.Exists(ResolveSafePath(name));
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir)) return false;
+                return dir.DirectoryExists(rest);
+            }
+            ValidateName(head);
+            return Directory.Exists(ResolveSafePath(head));
         }
 
         public override bool Exists() => Directory.Exists(Path);
@@ -243,8 +257,16 @@ namespace FileHub.Local
         public override void Delete(string name)
         {
             ThrowIfReadOnly();
-            ValidateName(name);
-            var fullPath = ResolveSafePath(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir))
+                    throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+                dir.Delete(rest);
+                return;
+            }
+            ValidateName(head);
+            var fullPath = ResolveSafePath(head);
             if (Directory.Exists(fullPath))
                 Directory.Delete(fullPath, recursive: true);
             else if (File.Exists(fullPath))

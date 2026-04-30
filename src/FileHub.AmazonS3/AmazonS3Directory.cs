@@ -362,13 +362,14 @@ namespace FileHub.AmazonS3
                 return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
             }
 
-            var childPrefix = S3PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, name);
+            var leaf = head ?? name;
+            var childPrefix = S3PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
 
             using (var empty = new MemoryStream())
             {
                 await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, null, cancellationToken).ConfigureAwait(false);
             }
-            return new AmazonS3Directory(this, name);
+            return new AmazonS3Directory(this, leaf);
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
@@ -396,18 +397,19 @@ namespace FileHub.AmazonS3
                 return null;
             }
 
+            var leaf = head ?? name;
             try
             {
-                S3PathUtil.ValidateName(name);
+                S3PathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
+            var childPrefix = S3PathUtil.CombinePrefix(_prefix, leaf);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-                return new AmazonS3Directory(this, name);
+                return new AmazonS3Directory(this, leaf);
             return null;
         }
 
@@ -515,8 +517,16 @@ namespace FileHub.AmazonS3
 
         public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { S3PathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { S3PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var key = S3PathUtil.CombineObjectKey(_prefix, head);
             try
             {
                 await _session.Client.HeadObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -537,8 +547,16 @@ namespace FileHub.AmazonS3
         // the only probe we need.
         public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { S3PathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { S3PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var childPrefix = S3PathUtil.CombinePrefix(_prefix, head);
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
@@ -558,9 +576,20 @@ namespace FileHub.AmazonS3
         public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            S3PathUtil.ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                {
+                    await s3Dir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+            }
+            S3PathUtil.ValidateName(head);
 
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var key = S3PathUtil.CombineObjectKey(_prefix, head);
             try
             {
                 await _session.Client.DeleteObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -571,7 +600,7 @@ namespace FileHub.AmazonS3
                 // fall through to directory delete attempt
             }
 
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
+            var childPrefix = S3PathUtil.CombinePrefix(_prefix, head);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
             {
                 await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);

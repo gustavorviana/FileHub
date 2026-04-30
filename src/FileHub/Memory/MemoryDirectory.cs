@@ -101,9 +101,10 @@ namespace FileHub.Memory
                     : CreateDirectory(head);
                 return intermediate.CreateDirectory(rest);
             }
-            ValidateName(name);
-            var dir = new MemoryDirectory(name, this, _pathMode);
-            _directories[name] = dir;
+            var leaf = head ?? name;
+            ValidateName(leaf);
+            var dir = new MemoryDirectory(leaf, this, _pathMode);
+            _directories[leaf] = dir;
             return dir;
         }
 
@@ -118,8 +119,10 @@ namespace FileHub.Memory
                 }
                 return child.TryOpenDirectory(rest, out directory);
             }
+            var leaf = head ?? name;
+            ValidateName(leaf);
             directory = null;
-            if (!_directories.TryGetValue(name, out var dir))
+            if (!_directories.TryGetValue(leaf, out var dir))
                 return false;
 
             directory = dir;
@@ -134,8 +137,29 @@ namespace FileHub.Memory
 
         // === Common operations ===
 
-        public override bool FileExists(string name) => _files.ContainsKey(name);
-        public override bool DirectoryExists(string name) => _directories.ContainsKey(name);
+        public override bool FileExists(string name)
+        {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir)) return false;
+                return dir.FileExists(rest);
+            }
+            ValidateName(head);
+            return _files.ContainsKey(head);
+        }
+
+        public override bool DirectoryExists(string name)
+        {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir)) return false;
+                return dir.DirectoryExists(rest);
+            }
+            ValidateName(head);
+            return _directories.ContainsKey(head);
+        }
 
         public override bool Exists() => !Disposed;
 
@@ -151,8 +175,17 @@ namespace FileHub.Memory
         public override void Delete(string name)
         {
             ThrowIfReadOnly();
-            if (_files.Remove(name)) return;
-            if (_directories.Remove(name)) return;
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                if (!TryOpenDirectory(head, out var dir))
+                    throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+                dir.Delete(rest);
+                return;
+            }
+            ValidateName(head);
+            if (_files.Remove(head)) return;
+            if (_directories.Remove(head)) return;
             throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
         }
 

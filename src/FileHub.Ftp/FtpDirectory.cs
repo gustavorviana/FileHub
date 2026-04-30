@@ -277,10 +277,11 @@ namespace FileHub.Ftp
                 return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
             }
 
-            FtpPathUtil.ValidateName(name);
-            var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, name);
+            var leaf = head ?? name;
+            FtpPathUtil.ValidateName(leaf);
+            var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, leaf);
             await _session.Client.CreateDirectoryAsync(fullPath, recursive: false, cancellationToken).ConfigureAwait(false);
-            return new FtpDirectory(this, name);
+            return new FtpDirectory(this, leaf);
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
@@ -310,18 +311,19 @@ namespace FileHub.Ftp
                 return null;
             }
 
+            var leaf = head ?? name;
             try
             {
-                FtpPathUtil.ValidateName(name);
+                FtpPathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var fullPath = FtpPathUtil.Combine(_path, name);
+            var fullPath = FtpPathUtil.Combine(_path, leaf);
             var exists = await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
-            return exists ? new FtpDirectory(this, name) : null;
+            return exists ? new FtpDirectory(this, leaf) : null;
         }
 
         // --- Direct-mode implementations: one MKDIR / one CWD-style probe ---
@@ -425,10 +427,18 @@ namespace FileHub.Ftp
 
         public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { FtpPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is FtpDirectory ftpDir)
+                    return await ftpDir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { FtpPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            var fullPath = FtpPathUtil.Combine(_path, name);
+            var fullPath = FtpPathUtil.Combine(_path, head);
             return await _session.Client.FileExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 
@@ -436,10 +446,18 @@ namespace FileHub.Ftp
 
         public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { FtpPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is FtpDirectory ftpDir)
+                    return await ftpDir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { FtpPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            var fullPath = FtpPathUtil.Combine(_path, name);
+            var fullPath = FtpPathUtil.Combine(_path, head);
             return await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 
@@ -460,10 +478,21 @@ namespace FileHub.Ftp
         public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            FtpPathUtil.ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is FtpDirectory ftpDir)
+                {
+                    await ftpDir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
+            }
+            FtpPathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
-            var fullPath = FtpPathUtil.Combine(_path, name);
+            var fullPath = FtpPathUtil.Combine(_path, head);
 
             if (await _session.Client.FileExistsAsync(fullPath, cancellationToken).ConfigureAwait(false))
             {

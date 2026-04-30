@@ -365,13 +365,14 @@ namespace FileHub.OracleObjectStorage
                 return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
             }
 
-            var childPrefix = OciPathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, name);
+            var leaf = head ?? name;
+            var childPrefix = OciPathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
 
             using (var empty = new MemoryStream())
             {
                 await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
             }
-            return new OracleObjectStorageDirectory(this, name);
+            return new OracleObjectStorageDirectory(this, leaf);
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
@@ -399,18 +400,19 @@ namespace FileHub.OracleObjectStorage
                 return null;
             }
 
+            var leaf = head ?? name;
             try
             {
-                OciPathUtil.ValidateName(name);
+                OciPathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, name);
+            var childPrefix = OciPathUtil.CombinePrefix(_prefix, leaf);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-                return new OracleObjectStorageDirectory(this, name);
+                return new OracleObjectStorageDirectory(this, leaf);
             return null;
         }
 
@@ -524,8 +526,16 @@ namespace FileHub.OracleObjectStorage
 
         public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { OciPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var objectName = OciPathUtil.CombineObjectName(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is OracleObjectStorageDirectory ociDir)
+                    return await ociDir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { OciPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var objectName = OciPathUtil.CombineObjectName(_prefix, head);
             try
             {
                 await _session.Client.HeadObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
@@ -545,8 +555,16 @@ namespace FileHub.OracleObjectStorage
         // writes, so LIST is the single probe that pays off.
         public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { OciPathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is OracleObjectStorageDirectory ociDir)
+                    return await ociDir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { OciPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var childPrefix = OciPathUtil.CombinePrefix(_prefix, head);
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
@@ -566,9 +584,20 @@ namespace FileHub.OracleObjectStorage
         public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            OciPathUtil.ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is OracleObjectStorageDirectory ociDir)
+                {
+                    await ociDir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+            }
+            OciPathUtil.ValidateName(head);
 
-            var objectName = OciPathUtil.CombineObjectName(_prefix, name);
+            var objectName = OciPathUtil.CombineObjectName(_prefix, head);
             try
             {
                 await _session.Client.DeleteObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
@@ -579,7 +608,7 @@ namespace FileHub.OracleObjectStorage
                 // fall through to directory delete attempt
             }
 
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, name);
+            var childPrefix = OciPathUtil.CombinePrefix(_prefix, head);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
             {
                 await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
