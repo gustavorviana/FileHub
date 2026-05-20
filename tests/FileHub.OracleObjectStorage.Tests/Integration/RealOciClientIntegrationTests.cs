@@ -22,11 +22,12 @@ public class RealOciClientIntegrationTests
         var basePrefix = Environment.GetEnvironmentVariable("FILEHUB_OCI_TEST_PREFIX") ?? "filehub-tests/";
         if (!basePrefix.EndsWith("/")) basePrefix += "/";
 
-        return OracleObjectStorageFileHub.FromConfigFile(
-            rootPath: basePrefix + "integration/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/",
-            bucket,
-            configFilePath: configFile,
-            profile: profile);
+        return OracleObjectStorageFileHub.Create(
+            OciHubOptions.FromConfigFile(
+                bucketName: bucket,
+                profile: profile,
+                configFilePath: configFile,
+                rootPath: basePrefix + "integration/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/"));
     }
 
     [RequiresOci]

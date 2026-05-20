@@ -26,11 +26,8 @@ public class RealS3MultipartIntegrationTests
         var key = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID")!;
         var secret = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY")!;
         var credentials = new Amazon.Runtime.BasicAWSCredentials(key, secret);
-        return AmazonS3FileHub.FromCredentials(
-            rootPath: Prefix,
-            bucketName: bucket,
-            credentials: credentials,
-            region: region);
+        return AmazonS3FileHub.Create(
+            S3HubOptions.FromCredentials(bucket, credentials, region, rootPath: Prefix));
     }
 
     [RequiresAws]

@@ -18,22 +18,23 @@ dotnet add package FileHub.OracleObjectStorage
 ```csharp
 using FileHub.OracleObjectStorage;
 
-using var hub = OracleObjectStorageFileHub.FromConfigFile(
-    rootPath:   "archive/2026",
-    bucketName: "reports");
+using var hub = OracleObjectStorageFileHub.Create(
+    OciHubOptions.FromConfigFile(bucketName: "reports", rootPath: "archive/2026"));
 
 hub.Root.CreateFile("q1.pdf").SetBytes(bytes);
 ```
 
 Always `using` or register as a singleton — the hub owns the SDK HTTP client by default.
 
-## Factories
+## Construction
 
-- `FromConfigFile(...)` — reads `~/.oci/config` (or a custom path).
-- `FromProvider(...)` — explicit `IAuthenticationDetailsProvider` (instance principals, resource principals, custom).
-- `FromClient(...)` — reuse an existing `ObjectStorageClient`. Caller owns it.
+`Create(OciHubOptions)` (or `CreateAsync` under a `SynchronizationContext`) builds the hub. Pick the strategy via a typed factory on `OciHubOptions`:
 
-Each has a sync and async variant.
+- `OciHubOptions.FromConfigFile(...)` — reads `~/.oci/config` (or a custom path).
+- `OciHubOptions.FromProvider(...)` — explicit `IAuthenticationDetailsProvider` (instance / resource principals, custom).
+- `OciHubOptions.FromClient(...)` — reuse an existing `ObjectStorageClient`. Caller owns it.
+
+The legacy `OracleObjectStorageFileHub.From*` static factories on the hub class are kept marked `[Obsolete]` for one release cycle, then removed in v1.
 
 ## Features
 

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace FileHub.Memory
 {
@@ -265,22 +267,57 @@ namespace FileHub.Memory
 
         private static IEnumerable<string> FilterByPattern(IEnumerable<string> names, string pattern)
         {
-            if (pattern == "*" || pattern == "*.*")
+            if (string.IsNullOrEmpty(pattern) || pattern == "*" || pattern == "*.*")
                 return names;
 
-            if (pattern.StartsWith("*") && pattern.LastIndexOf('*') == 0)
-            {
-                var suffix = pattern.Substring(1);
-                return names.Where(n => n.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
-            }
+            var regex = GlobToRegex(pattern);
+            return names.Where(n => regex.IsMatch(n));
+        }
 
-            if (pattern.EndsWith("*") && pattern.IndexOf('*') == pattern.Length - 1)
+        private static Regex GlobToRegex(string pattern)
+        {
+            var sb = new StringBuilder(pattern.Length + 8);
+            sb.Append('^');
+            for (var i = 0; i < pattern.Length; i++)
             {
-                var prefix = pattern.Substring(0, pattern.Length - 1);
-                return names.Where(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                var c = pattern[i];
+                switch (c)
+                {
+                    case '*':
+                        sb.Append(".*");
+                        break;
+                    case '?':
+                        sb.Append('.');
+                        break;
+                    case '[':
+                        var close = pattern.IndexOf(']', i + 1);
+                        if (close < 0)
+                        {
+                            sb.Append("\\[");
+                        }
+                        else
+                        {
+                            sb.Append('[');
+                            for (var j = i + 1; j < close; j++)
+                            {
+                                var inner = pattern[j];
+                                if (inner == '\\' || inner == '^' || inner == ']')
+                                    sb.Append('\\');
+                                sb.Append(inner);
+                            }
+                            sb.Append(']');
+                            i = close;
+                        }
+                        break;
+                    default:
+                        if ("\\.+()|{}^$".IndexOf(c) >= 0)
+                            sb.Append('\\');
+                        sb.Append(c);
+                        break;
+                }
             }
-
-            return names.Where(n => string.Equals(n, pattern, StringComparison.OrdinalIgnoreCase));
+            sb.Append('$');
+            return new Regex(sb.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
         }
     }
 }

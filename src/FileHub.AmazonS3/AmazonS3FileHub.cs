@@ -28,21 +28,103 @@ namespace FileHub.AmazonS3
             Root = new AmazonS3Directory(_session, rootPrefix, pathMode);
         }
 
-        // === Factories: sync delegates to async at the boundary ===
+        // === Canonical factory: options bag (preferred from v0.next onward) ===
+
+        /// <summary>
+        /// Build a FileHub from an <see cref="S3HubOptions"/> bag. This is the
+        /// canonical entry point: it covers profile-, credentials-, and
+        /// client-based construction in one place. The legacy <c>From*</c>
+        /// methods remain for source compatibility but are marked
+        /// <see cref="ObsoleteAttribute"/> in favour of this overload.
+        /// </summary>
+        public static AmazonS3FileHub Create(S3HubOptions options)
+            => SyncBridge.Run(ct => CreateAsync(options, ct));
+
+        /// <inheritdoc cref="Create(S3HubOptions)"/>
+        public static Task<AmazonS3FileHub> CreateAsync(
+            S3HubOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (string.IsNullOrEmpty(options.BucketName))
+                throw new ArgumentException("BucketName cannot be null or empty.", nameof(options));
+
+            var strategies = (options.Client != null ? 1 : 0)
+                           + (options.Credentials != null ? 1 : 0)
+                           + (options.Profile != null ? 1 : 0);
+            if (strategies > 1)
+                throw new ArgumentException("S3HubOptions accepts exactly one of Client, Credentials, or Profile.", nameof(options));
+
+            if (options.Client != null)
+            {
+                if (string.IsNullOrEmpty(options.Region))
+                {
+                    var fromClient = (options.Client as AmazonS3Client)?.Config?.RegionEndpoint?.SystemName;
+                    if (string.IsNullOrEmpty(fromClient))
+                        throw new ArgumentException("Region is required when Client is provided (unless the client is an AmazonS3Client with a RegionEndpoint).", nameof(options));
+                    return BuildAsync(
+                        new RealS3Client(options.Client, options.BucketName, fromClient, ownsClient: false),
+                        options.RootPath, options.PathMode, cancellationToken);
+                }
+                return BuildAsync(
+                    new RealS3Client(options.Client, options.BucketName, options.Region, ownsClient: false),
+                    options.RootPath, options.PathMode, cancellationToken);
+            }
+
+            if (options.Credentials != null)
+            {
+                if (string.IsNullOrEmpty(options.Region))
+                    throw new ArgumentException("Region is required when Credentials is provided.", nameof(options));
+                var sdkClient = new AmazonS3Client(options.Credentials, RegionEndpoint.GetBySystemName(options.Region));
+                return BuildAsync(
+                    new RealS3Client(sdkClient, options.BucketName, options.Region, ownsClient: true),
+                    options.RootPath, options.PathMode, cancellationToken);
+            }
+
+            // Profile path (also the default if everything is null)
+            var profile = options.Profile ?? "default";
+            var chain = new CredentialProfileStoreChain();
+            if (!chain.TryGetAWSCredentials(profile, out var credsFromProfile))
+                throw new ArgumentException($"AWS profile \"{profile}\" not found in the local credential store.", nameof(options));
+
+            string resolvedRegion = options.Region;
+            if (string.IsNullOrEmpty(resolvedRegion)
+                && chain.TryGetProfile(profile, out var cp)
+                && cp.Region != null)
+            {
+                resolvedRegion = cp.Region.SystemName;
+            }
+            if (string.IsNullOrEmpty(resolvedRegion))
+                throw new ArgumentException("Region is required when the profile does not carry one.", nameof(options));
+
+            var sdk = new AmazonS3Client(credsFromProfile, RegionEndpoint.GetBySystemName(resolvedRegion));
+            return BuildAsync(
+                new RealS3Client(sdk, options.BucketName, resolvedRegion, ownsClient: true),
+                options.RootPath, options.PathMode, cancellationToken);
+        }
+
+        // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===
 
         /// <summary>
         /// Build a FileHub using a profile from <c>~/.aws/credentials</c>.
-        /// <paramref name="region"/> is required when the profile does not
-        /// carry one. Defaults to <see cref="DirectoryPathMode.Direct"/>.
         /// </summary>
+        [Obsolete("Use Create(S3HubOptions.FromProfile(bucketName, profile, region, rootPath)) instead. This overload will be removed in v1.")]
         public static AmazonS3FileHub FromProfile(
             string rootPath,
             string bucketName,
             string profile = "default",
             string region = null,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromProfileAsync(rootPath, bucketName, profile, region, pathMode, ct));
+            => Create(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Profile = profile,
+                Region = region,
+                PathMode = pathMode,
+            });
 
+        [Obsolete("Use CreateAsync(S3HubOptions.FromProfile(bucketName, profile, region, rootPath), ct) instead. This overload will be removed in v1.")]
         public static Task<AmazonS3FileHub> FromProfileAsync(
             string rootPath,
             string bucketName,
@@ -50,41 +132,35 @@ namespace FileHub.AmazonS3
             string region = null,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrEmpty(bucketName))
-                throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
-
-            var chain = new CredentialProfileStoreChain();
-            if (!chain.TryGetAWSCredentials(profile ?? "default", out var credentials))
-                throw new ArgumentException($"AWS profile \"{profile}\" not found in the local credential store.", nameof(profile));
-
-            string resolvedRegion = region;
-            if (string.IsNullOrEmpty(resolvedRegion)
-                && chain.TryGetProfile(profile ?? "default", out var cp)
-                && cp.Region != null)
+            => CreateAsync(new S3HubOptions
             {
-                resolvedRegion = cp.Region.SystemName;
-            }
-
-            if (string.IsNullOrEmpty(resolvedRegion))
-                throw new ArgumentException("Region is required when the profile does not carry one.", nameof(region));
-
-            return FromCredentialsAsync(rootPath, bucketName, credentials, resolvedRegion, pathMode, cancellationToken);
-        }
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Profile = profile,
+                Region = region,
+                PathMode = pathMode,
+            }, cancellationToken);
 
         /// <summary>
         /// Build a FileHub from explicit AWS credentials and region.
-        /// Covers IAM role, env vars, instance profile, and any other
-        /// <see cref="AWSCredentials"/>-derived provider.
         /// </summary>
+        [Obsolete("Use Create(S3HubOptions.FromCredentials(bucketName, credentials, region, rootPath)) instead. This overload will be removed in v1.")]
         public static AmazonS3FileHub FromCredentials(
             string rootPath,
             string bucketName,
             AWSCredentials credentials,
             string region,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromCredentialsAsync(rootPath, bucketName, credentials, region, pathMode, ct));
+            => Create(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Credentials = credentials,
+                Region = region,
+                PathMode = pathMode,
+            });
 
+        [Obsolete("Use CreateAsync(S3HubOptions.FromCredentials(bucketName, credentials, region, rootPath), ct) instead. This overload will be removed in v1.")]
         public static Task<AmazonS3FileHub> FromCredentialsAsync(
             string rootPath,
             string bucketName,
@@ -92,31 +168,35 @@ namespace FileHub.AmazonS3
             string region,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrEmpty(bucketName))
-                throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
-            if (credentials == null) throw new ArgumentNullException(nameof(credentials));
-            if (string.IsNullOrEmpty(region))
-                throw new ArgumentException("Region cannot be null or empty.", nameof(region));
-
-            var sdkClient = new AmazonS3Client(credentials, RegionEndpoint.GetBySystemName(region));
-            var real = new RealS3Client(sdkClient, bucketName, region, ownsClient: true);
-            return BuildAsync(real, rootPath, pathMode, cancellationToken);
-        }
+            => CreateAsync(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Credentials = credentials,
+                Region = region,
+                PathMode = pathMode,
+            }, cancellationToken);
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="IAmazonS3"/>.
-        /// The caller retains ownership of the client — disposing this
-        /// FileHub does <b>not</b> dispose it.
         /// </summary>
+        [Obsolete("Use Create(S3HubOptions.FromClient(bucketName, client, region, rootPath)) instead. This overload will be removed in v1.")]
         public static AmazonS3FileHub FromClient(
             string bucketName,
             string rootPath,
             IAmazonS3 client,
             string region,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromClientAsync(bucketName, rootPath, client, region, pathMode, ct));
+            => Create(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Client = client,
+                Region = region,
+                PathMode = pathMode,
+            });
 
+        [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, client, region, rootPath), ct) instead. This overload will be removed in v1.")]
         public static Task<AmazonS3FileHub> FromClientAsync(
             string bucketName,
             string rootPath,
@@ -124,42 +204,47 @@ namespace FileHub.AmazonS3
             string region,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrEmpty(bucketName))
-                throw new ArgumentException("Bucket cannot be null or empty.", nameof(bucketName));
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            if (string.IsNullOrEmpty(region))
-                throw new ArgumentException("Region cannot be null or empty.", nameof(region));
-
-            var real = new RealS3Client(client, bucketName, region, ownsClient: false);
-            return BuildAsync(real, rootPath, pathMode, cancellationToken);
-        }
+            => CreateAsync(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Client = client,
+                Region = region,
+                PathMode = pathMode,
+            }, cancellationToken);
 
         /// <summary>
         /// Build a FileHub around an externally-owned <see cref="AmazonS3Client"/>.
-        /// The region is taken from the client's <c>Config.RegionEndpoint</c>,
-        /// so callers don't need to repeat it. The caller retains ownership
-        /// of the client — disposing this FileHub does <b>not</b> dispose it.
+        /// Region is read from the client's <c>Config.RegionEndpoint</c>.
         /// </summary>
+        [Obsolete("Use Create(S3HubOptions.FromClient(bucketName, AmazonS3Client, rootPath)) — region is read from client.Config.RegionEndpoint. This overload will be removed in v1.")]
         public static AmazonS3FileHub FromClient(
             string bucketName,
             string rootPath,
             AmazonS3Client client,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromClientAsync(bucketName, rootPath, client, pathMode, ct));
+            => Create(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Client = client,
+                PathMode = pathMode,
+            });
 
+        [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, AmazonS3Client, rootPath), ct) — region is read from client.Config.RegionEndpoint. This overload will be removed in v1.")]
         public static Task<AmazonS3FileHub> FromClientAsync(
             string bucketName,
             string rootPath,
             AmazonS3Client client,
             DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
-        {
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            var region = client.Config?.RegionEndpoint?.SystemName
-                ?? throw new ArgumentException("AmazonS3Client must have a RegionEndpoint configured.", nameof(client));
-            return FromClientAsync(bucketName, rootPath, (IAmazonS3)client, region, pathMode, cancellationToken);
-        }
+            => CreateAsync(new S3HubOptions
+            {
+                BucketName = bucketName,
+                RootPath = rootPath,
+                Client = client,
+                PathMode = pathMode,
+            }, cancellationToken);
 
         // === Internal factory (tests with in-memory fake) ===
 

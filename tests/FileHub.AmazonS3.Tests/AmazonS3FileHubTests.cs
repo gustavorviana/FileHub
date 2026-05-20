@@ -40,10 +40,8 @@ public class AmazonS3FileHubTests
         var credentials = new Amazon.Runtime.BasicAWSCredentials("ak", "sk");
         using var sdkClient = new Amazon.S3.AmazonS3Client(credentials, Amazon.RegionEndpoint.USWest2);
 
-        using var hub = await AmazonS3FileHub.FromClientAsync(
-            bucketName: "bucket",
-            rootPath: "",
-            client: sdkClient);
+        using var hub = await AmazonS3FileHub.CreateAsync(
+            S3HubOptions.FromClient("bucket", sdkClient));
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
@@ -55,10 +53,8 @@ public class AmazonS3FileHubTests
         var credentials = new Amazon.Runtime.BasicAWSCredentials("ak", "sk");
         using var sdkClient = new Amazon.S3.AmazonS3Client(credentials, Amazon.RegionEndpoint.EUWest1);
 
-        using var hub = AmazonS3FileHub.FromClient(
-            bucketName: "bucket",
-            rootPath: "",
-            client: sdkClient);
+        using var hub = AmazonS3FileHub.Create(
+            S3HubOptions.FromClient("bucket", sdkClient));
 
         Assert.NotNull(hub.Root);
         await System.Threading.Tasks.Task.CompletedTask;

@@ -19,11 +19,12 @@ dotnet add package FileHub.AmazonS3
 using Amazon.Runtime;
 using FileHub.AmazonS3;
 
-using var hub = AmazonS3FileHub.FromCredentials(
-    rootPath:    "archive/2026",
-    bucketName:  "reports",
-    credentials: new BasicAWSCredentials(key, secret),
-    region:      "us-east-1");
+using var hub = AmazonS3FileHub.Create(
+    S3HubOptions.FromCredentials(
+        bucketName:  "reports",
+        credentials: new BasicAWSCredentials(key, secret),
+        region:      "us-east-1",
+        rootPath:    "archive/2026"));
 
 hub.Root.CreateFile("q1.pdf").SetBytes(bytes);   // 1 PutObject
 ```
