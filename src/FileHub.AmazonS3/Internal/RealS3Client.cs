@@ -61,6 +61,7 @@ namespace FileHub.AmazonS3.Internal
                     ContentLength = resp.ContentLength,
                     LastModified = resp.LastModified,
                     ContentType = resp.Headers.ContentType,
+                    CacheControl = resp.Headers.CacheControl,
                     UserMetadata = meta,
                     StorageClass = resp.StorageClass?.Value,
                     ServerSideEncryption = resp.ServerSideEncryptionMethod?.Value
@@ -93,6 +94,7 @@ namespace FileHub.AmazonS3.Internal
         public async Task PutObjectAsync(
             string key, Stream body, long contentLength,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> userMetadata,
             string storageClass,
             string serverSideEncryption,
@@ -111,6 +113,7 @@ namespace FileHub.AmazonS3.Internal
                 };
                 if (contentLength >= 0) req.Headers.ContentLength = contentLength;
                 if (!string.IsNullOrEmpty(contentType)) req.ContentType = contentType;
+                if (!string.IsNullOrEmpty(cacheControl)) req.Headers.CacheControl = cacheControl;
                 if (userMetadata != null)
                 {
                     foreach (var kv in userMetadata)

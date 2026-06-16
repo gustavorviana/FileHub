@@ -115,6 +115,7 @@ internal sealed class InMemoryOciClient : IOciClient
             ContentLength = obj.Body.LongLength,
             LastModified = obj.LastModified,
             ContentType = obj.ContentType,
+            CacheControl = obj.CacheControl,
             OpcMeta = obj.OpcMeta is null
                 ? null
                 : new Dictionary<string, string>(obj.OpcMeta, StringComparer.OrdinalIgnoreCase)
@@ -153,6 +154,7 @@ internal sealed class InMemoryOciClient : IOciClient
         Stream body,
         long contentLength,
         string contentType,
+        string cacheControl,
         IReadOnlyDictionary<string, string> opcMeta,
         CancellationToken cancellationToken = default)
     {
@@ -179,6 +181,7 @@ internal sealed class InMemoryOciClient : IOciClient
         {
             Body = bytes,
             ContentType = contentType,
+            CacheControl = cacheControl,
             OpcMeta = opcMeta is null
                 ? null
                 : new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase),

@@ -34,6 +34,7 @@ internal sealed class InMemoryS3StoredObject
 {
     public byte[] Body { get; set; } = System.Array.Empty<byte>();
     public string? ContentType { get; set; }
+    public string? CacheControl { get; set; }
     public System.Collections.Generic.Dictionary<string, string>? UserMetadata { get; set; }
     public System.DateTime LastModified { get; set; }
     public string? StorageClass { get; set; }

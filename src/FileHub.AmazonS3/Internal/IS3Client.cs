@@ -35,6 +35,7 @@ namespace FileHub.AmazonS3.Internal
             Stream body,
             long contentLength,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> userMetadata,
             string storageClass,
             string serverSideEncryption,
@@ -105,6 +106,7 @@ namespace FileHub.AmazonS3.Internal
         public long? ContentLength { get; set; }
         public DateTime? LastModified { get; set; }
         public string ContentType { get; set; }
+        public string CacheControl { get; set; }
         public Dictionary<string, string> UserMetadata { get; set; }
         public string StorageClass { get; set; }
         public string ServerSideEncryption { get; set; }

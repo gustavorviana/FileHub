@@ -44,12 +44,14 @@ public class OracleObjectStorageMetadataTests : IClassFixture<InMemoryOciFixture
             new FileWriteOptions
             {
                 ContentType = "image/png",
+                CacheControl = "public,max-age=3600",
                 Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
             });
 
         var meta = await scope.OpenFile("img.bin").GetMetadataAsync();
 
         Assert.Equal("image/png", meta.ContentType);
+        Assert.Equal("public,max-age=3600", meta.CacheControl);
         Assert.Equal("team-x", meta.Tags["owner"]);
         Assert.DoesNotContain(OracleObjectStorageFile.ChangedAtTag, meta.Tags.Keys);
     }

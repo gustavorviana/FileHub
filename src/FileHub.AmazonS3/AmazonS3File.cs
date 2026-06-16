@@ -103,6 +103,7 @@ namespace FileHub.AmazonS3
         {
             _metadata = new AmazonS3FileMetadata(
                 contentType: head.ContentType,
+                cacheControl: head.CacheControl,
                 tags: head.UserMetadata,
                 storageClass: head.StorageClass,
                 serverSideEncryption: head.ServerSideEncryption);

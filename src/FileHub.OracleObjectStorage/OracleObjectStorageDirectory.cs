@@ -118,7 +118,7 @@ namespace FileHub.OracleObjectStorage
         {
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
-                _prefix, empty, contentLength: 0, contentType: DirectoryContentType, opcMeta: null, cancellationToken).ConfigureAwait(false);
+                _prefix, empty, contentLength: 0, contentType: DirectoryContentType, cacheControl: null, opcMeta: null, cancellationToken).ConfigureAwait(false);
         }
 
         // === Existence ===
@@ -147,7 +147,7 @@ namespace FileHub.OracleObjectStorage
             var objectName = OciPathUtil.ResolveSafeObjectName(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(objectName, empty, 0, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(objectName, empty, 0, null, null, null, cancellationToken).ConfigureAwait(false);
             }
             var created = new OracleObjectStorageFile(this, head, 0, DateTime.UtcNow);
             created.MarkLoaded();
@@ -370,7 +370,7 @@ namespace FileHub.OracleObjectStorage
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, cancellationToken).ConfigureAwait(false);
             }
             return new OracleObjectStorageDirectory(this, leaf);
         }
@@ -426,7 +426,7 @@ namespace FileHub.OracleObjectStorage
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, cancellationToken).ConfigureAwait(false);
             }
             return BuildDirectoryChain(segments);
         }

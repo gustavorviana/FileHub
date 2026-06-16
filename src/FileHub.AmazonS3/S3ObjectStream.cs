@@ -220,6 +220,7 @@ namespace FileHub.AmazonS3
                 _writeBuffer,
                 _writeBuffer.Length,
                 contentType: _options?.ContentType,
+                cacheControl: _options?.CacheControl,
                 userMetadata: _options?.Metadata,
                 storageClass: _options?.StorageClass,
                 serverSideEncryption: _options?.ServerSideEncryption,

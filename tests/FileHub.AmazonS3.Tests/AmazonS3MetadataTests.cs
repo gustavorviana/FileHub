@@ -23,6 +23,7 @@ public class AmazonS3MetadataTests
             new S3WriteOptions
             {
                 ContentType = "image/png",
+                CacheControl = "public,max-age=3600",
                 StorageClass = "GLACIER",
                 ServerSideEncryption = "AES256",
                 Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
@@ -31,6 +32,7 @@ public class AmazonS3MetadataTests
         var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("img.bin").GetMetadataAsync();
 
         Assert.Equal("image/png", meta.ContentType);
+        Assert.Equal("public,max-age=3600", meta.CacheControl);
         Assert.Equal("GLACIER", meta.StorageClass);
         Assert.Equal("AES256", meta.ServerSideEncryption);
         Assert.Equal("team-x", meta.Tags["owner"]);

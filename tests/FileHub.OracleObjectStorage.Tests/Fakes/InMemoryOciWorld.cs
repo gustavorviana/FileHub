@@ -42,6 +42,7 @@ internal sealed class InMemoryStoredObject
 {
     public byte[] Body { get; set; } = System.Array.Empty<byte>();
     public string? ContentType { get; set; }
+    public string? CacheControl { get; set; }
     public System.Collections.Generic.Dictionary<string, string>? OpcMeta { get; set; }
     public System.DateTime LastModified { get; set; }
 }

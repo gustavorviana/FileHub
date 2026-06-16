@@ -96,6 +96,7 @@ internal sealed class InMemoryS3Client : IS3Client
             ContentLength = obj.Body.LongLength,
             LastModified = obj.LastModified,
             ContentType = obj.ContentType,
+            CacheControl = obj.CacheControl,
             UserMetadata = obj.UserMetadata is null
                 ? null
                 : new Dictionary<string, string>(obj.UserMetadata, StringComparer.OrdinalIgnoreCase),
@@ -136,6 +137,7 @@ internal sealed class InMemoryS3Client : IS3Client
         Stream body,
         long contentLength,
         string contentType,
+        string cacheControl,
         IReadOnlyDictionary<string, string> userMetadata,
         string storageClass,
         string serverSideEncryption,
@@ -164,6 +166,7 @@ internal sealed class InMemoryS3Client : IS3Client
         {
             Body = bytes,
             ContentType = contentType,
+            CacheControl = cacheControl,
             UserMetadata = userMetadata is null
                 ? null
                 : new Dictionary<string, string>(userMetadata, StringComparer.OrdinalIgnoreCase),

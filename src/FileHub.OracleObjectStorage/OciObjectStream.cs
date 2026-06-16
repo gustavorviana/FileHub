@@ -231,6 +231,7 @@ namespace FileHub.OracleObjectStorage
             }
 
             var contentType = _options?.ContentType;
+            var cacheControl = _options?.CacheControl;
 
             // Server payload = the user tags plus the driver-internal last-write
             // bookkeeping tag.
@@ -244,6 +245,7 @@ namespace FileHub.OracleObjectStorage
                 _writeBuffer,
                 _writeBuffer.Length,
                 contentType,
+                cacheControl,
                 meta,
                 cancellationToken).ConfigureAwait(false);
 
@@ -251,7 +253,7 @@ namespace FileHub.OracleObjectStorage
             _file.OnWriteCommitted(
                 _writeBuffer.Length,
                 now,
-                new FileMetadata(contentType: contentType, tags: userTags));
+                new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags));
         }
 
         private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)

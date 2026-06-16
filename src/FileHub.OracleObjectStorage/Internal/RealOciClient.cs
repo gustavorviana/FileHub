@@ -57,6 +57,7 @@ namespace FileHub.OracleObjectStorage.Internal
                     ContentLength = resp.ContentLength,
                     LastModified = resp.LastModified,
                     ContentType = resp.ContentType,
+                    CacheControl = resp.CacheControl,
                     OpcMeta = resp.OpcMeta != null ? new Dictionary<string, string>(resp.OpcMeta) : null
                 };
             }, cancellationToken).ConfigureAwait(false);
@@ -88,6 +89,7 @@ namespace FileHub.OracleObjectStorage.Internal
             Stream body,
             long contentLength,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> opcMeta,
             CancellationToken cancellationToken = default)
         {
@@ -102,6 +104,7 @@ namespace FileHub.OracleObjectStorage.Internal
                     PutObjectBody = body,
                     ContentLength = contentLength,
                     ContentType = contentType,
+                    CacheControl = cacheControl,
                     OpcMeta = CopyMeta(opcMeta)
                 };
                 await _client.PutObject(request, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);

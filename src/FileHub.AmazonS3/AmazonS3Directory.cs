@@ -102,7 +102,7 @@ namespace FileHub.AmazonS3
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
                 _prefix, empty, contentLength: 0, contentType: DirectoryContentType,
-                userMetadata: null, storageClass: null, serverSideEncryption: null,
+                cacheControl: null, userMetadata: null, storageClass: null, serverSideEncryption: null,
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -135,6 +135,7 @@ namespace FileHub.AmazonS3
                 await _session.Client.PutObjectAsync(
                     key, empty, 0,
                     contentType: null,
+                    cacheControl: null,
                     userMetadata: null,
                     storageClass: null,
                     serverSideEncryption: null,
@@ -367,7 +368,7 @@ namespace FileHub.AmazonS3
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, null, null, cancellationToken).ConfigureAwait(false);
             }
             return new AmazonS3Directory(this, leaf);
         }
@@ -421,7 +422,7 @@ namespace FileHub.AmazonS3
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, null, null, cancellationToken).ConfigureAwait(false);
             }
             return BuildDirectoryChain(segments);
         }

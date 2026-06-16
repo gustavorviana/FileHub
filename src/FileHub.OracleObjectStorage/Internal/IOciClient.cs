@@ -36,6 +36,7 @@ namespace FileHub.OracleObjectStorage.Internal
             Stream body,
             long contentLength,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> opcMeta,
             CancellationToken cancellationToken = default);
 
@@ -63,6 +64,7 @@ namespace FileHub.OracleObjectStorage.Internal
         public long? ContentLength { get; set; }
         public DateTime? LastModified { get; set; }
         public string ContentType { get; set; }
+        public string CacheControl { get; set; }
         public Dictionary<string, string> OpcMeta { get; set; }
     }
 

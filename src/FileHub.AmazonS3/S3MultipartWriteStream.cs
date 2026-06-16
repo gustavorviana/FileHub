@@ -150,7 +150,7 @@ namespace FileHub.AmazonS3
                 using var empty = new MemoryStream(Array.Empty<byte>(), writable: false);
                 await client.PutObjectAsync(
                     _file.ObjectKey, empty, 0,
-                    contentType: null, userMetadata: null,
+                    contentType: null, cacheControl: null, userMetadata: null,
                     storageClass: null, serverSideEncryption: null,
                     cancellationToken).ConfigureAwait(false);
                 _file.OnWriteCommitted(0);

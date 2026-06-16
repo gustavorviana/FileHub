@@ -94,19 +94,19 @@ namespace FileHub.OracleObjectStorage
             _length = head.ContentLength ?? -1;
             _creationTimeUtc = head.LastModified ?? default;
             _lastWriteTimeUtc = ReadChangedAt(head.OpcMeta) ?? _creationTimeUtc;
-            _metadata = BuildSnapshot(head.ContentType, head.OpcMeta);
+            _metadata = BuildSnapshot(head.ContentType, head.CacheControl, head.OpcMeta);
             _isLoaded = true;
         }
 
         // Build the user-facing snapshot, stripping the driver-internal
         // last-write bookkeeping tag so it never surfaces to consumers.
-        private static FileMetadata BuildSnapshot(string contentType, Dictionary<string, string> opcMeta)
+        private static FileMetadata BuildSnapshot(string contentType, string cacheControl, Dictionary<string, string> opcMeta)
         {
             if (opcMeta == null)
-                return new FileMetadata(contentType: contentType);
+                return new FileMetadata(contentType: contentType, cacheControl: cacheControl);
             var userTags = new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase);
             userTags.Remove(ChangedAtTag);
-            return new FileMetadata(contentType: contentType, tags: userTags);
+            return new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags);
         }
 
         private static DateTime? ReadChangedAt(Dictionary<string, string> opcMeta)

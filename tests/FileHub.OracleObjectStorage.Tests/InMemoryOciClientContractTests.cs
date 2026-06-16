@@ -31,7 +31,7 @@ public class InMemoryOciClientContractTests
         using var c = NewClient();
         var body = Encoding.UTF8.GetBytes("hello");
         using (var ms = new MemoryStream(body))
-            await c.PutObjectAsync("k", ms, body.Length, contentType: null, opcMeta: null);
+            await c.PutObjectAsync("k", ms, body.Length, contentType: null, cacheControl: null, opcMeta: null);
 
         var get = await c.GetObjectAsync("k", rangeStart: null, rangeEndInclusive: null);
         using var reader = new StreamReader(get.InputStream);
@@ -43,7 +43,7 @@ public class InMemoryOciClientContractTests
     {
         using var c = NewClient();
         using (var ms = new MemoryStream(new byte[] { 1, 2, 3, 4, 5 }))
-            await c.PutObjectAsync("k", ms, 5, null, null);
+            await c.PutObjectAsync("k", ms, 5, null, null, null);
 
         var get = await c.GetObjectAsync("k", 1, 3);
         using var ms2 = new MemoryStream();
@@ -63,7 +63,7 @@ public class InMemoryOciClientContractTests
     {
         using var c = NewClient();
         using (var ms = new MemoryStream(new byte[] { 9 }))
-            await c.PutObjectAsync("src", ms, 1, null, null);
+            await c.PutObjectAsync("src", ms, 1, null, null, null);
 
         await c.RenameObjectAsync("src", "dst");
 
@@ -84,7 +84,7 @@ public class InMemoryOciClientContractTests
     {
         using var c = NewClient();
         foreach (var k in new[] { "root/", "root/a/", "root/a/x.txt", "root/a/y.txt", "root/b/z.txt", "root/c.txt" })
-            using (var ms = new MemoryStream()) await c.PutObjectAsync(k, ms, 0, null, null);
+            using (var ms = new MemoryStream()) await c.PutObjectAsync(k, ms, 0, null, null, null);
 
         var page = await c.ListObjectsAsync("root/", "/", limit: null, start: null);
         var objects = page.Objects.Select(o => o.Name).OrderBy(n => n).ToArray();
@@ -101,7 +101,7 @@ public class InMemoryOciClientContractTests
     {
         using var c = NewClient();
         for (int i = 0; i < 10; i++)
-            using (var ms = new MemoryStream()) await c.PutObjectAsync($"p/{i:D2}", ms, 0, null, null);
+            using (var ms = new MemoryStream()) await c.PutObjectAsync($"p/{i:D2}", ms, 0, null, null, null);
 
         var page1 = await c.ListObjectsAsync("p/", null, limit: 4, start: null);
         Assert.Equal(4, page1.Objects.Count);
@@ -136,7 +136,7 @@ public class InMemoryOciClientContractTests
     public async Task CreatePar_OnExistingObject_ReturnsAccessUri()
     {
         using var c = NewClient();
-        using (var ms = new MemoryStream()) await c.PutObjectAsync("k", ms, 0, null, null);
+        using (var ms = new MemoryStream()) await c.PutObjectAsync("k", ms, 0, null, null, null);
         var uri = await c.CreatePreauthenticatedReadRequestAsync("k", "parX", DateTime.UtcNow.AddMinutes(5));
         Assert.StartsWith("/p/parX/", uri);
         Assert.Single(c.Pars);
