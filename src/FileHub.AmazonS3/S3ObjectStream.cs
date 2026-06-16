@@ -19,6 +19,7 @@ namespace FileHub.AmazonS3
         internal const int BufferSize = 10 * 1024 * 1024;
 
         private readonly AmazonS3File _file;
+        private readonly S3WriteOptions _options;
         private readonly MemoryStream _writeBuffer;
         private readonly bool _isWrite;
         private long _position;
@@ -27,10 +28,11 @@ namespace FileHub.AmazonS3
 
         public event EventHandler Disposed;
 
-        public S3ObjectStream(AmazonS3File file, bool isWrite)
+        public S3ObjectStream(AmazonS3File file, bool isWrite, S3WriteOptions options = null)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _isWrite = isWrite;
+            _options = options;
             _writeBuffer = isWrite ? new MemoryStream() : null;
             CanRead = !isWrite;
             CanWrite = isWrite;
@@ -212,20 +214,18 @@ namespace FileHub.AmazonS3
         {
             _writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
-            var md = _file.Metadata;
-            var dirty = md.IsModified;
 
             await client.PutObjectAsync(
                 _file.ObjectKey,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType: dirty ? md.ContentType : null,
-                userMetadata: dirty && md.Tags.Count > 0 ? (System.Collections.Generic.IReadOnlyDictionary<string, string>)md.Tags : null,
-                storageClass: dirty ? md.StorageClass : null,
-                serverSideEncryption: dirty ? md.ServerSideEncryption : null,
+                contentType: _options?.ContentType,
+                userMetadata: _options?.Metadata,
+                storageClass: _options?.StorageClass,
+                serverSideEncryption: _options?.ServerSideEncryption,
                 cancellationToken).ConfigureAwait(false);
 
-            _file.OnWriteCommitted(_writeBuffer.Length);
+            _file.OnWriteCommitted(_writeBuffer.Length, _options);
         }
 
         private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)

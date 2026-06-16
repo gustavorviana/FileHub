@@ -7,7 +7,7 @@ using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
-    public class AmazonS3File : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, IMultipartUploadSignable, IMetadataAware, ILazyLoad
+    public class AmazonS3File : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, IMultipartUploadSignable, ILazyLoad
     {
         /// <summary>S3 minimum for multipart parts (except the last). 5 MiB.</summary>
         internal const long S3MinimumPartSize = 5L * 1024 * 1024;
@@ -49,30 +49,6 @@ namespace FileHub.AmazonS3
         /// I/O in getters.
         /// </summary>
         public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc;
-
-        /// <summary>
-        /// Mutable snapshot of the file's S3 metadata (tags, storage
-        /// class, content-type, SSE). Populated by
-        /// <see cref="Refresh"/> / <see cref="RefreshAsync"/> and by
-        /// <see cref="AmazonS3Directory.TryOpenFile"/>. Mutate freely — on
-        /// the next alteration op (<see cref="FileEntry.SetBytes"/>,
-        /// <see cref="CopyTo(FileDirectory, string)"/>,
-        /// <see cref="MoveTo(FileDirectory, string)"/>, stream commit),
-        /// if <see cref="FileMetadata.IsModified"/> is <c>true</c>, the
-        /// driver applies the staged values via
-        /// <c>MetadataDirective = REPLACE</c> on S3 and clears the flag.
-        ///
-        /// <para>
-        /// Canonical pattern to update metadata without re-uploading bytes:
-        /// <code>
-        /// file.Metadata.StorageClass = "GLACIER";
-        /// file.CopyTo(file.Parent, file.Name);   // self-copy applies the change
-        /// </code>
-        /// </para>
-        /// </summary>
-        public AmazonS3FileMetadata Metadata => _metadata;
-
-        FileMetadata IMetadataAware.Metadata => _metadata;
 
         internal string ObjectKey => S3PathUtil.CombineObjectKey(_parent.PrefixInternal, Name);
         internal IS3Session SessionInternal => _parent.SessionInternal;
@@ -125,7 +101,7 @@ namespace FileHub.AmazonS3
 
         internal void LoadMetadataFromHead(S3HeadResult head)
         {
-            _metadata.LoadSynced(
+            _metadata.LoadFromHead(
                 tags: head.UserMetadata,
                 storageClass: head.StorageClass,
                 contentType: head.ContentType,
@@ -171,14 +147,14 @@ namespace FileHub.AmazonS3
             return Task.FromResult<Stream>(OpenStream(isWrite: true));
         }
 
-        private S3ObjectStream OpenStream(bool isWrite)
+        private S3ObjectStream OpenStream(bool isWrite, S3WriteOptions options = null)
         {
             if (Disposed)
                 throw new ObjectDisposedException(nameof(AmazonS3File));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
 
-            var stream = new S3ObjectStream(this, isWrite);
+            var stream = new S3ObjectStream(this, isWrite, options);
             _lastOpenStream = stream;
             stream.Disposed += OnStreamDisposed;
             return stream;
@@ -193,17 +169,26 @@ namespace FileHub.AmazonS3
 
         /// <summary>
         /// Called at the end of a successful upload to reflect the new
-        /// length / last-write timestamp, and to mark the metadata
-        /// snapshot as synced with the store (since the PUT just applied
-        /// the staged values). Callers that need the authoritative server
-        /// timestamp should call <see cref="Refresh"/>.
+        /// length / last-write timestamp and promote any applied
+        /// <see cref="S3WriteOptions"/> into the cached snapshot. Callers that
+        /// need the authoritative server timestamp should call <see cref="Refresh"/>.
         /// </summary>
-        internal void OnWriteCommitted(long bytesWritten)
+        internal void OnWriteCommitted(long bytesWritten, S3WriteOptions applied = null)
         {
             _length = bytesWritten;
             _lastWriteTimeUtc = DateTime.UtcNow;
-            _metadata.MarkSynced();
+            ApplyToMetadata(applied);
             _isLoaded = true;
+        }
+
+        private void ApplyToMetadata(S3WriteOptions options)
+        {
+            if (options == null) return;
+            if (options.ContentType != null) _metadata.ContentType = options.ContentType;
+            if (options.CacheControl != null) _metadata.CacheControl = options.CacheControl;
+            if (options.Metadata != null) _metadata.SetTags(options.Metadata);
+            if (options.StorageClass != null) _metadata.StorageClass = options.StorageClass;
+            if (options.ServerSideEncryption != null) _metadata.ServerSideEncryption = options.ServerSideEncryption;
         }
 
         // === Mutations ===
@@ -222,25 +207,22 @@ namespace FileHub.AmazonS3
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             // S3 has no atomic rename. Fall back to copy+delete in-place.
-            // If the caller staged metadata changes (Metadata.IsModified),
-            // apply with REPLACE; otherwise preserve source metadata.
+            // Always default COPY — source metadata is preserved on the new key.
             ThrowIfReadOnly();
             S3PathUtil.ValidateName(newName);
             var sourceKey = ObjectKey;
             var destinationKey = S3PathUtil.CombineObjectKey(_parent.PrefixInternal, newName);
             var client = SessionInternal.Client;
 
-            var replace = _metadata.IsModified;
             await client.CopyFromBucketAsync(
                 client.Bucket, sourceKey, destinationKey,
-                metadataReplace: replace,
-                contentType: replace ? _metadata.ContentType : null,
-                userMetadata: replace && _metadata.Tags.Count > 0 ? (IReadOnlyDictionary<string, string>)_metadata.Tags : null,
-                storageClass: replace ? _metadata.StorageClass : null,
-                serverSideEncryption: replace ? _metadata.ServerSideEncryption : null,
+                metadataReplace: false,
+                contentType: null,
+                userMetadata: null,
+                storageClass: null,
+                serverSideEncryption: null,
                 cancellationToken).ConfigureAwait(false);
             await client.DeleteObjectAsync(sourceKey, cancellationToken).ConfigureAwait(false);
-            if (replace) _metadata.MarkSynced();
             Name = newName;
             return this;
         }
@@ -273,6 +255,53 @@ namespace FileHub.AmazonS3
             return newFile;
         }
 
+        // === FileWriteOptions / metadata-via-options surface ===
+
+        /// <summary>
+        /// Open a write stream whose commit applies <paramref name="options"/>
+        /// on <c>PutObject</c>. Options live with the stream — no cross-call
+        /// staging on the file.
+        /// </summary>
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<Stream>(OpenStream(isWrite: true, NormalizeOptions(options)));
+        }
+
+        public override Stream GetWriteStream(FileWriteOptions options)
+        {
+            ThrowIfReadOnly();
+            return OpenStream(isWrite: true, NormalizeOptions(options));
+        }
+
+        /// <summary>
+        /// Returns the cached metadata snapshot when the driver already loaded
+        /// it (strict <c>OpenFile</c> / <c>TryOpenFile</c> paid the HEAD); fires
+        /// a single HEAD to populate it otherwise.
+        /// </summary>
+        public override async Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            if (!_isLoaded)
+                await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            return _metadata;
+        }
+
+        // Normalize FileWriteOptions to S3WriteOptions so internal paths
+        // can read StorageClass / SSE slots even when the caller passed the
+        // base type. CacheControl: TODO plumb through IS3Client.
+        private static S3WriteOptions NormalizeOptions(FileWriteOptions options)
+        {
+            if (options == null) return null;
+            if (options is S3WriteOptions s3) return s3;
+            return new S3WriteOptions
+            {
+                ContentType = options.ContentType,
+                CacheControl = options.CacheControl,
+                Metadata = options.Metadata,
+            };
+        }
+
         public override FileEntry CopyTo(FileDirectory directory, string name)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
 
@@ -291,24 +320,21 @@ namespace FileHub.AmazonS3
                 var destinationKey = S3PathUtil.CombineObjectKey(s3Dir.PrefixInternal, name);
                 var sourceClient = SessionInternal.Client;
                 var destClient = s3Dir.SessionInternal.Client;
-                var replace = _metadata.IsModified;
                 // Issue CopyObject via the destination client — its endpoint
                 // is the destination region, which is the only endpoint that
                 // S3 accepts for cross-region routing. Same-region copies
-                // are indistinguishable. If the source has staged metadata
-                // changes, apply with REPLACE; otherwise the SDK default
-                // (COPY) makes the destination inherit source state.
+                // are indistinguishable. Always default COPY — destination
+                // inherits the source's metadata.
                 await destClient.CopyFromBucketAsync(
                     sourceClient.Bucket,
                     ObjectKey,
                     destinationKey,
-                    metadataReplace: replace,
-                    contentType: replace ? _metadata.ContentType : null,
-                    userMetadata: replace && _metadata.Tags.Count > 0 ? (IReadOnlyDictionary<string, string>)_metadata.Tags : null,
-                    storageClass: replace ? _metadata.StorageClass : null,
-                    serverSideEncryption: replace ? _metadata.ServerSideEncryption : null,
+                    metadataReplace: false,
+                    contentType: null,
+                    userMetadata: null,
+                    storageClass: null,
+                    serverSideEncryption: null,
                     cancellationToken).ConfigureAwait(false);
-                if (replace) _metadata.MarkSynced();
                 return new AmazonS3File(s3Dir, name, _length, _lastWriteTimeUtc);
             }
             return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
@@ -351,16 +377,15 @@ namespace FileHub.AmazonS3
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            // If the caller staged metadata changes, apply them on
-            // InitiateMultipartUpload; otherwise the object gets defaults.
-            var md = _metadata;
-            var dirty = md.IsModified;
+            // Multipart-via-IMultipartUploadable accepts no FileWriteOptions today
+            // (interface limit) — object created with bucket defaults. Callers
+            // needing metadata on multipart should use the regular write path.
             var uploadId = await SessionInternal.Client.BeginMultipartUploadAsync(
                 ObjectKey,
-                contentType: dirty ? md.ContentType : null,
-                userMetadata: dirty && md.Tags.Count > 0 ? (IReadOnlyDictionary<string, string>)md.Tags : null,
-                storageClass: dirty ? md.StorageClass : null,
-                serverSideEncryption: dirty ? md.ServerSideEncryption : null,
+                contentType: null,
+                userMetadata: null,
+                storageClass: null,
+                serverSideEncryption: null,
                 cancellationToken).ConfigureAwait(false);
             return new S3MultipartWriteStream(this, uploadId);
         }
@@ -387,18 +412,14 @@ namespace FileHub.AmazonS3
                 throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
 
             var client = SessionInternal.Client;
-            // If the caller staged metadata changes, apply them on the
-            // InitiateMultipartUpload — S3 records these on the upload
-            // and they stick when the client commits via the presigned
-            // URLs. Otherwise the resulting object takes bucket defaults.
-            var md = _metadata;
-            var dirty = md.IsModified;
+            // Signed multipart accepts no FileWriteOptions today (interface limit)
+            // — object created with bucket defaults.
             var uploadId = await client.BeginMultipartUploadAsync(
                 ObjectKey,
-                contentType: dirty ? md.ContentType : null,
-                userMetadata: dirty && md.Tags.Count > 0 ? (IReadOnlyDictionary<string, string>)md.Tags : null,
-                storageClass: dirty ? md.StorageClass : null,
-                serverSideEncryption: dirty ? md.ServerSideEncryption : null,
+                contentType: null,
+                userMetadata: null,
+                storageClass: null,
+                serverSideEncryption: null,
                 cancellationToken).ConfigureAwait(false);
 
             var expiresUtc = DateTime.UtcNow.Add(expiresIn);
@@ -426,7 +447,6 @@ namespace FileHub.AmazonS3
 
             await SessionInternal.Client.CompleteMultipartUploadAsync(ObjectKey, uploadId, completed, cancellationToken).ConfigureAwait(false);
             _lastWriteTimeUtc = DateTime.UtcNow;
-            _metadata.MarkSynced();
             _isLoaded = true;
         }
 

@@ -182,6 +182,131 @@ namespace FileHub
             await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
+        // === Write-with-options overloads (new API; drivers without metadata fall back to base) ===
+
+        /// <summary>
+        /// Open a write stream applying <paramref name="options"/> on commit
+        /// (content type, cache-control, user metadata). The base implementation
+        /// ignores <paramref name="options"/> and delegates to
+        /// <see cref="GetWriteStreamAsync(CancellationToken)"/>; drivers with a
+        /// native per-object metadata surface override.
+        /// </summary>
+        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return GetWriteStreamAsync(cancellationToken);
+        }
+
+        /// <summary>Sync sibling of <see cref="GetWriteStreamAsync(FileWriteOptions, CancellationToken)"/>.</summary>
+        public virtual Stream GetWriteStream(FileWriteOptions options)
+            => GetWriteStreamAsync(options).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <summary>
+        /// Write <paramref name="buffer"/> applying <paramref name="options"/>
+        /// at commit time. Base implementation delegates to
+        /// <see cref="GetWriteStreamAsync(FileWriteOptions, CancellationToken)"/>.
+        /// </summary>
+        public virtual async Task SetBytesAsync(byte[] buffer, FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Sync sibling of <see cref="SetBytesAsync(byte[], FileWriteOptions, CancellationToken)"/>.</summary>
+        public virtual void SetBytes(byte[] buffer, FileWriteOptions options)
+        {
+            ThrowIfReadOnly();
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            SetBytesAsync(buffer, options).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Write <paramref name="content"/> with the given encoding (default UTF-8 without BOM)
+        /// and apply <paramref name="options"/> at commit time.
+        /// </summary>
+        public virtual async Task SetTextAsync(string content, Encoding encoding, FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+            var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
+
+            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Sync sibling of <see cref="SetTextAsync(string, Encoding, FileWriteOptions, CancellationToken)"/>.</summary>
+        public virtual void SetText(string content, Encoding encoding, FileWriteOptions options)
+        {
+            ThrowIfReadOnly();
+            SetTextAsync(content, encoding, options).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Copy <paramref name="source"/> to this file applying <paramref name="options"/>
+        /// at commit time.
+        /// </summary>
+        public Task CopyFromStreamAsync(Stream source, FileWriteOptions options, CancellationToken cancellationToken = default)
+            => CopyFromStreamAsync(source, options, progress: null, cancellationToken);
+
+        /// <inheritdoc cref="CopyFromStreamAsync(Stream, FileWriteOptions, CancellationToken)"/>
+        public virtual async Task CopyFromStreamAsync(Stream source, FileWriteOptions options, IProgress<TransferStatus> progress, CancellationToken cancellationToken = default)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (!source.CanRead) throw new NotSupportedException("The source stream does not support reading.");
+
+            ThrowIfReadOnly();
+            var total = progress != null ? source.Length : 0;
+            var buffer = new byte[81920];
+            int bytesRead = 0;
+            var transferred = 0;
+
+            using var destination = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+
+            while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
+                if (progress != null)
+                {
+                    transferred += bytesRead;
+                    progress.Report(new TransferStatus(transferred, total));
+                }
+            }
+        }
+
+        /// <summary>Sync sibling of <see cref="CopyFromStreamAsync(Stream, FileWriteOptions, CancellationToken)"/>.</summary>
+        public void CopyFromStream(Stream source, FileWriteOptions options)
+            => CopyFromStreamAsync(source, options).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <inheritdoc cref="CopyFromStream(Stream, FileWriteOptions)"/>
+        public void CopyFromStream(Stream source, FileWriteOptions options, IProgress<TransferStatus> progress)
+            => CopyFromStreamAsync(source, options, progress).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        // === Metadata access (new API) ===
+
+        /// <summary>
+        /// Read the file's per-object metadata (content type, cache-control,
+        /// user tags, driver-specific typed fields). When the driver already
+        /// loaded the snapshot as part of an earlier operation (a strict
+        /// <c>OpenFile</c> or <c>TryOpenFile</c> that paid a HEAD), the cached
+        /// instance is returned immediately. Otherwise the driver fetches it
+        /// once. Drivers without a per-object metadata surface return an empty
+        /// snapshot.
+        /// </summary>
+        public virtual Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new FileMetadata());
+        }
+
+        /// <summary>Sync sibling of <see cref="GetMetadataAsync"/>.</summary>
+        public virtual FileMetadata GetMetadata()
+            => GetMetadataAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+
+
         public Task CopyFromStreamAsync(Stream source, CancellationToken cancellationToken = default)
             => CopyFromStreamAsync(source, progress: null, cancellationToken);
 
@@ -196,11 +321,11 @@ namespace FileHub
             int bytesRead = 0;
             var transferred = 0;
 
-            using var destination = await GetWriteStreamAsync(cancellationToken);
+            using var destination = await GetWriteStreamAsync(cancellationToken).ConfigureAwait(false);
 
             while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
             {
-                await destination.WriteAsync(buffer, 0, bytesRead).ConfigureAwait(false);
+                await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
                 if (progress != null)
                 {
                     transferred += bytesRead;

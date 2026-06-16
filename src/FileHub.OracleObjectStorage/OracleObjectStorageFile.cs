@@ -15,8 +15,17 @@ namespace FileHub.OracleObjectStorage
         private long _length;
         private DateTime _creationTimeUtc;
         private Dictionary<string, string> _tags;
+        private string _contentType;
         private bool _isLoaded;
         private OciObjectStream _lastOpenStream;
+
+        // Pending options staged for the next write commit (consumed by OciObjectStream).
+        private string _pendingContentType;
+        private IReadOnlyDictionary<string, string> _pendingUserMetadata;
+
+        internal string PendingContentTypeInternal { get => _pendingContentType; set => _pendingContentType = value; }
+        internal IReadOnlyDictionary<string, string> PendingUserMetadataInternal { get => _pendingUserMetadata; set => _pendingUserMetadata = value; }
+        internal string ContentTypeInternal { get => _contentType; set => _contentType = value; }
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from OCI.
@@ -89,6 +98,7 @@ namespace FileHub.OracleObjectStorage
             var head = await SessionInternal.Client.HeadObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
             _length = head.ContentLength ?? -1;
             _creationTimeUtc = head.LastModified ?? default;
+            _contentType = head.ContentType;
             _tags = head.OpcMeta != null
                 ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
                 : null;
@@ -266,6 +276,51 @@ namespace FileHub.OracleObjectStorage
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
             return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+        }
+
+        // === FileWriteOptions / metadata-via-options surface ===
+
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            StageOptions(options);
+            return GetWriteStreamAsync(cancellationToken);
+        }
+
+        public override Stream GetWriteStream(FileWriteOptions options)
+        {
+            ThrowIfReadOnly();
+            StageOptions(options);
+            return GetWriteStream();
+        }
+
+        /// <summary>
+        /// Returns the cached metadata snapshot when the driver already loaded
+        /// it (strict <c>OpenFile</c> / <c>TryOpenFile</c> paid the HEAD); fires
+        /// a single HEAD to populate it otherwise.
+        /// </summary>
+        public override async Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            if (!_isLoaded)
+                await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            var snapshot = new FileMetadata { ContentType = _contentType };
+            if (_tags != null)
+            {
+                // Strip the driver-internal last-write bookkeeping tag so it
+                // never surfaces in the user-facing metadata snapshot.
+                var userTags = new Dictionary<string, string>(_tags, StringComparer.OrdinalIgnoreCase);
+                userTags.Remove(ChangedAtTag);
+                snapshot.SetTags(userTags);
+            }
+            return snapshot;
+        }
+
+        private void StageOptions(FileWriteOptions options)
+        {
+            if (options == null) return;
+            if (options.ContentType != null) _pendingContentType = options.ContentType;
+            if (options.Metadata != null) _pendingUserMetadata = options.Metadata;
+            // CacheControl: not plumbed through IOciClient yet.
         }
 
         // === IUrlAccessible ===

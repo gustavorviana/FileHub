@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace FileHub.Memory
 {
@@ -13,6 +15,11 @@ namespace FileHub.Memory
         public MemoryStream Stream { get; }
         public DateTime CreationTimeUtc { get; }
         public DateTime LastWriteTimeUtc { get; set; }
+
+        public string ContentType { get; set; }
+        public string CacheControl { get; set; }
+        public IReadOnlyDictionary<string, string> Metadata { get; set; } =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         public MemoryFileData(string name)
         {
@@ -30,6 +37,19 @@ namespace FileHub.Memory
             Stream.Position = 0;
             CreationTimeUtc = DateTime.UtcNow;
             LastWriteTimeUtc = CreationTimeUtc;
+        }
+
+        public void ApplyOptions(FileWriteOptions options)
+        {
+            if (options == null) return;
+            if (options.ContentType != null) ContentType = options.ContentType;
+            if (options.CacheControl != null) CacheControl = options.CacheControl;
+            if (options.Metadata != null)
+            {
+                Metadata = new Dictionary<string, string>(
+                    options.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
+                    StringComparer.OrdinalIgnoreCase);
+            }
         }
 
         public void AcquireRead()
@@ -79,6 +99,11 @@ namespace FileHub.Memory
             Stream.CopyTo(data.Stream);
             Stream.Position = savedPosition;
             data.Stream.Position = 0;
+            data.ContentType = ContentType;
+            data.CacheControl = CacheControl;
+            data.Metadata = new Dictionary<string, string>(
+                Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
+                StringComparer.OrdinalIgnoreCase);
             return data;
         }
     }

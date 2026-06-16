@@ -6,8 +6,8 @@ namespace FileHub
     /// <summary>
     /// Implemented by <see cref="FileSystemEntry"/> types whose metadata is
     /// cached locally and needs to be re-fetched from the backing store
-    /// explicitly — typically cloud / network drivers like OCI Object Storage
-    /// and FTP. Drivers backed by the local filesystem usually don't need this.
+    /// explicitly — typically cloud or network-backed drivers. Drivers backed
+    /// by the local filesystem usually don't need this.
     /// </summary>
     /// <remarks>
     /// Exists so callers can decide, in a context-appropriate way, whether to

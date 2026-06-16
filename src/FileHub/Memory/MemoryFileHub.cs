@@ -3,6 +3,7 @@ namespace FileHub.Memory
     public class MemoryFileHub : IMemoryFileHub
     {
         public FileDirectory Root { get; }
+        public FileHubFeatures Features { get; } = new FileHubFeatures(metadata: true);
 
         public MemoryFileHub(string rootName = "root")
             : this(rootName, DirectoryPathMode.OpenIntermediates) { }

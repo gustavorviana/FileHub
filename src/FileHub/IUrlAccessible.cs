@@ -6,8 +6,8 @@ namespace FileHub
 {
     /// <summary>
     /// Indicates that a file system item can be accessed through a URL.
-    /// Implemented by drivers that expose items over HTTP (S3, Oracle OCI,
-    /// local public directories, etc).
+    /// Implemented by drivers backed by storage that exposes items over HTTP
+    /// (object storage with signed URLs, public file servers, CDNs, etc).
     /// </summary>
     public interface IUrlAccessible
     {

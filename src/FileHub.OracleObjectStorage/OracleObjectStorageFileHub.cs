@@ -20,6 +20,7 @@ namespace FileHub.OracleObjectStorage
         private bool _disposed;
 
         public FileDirectory Root { get; }
+        public FileHubFeatures Features { get; } = new FileHubFeatures(metadata: true);
 
         private OracleObjectStorageFileHub(OciSession session, string rootPath, DirectoryPathMode pathMode)
         {

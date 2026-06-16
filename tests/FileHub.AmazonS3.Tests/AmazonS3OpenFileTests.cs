@@ -57,7 +57,6 @@ public class AmazonS3OpenFileTests
         Assert.Equal(puts, client.PutInvocationCount);
         Assert.False(file.IsLoaded);
         Assert.Equal(-1, file.Length);
-        Assert.Null(file.Metadata.StorageClass);
     }
 
     [Fact]

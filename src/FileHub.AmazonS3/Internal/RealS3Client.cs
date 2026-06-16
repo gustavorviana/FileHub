@@ -114,7 +114,7 @@ namespace FileHub.AmazonS3.Internal
                 if (userMetadata != null)
                 {
                     foreach (var kv in userMetadata)
-                        req.Metadata.Add(kv.Key, kv.Value);
+                        req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
                 }
                 if (!string.IsNullOrEmpty(storageClass))
                     req.StorageClass = S3StorageClass.FindValue(storageClass);
@@ -169,7 +169,7 @@ namespace FileHub.AmazonS3.Internal
                     if (userMetadata != null)
                     {
                         foreach (var kv in userMetadata)
-                            req.Metadata.Add(kv.Key, kv.Value);
+                            req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
                     }
                 }
                 // Storage class + SSE are independent of MetadataDirective in S3;
@@ -280,7 +280,7 @@ namespace FileHub.AmazonS3.Internal
                 if (userMetadata != null)
                 {
                     foreach (var kv in userMetadata)
-                        req.Metadata.Add(kv.Key, kv.Value);
+                        req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
                 }
                 if (!string.IsNullOrEmpty(storageClass))
                     req.StorageClass = S3StorageClass.FindValue(storageClass);

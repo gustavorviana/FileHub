@@ -443,6 +443,7 @@ public class NamedFileHubTests
     {
         private readonly MemoryFileHub _inner = new();
         public FileDirectory Root => _inner.Root;
+        public FileHubFeatures Features => _inner.Features;
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
     }

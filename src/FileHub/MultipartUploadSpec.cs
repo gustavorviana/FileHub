@@ -3,12 +3,11 @@ using System;
 namespace FileHub
 {
     /// <summary>
-    /// Describes how to split a large upload into parts for multipart APIs
-    /// (S3 multipart, Azure block blobs, GCS resumable uploads, etc.).
-    /// Drivers read <see cref="TotalBytes"/>, <see cref="PartSize"/>, and
-    /// <see cref="PartCount"/> to generate the right number of parts and
-    /// validate against backend-specific limits (S3: parts must be at
-    /// least 5 MiB except the last; at most 10,000 parts per upload).
+    /// Describes how to split a large upload into parts for multipart upload
+    /// APIs. Drivers read <see cref="TotalBytes"/>, <see cref="PartSize"/>,
+    /// and <see cref="PartCount"/> to generate the right number of parts and
+    /// validate against backend-specific limits (common object-storage
+    /// constraints: parts ≥ 5 MiB except the last; ≤ 10,000 parts per upload).
     /// </summary>
     public readonly struct MultipartUploadSpec : IEquatable<MultipartUploadSpec>
     {

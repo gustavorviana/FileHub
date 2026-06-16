@@ -23,8 +23,8 @@ namespace FileHub.Local
         /// <summary>
         /// Create a <see cref="LocalFile"/> reference pointing at <paramref name="fileName"/>
         /// inside <paramref name="directory"/>. The file itself is not created on
-        /// disk — call <see cref="FileEntry.SetText"/>, <see cref="FileEntry.SetBytes"/> or
-        /// <see cref="GetWriteStream"/> to materialise it, or <see cref="Exists"/>
+        /// disk — call <see cref="FileEntry.SetText(string, System.Text.Encoding)"/>, <see cref="FileEntry.SetBytes(byte[])"/> or
+        /// <see cref="FileEntry.GetWriteStream()"/> to materialise it, or <see cref="Exists"/>
         /// to test whether it already exists.
         /// </summary>
         /// <remarks>

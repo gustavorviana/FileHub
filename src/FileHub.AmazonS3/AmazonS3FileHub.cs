@@ -20,6 +20,7 @@ namespace FileHub.AmazonS3
         private bool _disposed;
 
         public FileDirectory Root { get; }
+        public FileHubFeatures Features { get; } = new FileHubFeatures(metadata: true);
 
         private AmazonS3FileHub(S3Session session, string rootPath, DirectoryPathMode pathMode)
         {

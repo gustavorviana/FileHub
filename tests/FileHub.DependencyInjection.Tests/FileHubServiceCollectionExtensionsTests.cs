@@ -133,6 +133,7 @@ public class FileHubServiceCollectionExtensionsTests
     private sealed class DisposableFileHub : IFileHub, IDisposable
     {
         public FileDirectory Root { get; } = new MemoryFileHub().Root;
+        public FileHubFeatures Features => FileHubFeatures.None;
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
     }

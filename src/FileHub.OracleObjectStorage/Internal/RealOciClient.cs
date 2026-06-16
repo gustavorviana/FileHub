@@ -329,8 +329,10 @@ namespace FileHub.OracleObjectStorage.Internal
         private static Dictionary<string, string> CopyMeta(IReadOnlyDictionary<string, string> source)
         {
             if (source == null) return null;
+            // Normalize null values to empty strings — OCI headers reject null
+            // and the SDK serialization behavior is undefined for null values.
             var copy = new Dictionary<string, string>(source.Count);
-            foreach (var kvp in source) copy[kvp.Key] = kvp.Value;
+            foreach (var kvp in source) copy[kvp.Key] = kvp.Value ?? string.Empty;
             return copy;
         }
 

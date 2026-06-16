@@ -21,9 +21,9 @@ namespace FileHub
         /// smallest number of operations the backend supports: one recursive
         /// <c>mkdir</c> on a local filesystem, one <c>PUT</c>/<c>HEAD</c> on
         /// object storage. Cost-optimised — default for cloud-storage hubs
-        /// (OCI Object Storage, AWS S3) where each API call is billed.
-        /// Drivers that cannot usefully skip intermediates (e.g. the in-memory
-        /// driver) fall back to <see cref="OpenIntermediates"/> behaviour.
+        /// where each API call is billed. Drivers that cannot usefully skip
+        /// intermediates (e.g. the in-memory driver) fall back to
+        /// <see cref="OpenIntermediates"/> behaviour.
         /// </summary>
         Direct
     }

@@ -10,7 +10,7 @@ namespace FileHub
     /// writing the file also holds the bytes (server-side generation,
     /// long-running import, uploading a local stream to an object store).
     ///
-    /// Contrast with the regular <see cref="FileEntry.GetWriteStream"/>,
+    /// Contrast with the regular <see cref="FileEntry.GetWriteStream()"/>,
     /// which buffers the full payload in memory before issuing a single
     /// request — fine for small files but unsuitable for large ones.
     /// </summary>
@@ -19,7 +19,8 @@ namespace FileHub
         /// <summary>
         /// Minimum size (in bytes) the backing store accepts for any part
         /// except the last one. Writes below this threshold are buffered
-        /// locally; crossing it triggers a part upload. S3 = 5 MiB.
+        /// locally; crossing it triggers a part upload. Common object-storage
+        /// backends require parts of at least 5 MiB.
         /// </summary>
         long MinimumPartSize { get; }
 

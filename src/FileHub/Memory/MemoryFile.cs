@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.Memory
 {
@@ -80,6 +82,35 @@ namespace FileHub.Memory
             var newFile = CopyTo(directory, name);
             Delete();
             return newFile;
+        }
+
+        // === FileWriteOptions / metadata support ===
+
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+            Data.ApplyOptions(options);
+            return Task.FromResult(GetWriteStream());
+        }
+
+        public override Stream GetWriteStream(FileWriteOptions options)
+        {
+            ThrowIfReadOnly();
+            Data.ApplyOptions(options);
+            return GetWriteStream();
+        }
+
+        public override Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var snapshot = new FileMetadata
+            {
+                ContentType = Data.ContentType,
+                CacheControl = Data.CacheControl,
+            };
+            snapshot.SetTags(Data.Metadata);
+            return Task.FromResult(snapshot);
         }
     }
 }

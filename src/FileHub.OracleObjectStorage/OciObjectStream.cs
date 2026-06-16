@@ -217,18 +217,39 @@ namespace FileHub.OracleObjectStorage
             // pre-upload state. OnWriteCommitted (below) is what promotes the
             // timestamp into TagsInternal after the object is durable.
             _file.EnsureTags();
-            var meta = new System.Collections.Generic.Dictionary<string, string>(_file.TagsInternal)
+            var meta = new System.Collections.Generic.Dictionary<string, string>(_file.TagsInternal, System.StringComparer.OrdinalIgnoreCase)
             {
                 [OracleObjectStorageFile.ChangedAtTag] = timestamp
             };
+
+            // Merge in user metadata staged via FileWriteOptions, if any.
+            var pendingMeta = _file.PendingUserMetadataInternal;
+            if (pendingMeta != null)
+            {
+                foreach (var kv in pendingMeta)
+                    meta[kv.Key] = kv.Value;
+            }
 
             await client.PutObjectAsync(
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType: null,
+                contentType: _file.PendingContentTypeInternal,
                 meta,
                 cancellationToken).ConfigureAwait(false);
+
+            // Promote the staged content type / metadata to the file's snapshot
+            // and clear the pending slots so a follow-up write doesn't re-apply
+            // stale options.
+            if (_file.PendingContentTypeInternal != null)
+                _file.ContentTypeInternal = _file.PendingContentTypeInternal;
+            _file.PendingContentTypeInternal = null;
+            if (pendingMeta != null)
+            {
+                foreach (var kv in pendingMeta)
+                    _file.TagsInternal[kv.Key] = kv.Value;
+            }
+            _file.PendingUserMetadataInternal = null;
 
             _file.OnWriteCommitted(_writeBuffer.Length, timestamp);
         }
