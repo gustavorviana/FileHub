@@ -46,6 +46,7 @@ internal sealed class InMemoryS3MultipartUpload
     public string UploadId { get; init; } = "";
     public string Key { get; init; } = "";
     public string? ContentType { get; init; }
+    public string? CacheControl { get; init; }
     public System.Collections.Generic.Dictionary<string, string>? UserMetadata { get; init; }
     public string? StorageClass { get; init; }
     public string? ServerSideEncryption { get; init; }

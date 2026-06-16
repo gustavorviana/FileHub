@@ -23,8 +23,8 @@ namespace FileHub.Local
         /// <summary>
         /// Create a <see cref="LocalFile"/> reference pointing at <paramref name="fileName"/>
         /// inside <paramref name="directory"/>. The file itself is not created on
-        /// disk — call <see cref="FileEntry.SetText(string, System.Text.Encoding)"/>, <see cref="FileEntry.SetBytes(byte[])"/> or
-        /// <see cref="FileEntry.GetWriteStream()"/> to materialise it, or <see cref="Exists"/>
+        /// disk — call <see cref="FileEntry.SetText(string, System.Text.Encoding, FileWriteOptions)"/>, <see cref="FileEntry.SetBytes(byte[], FileWriteOptions)"/> or
+        /// <see cref="FileEntry.GetWriteStream(FileWriteOptions)"/> to materialise it, or <see cref="Exists"/>
         /// to test whether it already exists.
         /// </summary>
         /// <remarks>
@@ -54,7 +54,7 @@ namespace FileHub.Local
             return new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read);
         }
 
-        public override Stream GetWriteStream()
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             return new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.None);

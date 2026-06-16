@@ -135,19 +135,6 @@ namespace FileHub.AmazonS3
             return Task.FromResult<Stream>(OpenStream(isWrite: false));
         }
 
-        public override Stream GetWriteStream()
-        {
-            ThrowIfReadOnly();
-            return OpenStream(isWrite: true);
-        }
-
-        public override Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: true));
-        }
-
         private S3ObjectStream OpenStream(bool isWrite, S3WriteOptions options = null)
         {
             if (Disposed)
@@ -266,14 +253,14 @@ namespace FileHub.AmazonS3
         /// on <c>PutObject</c>. Options live with the stream — no cross-call
         /// staging on the file.
         /// </summary>
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<Stream>(OpenStream(isWrite: true, NormalizeOptions(options)));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options)
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             return OpenStream(isWrite: true, NormalizeOptions(options));
@@ -377,29 +364,31 @@ namespace FileHub.AmazonS3
 
         public long MinimumPartSize => S3MinimumPartSize;
 
-        public Stream GetMultipartWriteStream() => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(ct));
+        public Stream GetMultipartWriteStream(FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(options, ct));
 
-        public async Task<Stream> GetMultipartWriteStreamAsync(CancellationToken cancellationToken = default)
+        public async Task<Stream> GetMultipartWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            // Multipart-via-IMultipartUploadable accepts no FileWriteOptions today
-            // (interface limit) — object created with bucket defaults. Callers
-            // needing metadata on multipart should use the regular write path.
+            var s3Options = NormalizeOptions(options);
+            // Options are bound to the object at CreateMultipartUpload; the stream
+            // re-applies them to the cached snapshot when the upload completes.
             var uploadId = await SessionInternal.Client.BeginMultipartUploadAsync(
                 ObjectKey,
-                contentType: null,
-                userMetadata: null,
-                storageClass: null,
-                serverSideEncryption: null,
+                contentType: s3Options?.ContentType,
+                cacheControl: s3Options?.CacheControl,
+                userMetadata: s3Options?.Metadata,
+                storageClass: s3Options?.StorageClass,
+                serverSideEncryption: s3Options?.ServerSideEncryption,
                 cancellationToken).ConfigureAwait(false);
-            return new S3MultipartWriteStream(this, uploadId);
+            return new S3MultipartWriteStream(this, uploadId, s3Options);
         }
 
         // === IMultipartUploadSignable ===
 
-        public SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn)
-            => SyncBridge.Run(ct => BeginSignedMultipartUploadAsync(spec, expiresIn, ct));
+        public SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => BeginSignedMultipartUploadAsync(spec, expiresIn, options, ct));
 
         public void CompleteSignedMultipartUpload(string uploadId, IReadOnlyList<UploadedPart> parts)
             => SyncBridge.Run(ct => CompleteSignedMultipartUploadAsync(uploadId, parts, ct));
@@ -410,6 +399,7 @@ namespace FileHub.AmazonS3
         public async Task<SignedMultipartUpload> BeginSignedMultipartUploadAsync(
             MultipartUploadSpec spec,
             TimeSpan expiresIn,
+            FileWriteOptions options = null,
             CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
@@ -418,15 +408,21 @@ namespace FileHub.AmazonS3
                 throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
 
             var client = SessionInternal.Client;
-            // Signed multipart accepts no FileWriteOptions today (interface limit)
-            // — object created with bucket defaults.
+            var s3Options = NormalizeOptions(options);
             var uploadId = await client.BeginMultipartUploadAsync(
                 ObjectKey,
-                contentType: null,
-                userMetadata: null,
-                storageClass: null,
-                serverSideEncryption: null,
+                contentType: s3Options?.ContentType,
+                cacheControl: s3Options?.CacheControl,
+                userMetadata: s3Options?.Metadata,
+                storageClass: s3Options?.StorageClass,
+                serverSideEncryption: s3Options?.ServerSideEncryption,
                 cancellationToken).ConfigureAwait(false);
+
+            // The metadata is bound to the object at CreateMultipartUpload, so
+            // reflect it in the cached snapshot now — it becomes real once the
+            // client completes the upload (and is moot if the upload is aborted,
+            // since the object never materializes).
+            ApplyToMetadata(s3Options);
 
             var expiresUtc = DateTime.UtcNow.Add(expiresIn);
             var signedParts = new List<SignedPart>(spec.PartCount);

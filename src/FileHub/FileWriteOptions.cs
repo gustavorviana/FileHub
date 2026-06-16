@@ -5,7 +5,7 @@ namespace FileHub
     /// <summary>
     /// Options applied at write time (<see cref="FileEntry.SetBytesAsync(byte[], FileWriteOptions, System.Threading.CancellationToken)"/>,
     /// <see cref="FileEntry.GetWriteStreamAsync(FileWriteOptions, System.Threading.CancellationToken)"/>,
-    /// <see cref="FileEntry.CopyFromStreamAsync(System.IO.Stream, FileWriteOptions, System.Threading.CancellationToken)"/>).
+    /// <see cref="FileEntry.CopyFromStreamAsync"/>).
     /// <para>
     /// Drivers that do not support a field silently ignore it — never throw. Check
     /// <see cref="IFileHub.Features"/> to discover what each driver actually applies.

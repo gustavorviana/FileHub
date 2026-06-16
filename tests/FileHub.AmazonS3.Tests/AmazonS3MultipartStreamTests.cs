@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using FileHub.AmazonS3.Tests.Fakes;
@@ -89,5 +90,49 @@ public class AmazonS3MultipartStreamTests
         IMultipartUploadable up = file;
         Assert.Equal(PartSize, up.MinimumPartSize);
         await Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task Multipart_AppliesWriteOptions()
+    {
+        using var hub = NewHub(out _);
+        var file = (AmazonS3File)hub.Root.CreateFile("img.bin");
+
+        var options = new S3WriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "public,max-age=3600",
+            StorageClass = "GLACIER",
+            ServerSideEncryption = "AES256",
+            Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
+        };
+
+        var payload = new byte[1024];
+        using (var stream = await file.GetMultipartWriteStreamAsync(options))
+            await stream.WriteAsync(payload, 0, payload.Length);
+
+        var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("img.bin").GetMetadataAsync();
+        Assert.Equal("image/png", meta.ContentType);
+        Assert.Equal("public,max-age=3600", meta.CacheControl);
+        Assert.Equal("GLACIER", meta.StorageClass);
+        Assert.Equal("AES256", meta.ServerSideEncryption);
+        Assert.Equal("team-x", meta.Tags["owner"]);
+    }
+
+    [Fact]
+    public async Task Multipart_EmptyPayload_StillAppliesWriteOptions()
+    {
+        using var hub = NewHub(out _);
+        var file = (AmazonS3File)hub.Root.CreateFile("empty.bin");
+
+        var options = new S3WriteOptions { ContentType = "text/plain", StorageClass = "STANDARD_IA" };
+        using (await file.GetMultipartWriteStreamAsync(options))
+        {
+            // no write → zero-byte completion path
+        }
+
+        var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("empty.bin").GetMetadataAsync();
+        Assert.Equal("text/plain", meta.ContentType);
+        Assert.Equal("STANDARD_IA", meta.StorageClass);
     }
 }

@@ -48,9 +48,10 @@ namespace FileHub.Memory
             }
         }
 
-        public override Stream GetWriteStream()
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
+            Data.ApplyOptions(options);
             Data.AcquireWrite();
             try
             {
@@ -85,21 +86,6 @@ namespace FileHub.Memory
         }
 
         // === FileWriteOptions / metadata support ===
-
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            Data.ApplyOptions(options);
-            return Task.FromResult(GetWriteStream());
-        }
-
-        public override Stream GetWriteStream(FileWriteOptions options)
-        {
-            ThrowIfReadOnly();
-            Data.ApplyOptions(options);
-            return GetWriteStream();
-        }
 
         public override Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
         {

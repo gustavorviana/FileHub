@@ -94,9 +94,9 @@ namespace FileHub.Ftp
             return await OpenStreamAsync(isWrite: false, cancellationToken).ConfigureAwait(false);
         }
 
-        public override Stream GetWriteStream() => GetWriteStreamAsync().GetAwaiter().GetResult();
+        public override Stream GetWriteStream(FileWriteOptions options = null) => GetWriteStreamAsync(options).GetAwaiter().GetResult();
 
-        public override async Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
+        public override async Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);

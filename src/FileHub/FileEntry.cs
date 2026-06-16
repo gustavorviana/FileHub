@@ -17,7 +17,7 @@ namespace FileHub
         // === Sync abstract (drivers implement) ===
 
         public abstract Stream GetReadStream();
-        public abstract Stream GetWriteStream();
+        public abstract Stream GetWriteStream(FileWriteOptions options = null);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name);
@@ -44,19 +44,19 @@ namespace FileHub
             return ms.ToArray();
         }
 
-        public void SetText(string content, Encoding encoding = null)
+        public void SetText(string content, Encoding encoding = null, FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
-            using var stream = GetWriteStream();
+            using var stream = GetWriteStream(options);
             stream.Write(bytes, 0, bytes.Length);
         }
 
-        public void SetBytes(byte[] buffer)
+        public void SetBytes(byte[] buffer, FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             if (buffer == null) throw new ArgumentNullException(nameof(buffer));
-            using var stream = GetWriteStream();
+            using var stream = GetWriteStream(options);
             stream.Write(buffer, 0, buffer.Length);
         }
 
@@ -84,10 +84,7 @@ namespace FileHub
             }
         }
 
-        public void CopyFromStream(Stream source)
-            => CopyFromStream(source, progress: null);
-
-        public void CopyFromStream(Stream source, IProgress<TransferStatus> progress)
+        public void CopyFromStream(Stream source, FileWriteOptions options = null, IProgress<TransferStatus> progress = null)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (!source.CanRead) throw new NotSupportedException("The source stream does not support reading.");
@@ -98,7 +95,7 @@ namespace FileHub
             var transferred = 0;
             int bytesRead;
 
-            using var destination = GetWriteStream();
+            using var destination = GetWriteStream(options);
 
             while ((bytesRead = source.Read(buffer, 0, buffer.Length)) > 0)
             {
@@ -130,10 +127,10 @@ namespace FileHub
             return Task.FromResult(GetReadStream());
         }
 
-        public virtual Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
+        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(GetWriteStream());
+            return Task.FromResult(GetWriteStream(options));
         }
 
         public virtual async Task<string> ReadAllTextAsync(CancellationToken cancellationToken = default)
@@ -162,73 +159,7 @@ namespace FileHub
             return ms.ToArray();
         }
 
-        public virtual async Task SetTextAsync(string content, Encoding encoding = null, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
-
-            using var stream = await GetWriteStreamAsync(cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
-        }
-
-        public virtual async Task SetBytesAsync(byte[] buffer, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using var stream = await GetWriteStreamAsync(cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
-        }
-
-        // === Write-with-options overloads (new API; drivers without metadata fall back to base) ===
-
-        /// <summary>
-        /// Open a write stream applying <paramref name="options"/> on commit
-        /// (content type, cache-control, user metadata). The base implementation
-        /// ignores <paramref name="options"/> and delegates to
-        /// <see cref="GetWriteStreamAsync(CancellationToken)"/>; drivers with a
-        /// native per-object metadata surface override.
-        /// </summary>
-        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return GetWriteStreamAsync(cancellationToken);
-        }
-
-        /// <summary>Sync sibling of <see cref="GetWriteStreamAsync(FileWriteOptions, CancellationToken)"/>.</summary>
-        public virtual Stream GetWriteStream(FileWriteOptions options)
-            => GetWriteStreamAsync(options).ConfigureAwait(false).GetAwaiter().GetResult();
-
-        /// <summary>
-        /// Write <paramref name="buffer"/> applying <paramref name="options"/>
-        /// at commit time. Base implementation delegates to
-        /// <see cref="GetWriteStreamAsync(FileWriteOptions, CancellationToken)"/>.
-        /// </summary>
-        public virtual async Task SetBytesAsync(byte[] buffer, FileWriteOptions options, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
-        }
-
-        /// <summary>Sync sibling of <see cref="SetBytesAsync(byte[], FileWriteOptions, CancellationToken)"/>.</summary>
-        public virtual void SetBytes(byte[] buffer, FileWriteOptions options)
-        {
-            ThrowIfReadOnly();
-            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
-            SetBytesAsync(buffer, options).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        /// <summary>
-        /// Write <paramref name="content"/> with the given encoding (default UTF-8 without BOM)
-        /// and apply <paramref name="options"/> at commit time.
-        /// </summary>
-        public virtual async Task SetTextAsync(string content, Encoding encoding, FileWriteOptions options, CancellationToken cancellationToken = default)
+        public virtual async Task SetTextAsync(string content, Encoding encoding = null, FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
@@ -238,52 +169,15 @@ namespace FileHub
             await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
         }
 
-        /// <summary>Sync sibling of <see cref="SetTextAsync(string, Encoding, FileWriteOptions, CancellationToken)"/>.</summary>
-        public virtual void SetText(string content, Encoding encoding, FileWriteOptions options)
+        public virtual async Task SetBytesAsync(byte[] buffer, FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            SetTextAsync(content, encoding, options).ConfigureAwait(false).GetAwaiter().GetResult();
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
-
-        /// <summary>
-        /// Copy <paramref name="source"/> to this file applying <paramref name="options"/>
-        /// at commit time.
-        /// </summary>
-        public Task CopyFromStreamAsync(Stream source, FileWriteOptions options, CancellationToken cancellationToken = default)
-            => CopyFromStreamAsync(source, options, progress: null, cancellationToken);
-
-        /// <inheritdoc cref="CopyFromStreamAsync(Stream, FileWriteOptions, CancellationToken)"/>
-        public virtual async Task CopyFromStreamAsync(Stream source, FileWriteOptions options, IProgress<TransferStatus> progress, CancellationToken cancellationToken = default)
-        {
-            if (source == null) throw new ArgumentNullException(nameof(source));
-            if (!source.CanRead) throw new NotSupportedException("The source stream does not support reading.");
-
-            ThrowIfReadOnly();
-            var total = progress != null ? source.Length : 0;
-            var buffer = new byte[81920];
-            int bytesRead = 0;
-            var transferred = 0;
-
-            using var destination = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
-
-            while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
-            {
-                await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
-                if (progress != null)
-                {
-                    transferred += bytesRead;
-                    progress.Report(new TransferStatus(transferred, total));
-                }
-            }
-        }
-
-        /// <summary>Sync sibling of <see cref="CopyFromStreamAsync(Stream, FileWriteOptions, CancellationToken)"/>.</summary>
-        public void CopyFromStream(Stream source, FileWriteOptions options)
-            => CopyFromStreamAsync(source, options).ConfigureAwait(false).GetAwaiter().GetResult();
-
-        /// <inheritdoc cref="CopyFromStream(Stream, FileWriteOptions)"/>
-        public void CopyFromStream(Stream source, FileWriteOptions options, IProgress<TransferStatus> progress)
-            => CopyFromStreamAsync(source, options, progress).ConfigureAwait(false).GetAwaiter().GetResult();
 
         // === Metadata access (new API) ===
 
@@ -307,10 +201,12 @@ namespace FileHub
             => GetMetadataAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
 
-        public Task CopyFromStreamAsync(Stream source, CancellationToken cancellationToken = default)
-            => CopyFromStreamAsync(source, progress: null, cancellationToken);
-
-        public async Task CopyFromStreamAsync(Stream source, IProgress<TransferStatus> progress, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Copy <paramref name="source"/> into this file, applying
+        /// <paramref name="options"/> at commit time and optionally reporting
+        /// <paramref name="progress"/>.
+        /// </summary>
+        public virtual async Task CopyFromStreamAsync(Stream source, FileWriteOptions options = null, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             if (source == null) throw new ArgumentNullException(nameof(source));
             if (!source.CanRead) throw new NotSupportedException("The source stream does not support reading.");
@@ -318,10 +214,10 @@ namespace FileHub
             ThrowIfReadOnly();
             var total = progress != null ? source.Length : 0;
             var buffer = new byte[81920];
-            int bytesRead = 0;
+            int bytesRead;
             var transferred = 0;
 
-            using var destination = await GetWriteStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var destination = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
 
             while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
             {
@@ -381,7 +277,7 @@ namespace FileHub
             cancellationToken.ThrowIfCancellationRequested();
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
-            using var writeStream = await newFile.GetWriteStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken).ConfigureAwait(false);
             await CopyToStreamAsync(writeStream, cancellationToken).ConfigureAwait(false);
 
             return newFile;

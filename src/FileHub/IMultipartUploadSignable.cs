@@ -23,7 +23,7 @@ namespace FileHub
 
         // === Sync (delegates to async) ===
 
-        SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn);
+        SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn, FileWriteOptions options = null);
 
         void CompleteSignedMultipartUpload(string uploadId, IReadOnlyList<UploadedPart> parts);
 
@@ -32,14 +32,18 @@ namespace FileHub
         // === Async (source of truth) ===
 
         /// <summary>
-        /// Begins a multipart upload and returns one pre-signed PUT URL
-        /// for each part described by <paramref name="spec"/>, valid for
-        /// <paramref name="expiresIn"/>. Distribute the URLs to the
-        /// remote client; collect ETags when they finish.
+        /// Begins a multipart upload and returns one pre-signed PUT URL for each
+        /// part described by <paramref name="spec"/>, valid for
+        /// <paramref name="expiresIn"/>. Distribute the URLs to the remote
+        /// client; collect ETags when they finish. <paramref name="options"/>
+        /// (content type, cache-control, user metadata, driver-specific fields)
+        /// are bound to the object at <c>CreateMultipartUpload</c> and take
+        /// effect when the client completes the upload.
         /// </summary>
         Task<SignedMultipartUpload> BeginSignedMultipartUploadAsync(
             MultipartUploadSpec spec,
             TimeSpan expiresIn,
+            FileWriteOptions options = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

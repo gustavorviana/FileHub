@@ -22,6 +22,7 @@ namespace FileHub.AmazonS3
 
         private readonly AmazonS3File _file;
         private readonly string _uploadId;
+        private readonly S3WriteOptions _options;
         private readonly List<S3CompletedPart> _completedParts = new();
         private readonly MemoryStream _buffer = new();
 
@@ -31,10 +32,11 @@ namespace FileHub.AmazonS3
         private bool _disposed;
         private long _totalWritten;
 
-        public S3MultipartWriteStream(AmazonS3File file, string uploadId)
+        public S3MultipartWriteStream(AmazonS3File file, string uploadId, S3WriteOptions options = null)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _uploadId = uploadId ?? throw new ArgumentNullException(nameof(uploadId));
+            _options = options;
         }
 
         public override bool CanRead => false;
@@ -150,10 +152,10 @@ namespace FileHub.AmazonS3
                 using var empty = new MemoryStream(Array.Empty<byte>(), writable: false);
                 await client.PutObjectAsync(
                     _file.ObjectKey, empty, 0,
-                    contentType: null, cacheControl: null, userMetadata: null,
-                    storageClass: null, serverSideEncryption: null,
+                    contentType: _options?.ContentType, cacheControl: _options?.CacheControl, userMetadata: _options?.Metadata,
+                    storageClass: _options?.StorageClass, serverSideEncryption: _options?.ServerSideEncryption,
                     cancellationToken).ConfigureAwait(false);
-                _file.OnWriteCommitted(0);
+                _file.OnWriteCommitted(0, _options);
                 return;
             }
 
@@ -162,7 +164,7 @@ namespace FileHub.AmazonS3
 
             await client.CompleteMultipartUploadAsync(_file.ObjectKey, _uploadId, _completedParts, cancellationToken).ConfigureAwait(false);
             _completed = true;
-            _file.OnWriteCommitted(_totalWritten);
+            _file.OnWriteCommitted(_totalWritten, _options);
         }
 
         private async Task UploadCurrentBufferAsync(CancellationToken cancellationToken)

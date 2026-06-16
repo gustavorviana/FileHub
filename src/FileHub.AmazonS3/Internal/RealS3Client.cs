@@ -270,6 +270,7 @@ namespace FileHub.AmazonS3.Internal
         public async Task<string> BeginMultipartUploadAsync(
             string key,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> userMetadata,
             string storageClass,
             string serverSideEncryption,
@@ -280,6 +281,7 @@ namespace FileHub.AmazonS3.Internal
             {
                 var req = new InitiateMultipartUploadRequest { BucketName = Bucket, Key = key };
                 if (!string.IsNullOrEmpty(contentType)) req.ContentType = contentType;
+                if (!string.IsNullOrEmpty(cacheControl)) req.Headers.CacheControl = cacheControl;
                 if (userMetadata != null)
                 {
                     foreach (var kv in userMetadata)

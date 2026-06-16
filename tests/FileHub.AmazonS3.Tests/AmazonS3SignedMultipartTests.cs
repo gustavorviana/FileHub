@@ -131,4 +131,42 @@ public class AmazonS3SignedMultipartTests
         // Cleanup
         await file.AbortSignedMultipartUploadAsync(session.UploadId);
     }
+
+    [Fact]
+    public async Task SignedMultipart_WithOptions_AppliesMetadataOnComplete()
+    {
+        using var hub = NewHub(out var client);
+        var file = (AmazonS3File)hub.Root.CreateFile("signed.bin");
+
+        var options = new S3WriteOptions
+        {
+            ContentType = "application/zip",
+            CacheControl = "private,max-age=60",
+            StorageClass = "GLACIER",
+            Metadata = new Dictionary<string, string> { ["origin"] = "batch" },
+        };
+        var spec = MultipartUploadSpec.FromPartSize(totalBytes: MinPart + 10, partSize: MinPart);
+        var session = await file.BeginSignedMultipartUploadAsync(spec, TimeSpan.FromHours(1), options);
+
+        var uploaded = new List<UploadedPart>();
+        var buffer = new byte[spec.TotalBytes];
+        new Random(7).NextBytes(buffer);
+        long offset = 0;
+        foreach (var part in session.Parts)
+        {
+            var len = part.ContentLength;
+            using var ms = new MemoryStream(buffer, (int)offset, (int)len, writable: false);
+            var etag = await client.UploadPartAsync(file.ObjectKey, session.UploadId, part.PartNumber, ms, len);
+            uploaded.Add(new UploadedPart(part.PartNumber, etag));
+            offset += len;
+        }
+
+        await file.CompleteSignedMultipartUploadAsync(session.UploadId, uploaded);
+
+        var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("signed.bin").GetMetadataAsync();
+        Assert.Equal("application/zip", meta.ContentType);
+        Assert.Equal("private,max-age=60", meta.CacheControl);
+        Assert.Equal("GLACIER", meta.StorageClass);
+        Assert.Equal("batch", meta.Tags["origin"]);
+    }
 }

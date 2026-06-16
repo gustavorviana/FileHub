@@ -86,6 +86,7 @@ namespace FileHub.AmazonS3.Internal
         Task<string> BeginMultipartUploadAsync(
             string key,
             string contentType,
+            string cacheControl,
             IReadOnlyDictionary<string, string> userMetadata,
             string storageClass,
             string serverSideEncryption,

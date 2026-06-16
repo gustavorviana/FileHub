@@ -138,23 +138,10 @@ namespace FileHub.OracleObjectStorage
 
         public override Stream GetReadStream() => OpenStream(isWrite: false);
 
-        public override Stream GetWriteStream()
-        {
-            ThrowIfReadOnly();
-            return OpenStream(isWrite: true);
-        }
-
         public override Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<Stream>(OpenStream(isWrite: false));
-        }
-
-        public override Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: true));
         }
 
         private OciObjectStream OpenStream(bool isWrite, FileWriteOptions options = null)
@@ -292,14 +279,14 @@ namespace FileHub.OracleObjectStorage
 
         // === FileWriteOptions / metadata-via-options surface ===
 
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult<Stream>(OpenStream(isWrite: true, options));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options)
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             return OpenStream(isWrite: true, options);

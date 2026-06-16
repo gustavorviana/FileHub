@@ -329,6 +329,7 @@ internal sealed class InMemoryS3Client : IS3Client
     public Task<string> BeginMultipartUploadAsync(
         string key,
         string contentType,
+        string cacheControl,
         IReadOnlyDictionary<string, string> userMetadata,
         string storageClass,
         string serverSideEncryption,
@@ -342,6 +343,7 @@ internal sealed class InMemoryS3Client : IS3Client
             UploadId = uploadId,
             Key = key,
             ContentType = contentType,
+            CacheControl = cacheControl,
             UserMetadata = userMetadata is null
                 ? null
                 : new Dictionary<string, string>(userMetadata, StringComparer.OrdinalIgnoreCase),
@@ -398,6 +400,7 @@ internal sealed class InMemoryS3Client : IS3Client
             Body = ms.ToArray(),
             LastModified = DateTime.UtcNow,
             ContentType = upload.ContentType,
+            CacheControl = upload.CacheControl,
             UserMetadata = upload.UserMetadata is null
                 ? null
                 : new Dictionary<string, string>(upload.UserMetadata, StringComparer.OrdinalIgnoreCase),
