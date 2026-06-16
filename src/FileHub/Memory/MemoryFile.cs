@@ -104,13 +104,10 @@ namespace FileHub.Memory
         public override Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var snapshot = new FileMetadata
-            {
-                ContentType = Data.ContentType,
-                CacheControl = Data.CacheControl,
-            };
-            snapshot.SetTags(Data.Metadata);
-            return Task.FromResult(snapshot);
+            return Task.FromResult(new FileMetadata(
+                contentType: Data.ContentType,
+                cacheControl: Data.CacheControl,
+                tags: Data.Metadata));
         }
     }
 }

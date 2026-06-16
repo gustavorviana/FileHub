@@ -14,12 +14,13 @@ namespace FileHub.OracleObjectStorage
         private readonly OracleObjectStorageDirectory _parent;
         private long _length;
         private DateTime _creationTimeUtc;
-        private Dictionary<string, string> _tags;
-        private string _contentType;
+        private DateTime _lastWriteTimeUtc;
+        private FileMetadata _metadata = new FileMetadata();
         private bool _isLoaded;
         private OciObjectStream _lastOpenStream;
 
-        internal string ContentTypeInternal { get => _contentType; set => _contentType = value; }
+        /// <summary>Driver-internal: the current immutable user-facing snapshot.</summary>
+        internal FileMetadata MetadataInternal => _metadata;
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from OCI.
@@ -47,26 +48,15 @@ namespace FileHub.OracleObjectStorage
         public override DateTime CreationTimeUtc => _creationTimeUtc;
 
         /// <summary>
-        /// Cached last-write timestamp. Reads from the object's
-        /// <see cref="ChangedAtTag"/> metadata when present, otherwise falls
-        /// back to <see cref="CreationTimeUtc"/>. Drivers do not do hidden
-        /// I/O in getters.
+        /// Cached last-write timestamp, derived from the object's
+        /// <see cref="ChangedAtTag"/> metadata at load time, falling back to
+        /// <see cref="CreationTimeUtc"/>. Drivers do not do hidden I/O in getters.
         /// </summary>
-        public override DateTime LastWriteTimeUtc
-        {
-            get
-            {
-                if (_tags != null && _tags.TryGetValue(ChangedAtTag, out var value)
-                    && DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                    return parsed;
-                return _creationTimeUtc;
-            }
-        }
+        public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc == default ? _creationTimeUtc : _lastWriteTimeUtc;
 
         internal string ObjectName => OciPathUtil.CombineObjectName(_parent.PrefixInternal, Name);
         internal IOciSession SessionInternal => _parent.SessionInternal;
         internal long LengthInternal { get => _length; set => _length = value; }
-        internal Dictionary<string, string> TagsInternal => _tags;
 
         internal OracleObjectStorageFile(OracleObjectStorageDirectory parent, string name) : base(name)
         {
@@ -103,11 +93,28 @@ namespace FileHub.OracleObjectStorage
         {
             _length = head.ContentLength ?? -1;
             _creationTimeUtc = head.LastModified ?? default;
-            _contentType = head.ContentType;
-            _tags = head.OpcMeta != null
-                ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
-                : null;
+            _lastWriteTimeUtc = ReadChangedAt(head.OpcMeta) ?? _creationTimeUtc;
+            _metadata = BuildSnapshot(head.ContentType, head.OpcMeta);
             _isLoaded = true;
+        }
+
+        // Build the user-facing snapshot, stripping the driver-internal
+        // last-write bookkeeping tag so it never surfaces to consumers.
+        private static FileMetadata BuildSnapshot(string contentType, Dictionary<string, string> opcMeta)
+        {
+            if (opcMeta == null)
+                return new FileMetadata(contentType: contentType);
+            var userTags = new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase);
+            userTags.Remove(ChangedAtTag);
+            return new FileMetadata(contentType: contentType, tags: userTags);
+        }
+
+        private static DateTime? ReadChangedAt(Dictionary<string, string> opcMeta)
+        {
+            if (opcMeta != null && opcMeta.TryGetValue(ChangedAtTag, out var value)
+                && DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                return parsed;
+            return null;
         }
 
         // === Exists (sync delegates to async) ===
@@ -178,11 +185,11 @@ namespace FileHub.OracleObjectStorage
         /// that need the authoritative server timestamp should call
         /// <see cref="Refresh"/>.
         /// </summary>
-        internal void OnWriteCommitted(long bytesWritten, string timestampTagValue)
+        internal void OnWriteCommitted(long bytesWritten, DateTime lastWriteUtc, FileMetadata snapshot)
         {
             _length = bytesWritten;
-            EnsureTags();
-            _tags[ChangedAtTag] = timestampTagValue;
+            _lastWriteTimeUtc = lastWriteUtc;
+            _metadata = snapshot;
             _isLoaded = true;
         }
 
@@ -307,16 +314,9 @@ namespace FileHub.OracleObjectStorage
         {
             if (!_isLoaded)
                 await RefreshAsync(cancellationToken).ConfigureAwait(false);
-            var snapshot = new FileMetadata { ContentType = _contentType };
-            if (_tags != null)
-            {
-                // Strip the driver-internal last-write bookkeeping tag so it
-                // never surfaces in the user-facing metadata snapshot.
-                var userTags = new Dictionary<string, string>(_tags, StringComparer.OrdinalIgnoreCase);
-                userTags.Remove(ChangedAtTag);
-                snapshot.SetTags(userTags);
-            }
-            return snapshot;
+            // Safe to hand out directly: the snapshot is immutable and replaced
+            // wholesale on refresh / write, never mutated in place.
+            return _metadata;
         }
 
         // === IUrlAccessible ===
@@ -349,14 +349,6 @@ namespace FileHub.OracleObjectStorage
 
             var accessUri = await client.CreatePreauthenticatedReadRequestAsync(ObjectName, parName, timeExpires, cancellationToken).ConfigureAwait(false);
             return new Uri($"https://objectstorage.{client.Region}.oraclecloud.com{accessUri}");
-        }
-
-        // === Internal ===
-
-        internal void EnsureTags()
-        {
-            if (_tags == null)
-                _tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         public override void Dispose()

@@ -20,7 +20,7 @@ namespace FileHub.AmazonS3
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
         private bool _isLoaded;
-        private readonly AmazonS3FileMetadata _metadata = new AmazonS3FileMetadata();
+        private AmazonS3FileMetadata _metadata = new AmazonS3FileMetadata();
         private S3ObjectStream _lastOpenStream;
 
         /// <summary>
@@ -101,10 +101,10 @@ namespace FileHub.AmazonS3
 
         internal void LoadMetadataFromHead(S3HeadResult head)
         {
-            _metadata.LoadFromHead(
+            _metadata = new AmazonS3FileMetadata(
+                contentType: head.ContentType,
                 tags: head.UserMetadata,
                 storageClass: head.StorageClass,
-                contentType: head.ContentType,
                 serverSideEncryption: head.ServerSideEncryption);
             _isLoaded = true;
         }
@@ -181,14 +181,17 @@ namespace FileHub.AmazonS3
             _isLoaded = true;
         }
 
+        // Replace the snapshot with one reflecting the applied options, falling
+        // back to the previous value for any field the write didn't set.
         private void ApplyToMetadata(S3WriteOptions options)
         {
             if (options == null) return;
-            if (options.ContentType != null) _metadata.ContentType = options.ContentType;
-            if (options.CacheControl != null) _metadata.CacheControl = options.CacheControl;
-            if (options.Metadata != null) _metadata.SetTags(options.Metadata);
-            if (options.StorageClass != null) _metadata.StorageClass = options.StorageClass;
-            if (options.ServerSideEncryption != null) _metadata.ServerSideEncryption = options.ServerSideEncryption;
+            _metadata = new AmazonS3FileMetadata(
+                contentType: options.ContentType ?? _metadata.ContentType,
+                cacheControl: options.CacheControl ?? _metadata.CacheControl,
+                tags: options.Metadata ?? _metadata.Tags,
+                storageClass: options.StorageClass ?? _metadata.StorageClass,
+                serverSideEncryption: options.ServerSideEncryption ?? _metadata.ServerSideEncryption);
         }
 
         // === Mutations ===
@@ -284,6 +287,8 @@ namespace FileHub.AmazonS3
         {
             if (!_isLoaded)
                 await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            // Safe to hand out directly: the snapshot is immutable and replaced
+            // wholesale on refresh / write, never mutated in place.
             return _metadata;
         }
 

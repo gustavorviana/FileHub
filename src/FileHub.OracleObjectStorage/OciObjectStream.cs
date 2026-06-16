@@ -212,47 +212,46 @@ namespace FileHub.OracleObjectStorage
         {
             _writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
-            var timestamp = DateTime.UtcNow.ToString("O");
+            var now = DateTime.UtcNow;
+            var timestamp = now.ToString("O");
 
-            // Build the metadata payload without mutating the file's in-memory
-            // tags — if PutObjectAsync fails, the parent file must stay in its
-            // pre-upload state. OnWriteCommitted (below) is what promotes the
-            // timestamp into TagsInternal after the object is durable.
-            _file.EnsureTags();
-            var meta = new System.Collections.Generic.Dictionary<string, string>(_file.TagsInternal, System.StringComparer.OrdinalIgnoreCase)
+            // User-facing tags after this write: start from the current snapshot
+            // and overlay any metadata from the write options. Options live with
+            // the stream — never staged on the file — so an abandoned write can't
+            // leak forward. The parent file is only mutated after the upload is
+            // durable (OnWriteCommitted below).
+            var userTags = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in _file.MetadataInternal.Tags)
+                userTags[kv.Key] = kv.Value;
+            var optionMeta = _options?.Metadata;
+            if (optionMeta != null)
+            {
+                foreach (var kv in optionMeta)
+                    userTags[kv.Key] = kv.Value;
+            }
+
+            var contentType = _options?.ContentType;
+
+            // Server payload = the user tags plus the driver-internal last-write
+            // bookkeeping tag.
+            var meta = new System.Collections.Generic.Dictionary<string, string>(userTags, System.StringComparer.OrdinalIgnoreCase)
             {
                 [OracleObjectStorageFile.ChangedAtTag] = timestamp
             };
-
-            // Merge in user metadata from the write options scoped to this
-            // stream, if any. Options live with the stream — never staged on
-            // the file — so an abandoned write can't leak into the next one.
-            var userMeta = _options?.Metadata;
-            if (userMeta != null)
-            {
-                foreach (var kv in userMeta)
-                    meta[kv.Key] = kv.Value;
-            }
 
             await client.PutObjectAsync(
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType: _options?.ContentType,
+                contentType,
                 meta,
                 cancellationToken).ConfigureAwait(false);
 
-            // Promote the applied content type / metadata into the file's
-            // snapshot now that the object is durable.
-            if (_options?.ContentType != null)
-                _file.ContentTypeInternal = _options.ContentType;
-            if (userMeta != null)
-            {
-                foreach (var kv in userMeta)
-                    _file.TagsInternal[kv.Key] = kv.Value;
-            }
-
-            _file.OnWriteCommitted(_writeBuffer.Length, timestamp);
+            // Replace the file's snapshot now that the object is durable.
+            _file.OnWriteCommitted(
+                _writeBuffer.Length,
+                now,
+                new FileMetadata(contentType: contentType, tags: userTags));
         }
 
         private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
