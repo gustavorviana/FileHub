@@ -19,12 +19,6 @@ namespace FileHub.OracleObjectStorage
         private bool _isLoaded;
         private OciObjectStream _lastOpenStream;
 
-        // Pending options staged for the next write commit (consumed by OciObjectStream).
-        private string _pendingContentType;
-        private IReadOnlyDictionary<string, string> _pendingUserMetadata;
-
-        internal string PendingContentTypeInternal { get => _pendingContentType; set => _pendingContentType = value; }
-        internal IReadOnlyDictionary<string, string> PendingUserMetadataInternal { get => _pendingUserMetadata; set => _pendingUserMetadata = value; }
         internal string ContentTypeInternal { get => _contentType; set => _contentType = value; }
 
         /// <summary>
@@ -96,6 +90,17 @@ namespace FileHub.OracleObjectStorage
         {
             cancellationToken.ThrowIfCancellationRequested();
             var head = await SessionInternal.Client.HeadObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            LoadFromHead(head);
+        }
+
+        /// <summary>
+        /// Driver-internal: populate the cached snapshot (length, timestamp,
+        /// content type, user metadata) from a HEAD result and flip
+        /// <see cref="IsLoaded"/> to <c>true</c> — without paying a second
+        /// HEAD. Used by the strict open path that already issued one.
+        /// </summary>
+        internal void LoadFromHead(OciHeadResult head)
+        {
             _length = head.ContentLength ?? -1;
             _creationTimeUtc = head.LastModified ?? default;
             _contentType = head.ContentType;
@@ -145,14 +150,14 @@ namespace FileHub.OracleObjectStorage
             return Task.FromResult<Stream>(OpenStream(isWrite: true));
         }
 
-        private OciObjectStream OpenStream(bool isWrite)
+        private OciObjectStream OpenStream(bool isWrite, FileWriteOptions options = null)
         {
             if (Disposed)
                 throw new ObjectDisposedException(nameof(OracleObjectStorageFile));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
 
-            var stream = new OciObjectStream(this, isWrite);
+            var stream = new OciObjectStream(this, isWrite, options);
             _lastOpenStream = stream;
             stream.Disposed += OnStreamDisposed;
             return stream;
@@ -283,15 +288,14 @@ namespace FileHub.OracleObjectStorage
         public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            StageOptions(options);
-            return GetWriteStreamAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<Stream>(OpenStream(isWrite: true, options));
         }
 
         public override Stream GetWriteStream(FileWriteOptions options)
         {
             ThrowIfReadOnly();
-            StageOptions(options);
-            return GetWriteStream();
+            return OpenStream(isWrite: true, options);
         }
 
         /// <summary>
@@ -313,14 +317,6 @@ namespace FileHub.OracleObjectStorage
                 snapshot.SetTags(userTags);
             }
             return snapshot;
-        }
-
-        private void StageOptions(FileWriteOptions options)
-        {
-            if (options == null) return;
-            if (options.ContentType != null) _pendingContentType = options.ContentType;
-            if (options.Metadata != null) _pendingUserMetadata = options.Metadata;
-            // CacheControl: not plumbed through IOciClient yet.
         }
 
         // === IUrlAccessible ===

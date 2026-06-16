@@ -20,6 +20,7 @@ namespace FileHub.OracleObjectStorage
         internal const int BufferSize = 10 * 1024 * 1024;
 
         private readonly OracleObjectStorageFile _file;
+        private readonly FileWriteOptions _options;
         private readonly MemoryStream _writeBuffer;
         private readonly bool _isWrite;
         private long _position;
@@ -28,10 +29,11 @@ namespace FileHub.OracleObjectStorage
 
         public event EventHandler Disposed;
 
-        public OciObjectStream(OracleObjectStorageFile file, bool isWrite)
+        public OciObjectStream(OracleObjectStorageFile file, bool isWrite, FileWriteOptions options = null)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _isWrite = isWrite;
+            _options = options;
             _writeBuffer = isWrite ? new MemoryStream() : null;
             CanRead = !isWrite;
             CanWrite = isWrite;
@@ -222,11 +224,13 @@ namespace FileHub.OracleObjectStorage
                 [OracleObjectStorageFile.ChangedAtTag] = timestamp
             };
 
-            // Merge in user metadata staged via FileWriteOptions, if any.
-            var pendingMeta = _file.PendingUserMetadataInternal;
-            if (pendingMeta != null)
+            // Merge in user metadata from the write options scoped to this
+            // stream, if any. Options live with the stream — never staged on
+            // the file — so an abandoned write can't leak into the next one.
+            var userMeta = _options?.Metadata;
+            if (userMeta != null)
             {
-                foreach (var kv in pendingMeta)
+                foreach (var kv in userMeta)
                     meta[kv.Key] = kv.Value;
             }
 
@@ -234,22 +238,19 @@ namespace FileHub.OracleObjectStorage
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType: _file.PendingContentTypeInternal,
+                contentType: _options?.ContentType,
                 meta,
                 cancellationToken).ConfigureAwait(false);
 
-            // Promote the staged content type / metadata to the file's snapshot
-            // and clear the pending slots so a follow-up write doesn't re-apply
-            // stale options.
-            if (_file.PendingContentTypeInternal != null)
-                _file.ContentTypeInternal = _file.PendingContentTypeInternal;
-            _file.PendingContentTypeInternal = null;
-            if (pendingMeta != null)
+            // Promote the applied content type / metadata into the file's
+            // snapshot now that the object is durable.
+            if (_options?.ContentType != null)
+                _file.ContentTypeInternal = _options.ContentType;
+            if (userMeta != null)
             {
-                foreach (var kv in pendingMeta)
+                foreach (var kv in userMeta)
                     _file.TagsInternal[kv.Key] = kv.Value;
             }
-            _file.PendingUserMetadataInternal = null;
 
             _file.OnWriteCommitted(_writeBuffer.Length, timestamp);
         }

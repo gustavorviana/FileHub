@@ -237,8 +237,8 @@ namespace FileHub.OracleObjectStorage
             try
             {
                 var head = await _session.Client.HeadObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
-                var file = new OracleObjectStorageFile(this, name, head.ContentLength ?? 0, head.LastModified);
-                file.MarkLoaded();
+                var file = new OracleObjectStorageFile(this, name);
+                file.LoadFromHead(head);
                 return file;
             }
             catch (FileNotFoundException)
