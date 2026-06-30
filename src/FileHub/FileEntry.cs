@@ -67,7 +67,7 @@ namespace FileHub
 
             var buffer = new byte[81920];
             var total = progress != null ? Length : 0;
-            var transferred = 0;
+            long transferred = 0;
             int bytesRead;
             using var source = GetReadStream();
             while ((bytesRead = source.Read(buffer, 0, buffer.Length)) > 0)
@@ -89,7 +89,7 @@ namespace FileHub
             ThrowIfReadOnly();
             var buffer = new byte[81920];
             var total = progress != null ? source.Length : 0;
-            var transferred = 0;
+            long transferred = 0;
             int bytesRead;
 
             using var destination = GetWriteStream(options);
@@ -212,7 +212,7 @@ namespace FileHub
             var total = progress != null ? source.Length : 0;
             var buffer = new byte[81920];
             int bytesRead;
-            var transferred = 0;
+            long transferred = 0;
 
             using var destination = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
 

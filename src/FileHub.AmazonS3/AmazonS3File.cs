@@ -295,7 +295,7 @@ namespace FileHub.AmazonS3
 
         // Normalize FileWriteOptions to S3WriteOptions so internal paths
         // can read StorageClass / SSE slots even when the caller passed the
-        // base type. CacheControl: TODO plumb through IS3Client.
+        // base type.
         private static S3WriteOptions NormalizeOptions(FileWriteOptions options)
         {
             if (options == null) return null;
