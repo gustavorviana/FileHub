@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using FileHub.AmazonS3.Tests.Fakes;
 
 namespace FileHub.AmazonS3.Tests;
@@ -91,5 +92,42 @@ public class AmazonS3UrlAccessTests
         var dir = (ISignedUploadable)hub.Root;
 
         Assert.Throws<ArgumentException>(() => dir.GetSignedUploadUrl("", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_WithOptions_BindsHeadersIntoSignature()
+    {
+        var client = new InMemoryS3Client(bucket: "my-bucket", region: "us-east-1");
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        var dir = (ISignedUploadable)hub.Root;
+
+        var options = new S3WriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "max-age=3600",
+            StorageClass = "STANDARD_IA",
+            ServerSideEncryption = "AES256",
+            Metadata = new Dictionary<string, string> { ["owner"] = "alice" },
+        };
+
+        var url = dir.GetSignedUploadUrl("uploads/img.png", TimeSpan.FromMinutes(15), options).ToString();
+
+        Assert.Contains("X-Amz-SignedHeader-ContentType=image%2Fpng", url);
+        Assert.Contains("X-Amz-SignedHeader-CacheControl=max-age%3D3600", url);
+        Assert.Contains("X-Amz-SignedHeader-StorageClass=STANDARD_IA", url);
+        Assert.Contains("X-Amz-SignedHeader-SSE=AES256", url);
+        Assert.Contains("X-Amz-SignedHeader-Meta-owner=alice", url);
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_NullOptions_NoSignedHeaderParams()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        var dir = (ISignedUploadable)hub.Root;
+
+        var url = dir.GetSignedUploadUrl("upload.bin", TimeSpan.FromMinutes(5)).ToString();
+
+        Assert.DoesNotContain("X-Amz-SignedHeader-", url);
     }
 }
