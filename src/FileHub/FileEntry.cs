@@ -60,10 +60,7 @@ namespace FileHub
             stream.Write(buffer, 0, buffer.Length);
         }
 
-        public void CopyToStream(Stream destination)
-            => CopyToStream(destination, progress: null);
-
-        public void CopyToStream(Stream destination, IProgress<TransferStatus> progress)
+        public void CopyToStream(Stream destination, IProgress<TransferStatus> progress = null)
         {
             if (destination == null) throw new ArgumentNullException(nameof(destination));
             if (!destination.CanWrite) throw new NotSupportedException("The destination stream does not support writing.");
@@ -230,12 +227,9 @@ namespace FileHub
             }
         }
 
-        public virtual Task CopyToStreamAsync(Stream destination, CancellationToken cancellationToken = default)
-            => CopyToStreamAsync(destination, progress: null, cancellationToken);
-
         public virtual async Task CopyToStreamAsync(
             Stream destination,
-            IProgress<TransferStatus> progress,
+            IProgress<TransferStatus> progress = null,
             CancellationToken cancellationToken = default)
         {
             if (destination == null) throw new ArgumentNullException(nameof(destination));
@@ -278,7 +272,7 @@ namespace FileHub
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
             using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken).ConfigureAwait(false);
-            await CopyToStreamAsync(writeStream, cancellationToken).ConfigureAwait(false);
+            await CopyToStreamAsync(writeStream, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             return newFile;
         }

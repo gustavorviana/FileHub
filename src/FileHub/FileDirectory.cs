@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 #if NET8_0_OR_GREATER
@@ -29,13 +30,80 @@ namespace FileHub
         public abstract bool TryOpenDirectory(string name, out FileDirectory directory);
         public abstract IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*");
 
+        /// <summary>
+        /// Paged enumeration of directories. Base implementation applies
+        /// <paramref name="offset"/> and <paramref name="limit"/> on top of
+        /// <see cref="GetDirectories(string)"/> via LINQ. Drivers backed by a
+        /// store that paginates natively (object storage) may override to push
+        /// the slice down to the backend.
+        /// </summary>
+        public virtual IEnumerable<FileDirectory> GetDirectories(string searchPattern, FileListOffset offset, int? limit = null)
+        {
+            ValidatePaging(limit);
+            IEnumerable<FileDirectory> seq = GetDirectories(searchPattern);
+            if (offset.IsNamed)
+                seq = seq.Where(d => string.CompareOrdinal(d.Name, offset.Name) >= 0);
+            else if (offset.Index > 0)
+                seq = seq.Skip(offset.Index);
+            if (limit.HasValue) seq = seq.Take(limit.Value);
+            return seq;
+        }
+
         public abstract bool FileExists(string name);
         public abstract bool DirectoryExists(string name);
         public abstract void Delete();
         public abstract void Delete(string name);
-        public abstract FileDirectory Rename(string newName);
-        public abstract FileDirectory MoveTo(FileDirectory directory, string name);
-        public abstract FileDirectory CopyTo(FileDirectory directory, string name);
+
+        // === Default implementations (drivers override for native paths) ===
+
+        /// <summary>
+        /// Rename this directory under the same parent. Base implementation
+        /// delegates to <see cref="MoveTo(FileDirectory, string)"/> with the
+        /// same parent — drivers backed by a store that has a native rename
+        /// (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system <c>Move</c>)
+        /// override to use it directly.
+        /// </summary>
+        public virtual FileDirectory Rename(string newName)
+        {
+            ThrowIfReadOnly();
+            if (Parent == null)
+                throw new InvalidOperationException("Cannot rename the root directory.");
+            return MoveTo(Parent, newName);
+        }
+
+        /// <summary>
+        /// Move this directory under <paramref name="directory"/> with
+        /// <paramref name="name"/>. Base implementation = copy then delete.
+        /// Drivers with an atomic move primitive override.
+        /// </summary>
+        public virtual FileDirectory MoveTo(FileDirectory directory, string name)
+        {
+            ThrowIfReadOnly();
+            var newDir = CopyTo(directory, name);
+            Delete();
+            return newDir;
+        }
+
+        /// <summary>
+        /// Recursively copy this directory's contents into a new directory
+        /// named <paramref name="name"/> under <paramref name="directory"/>.
+        /// Base implementation walks files + subdirectories and copies each
+        /// — works across drivers (stream copy on file leaves). Drivers
+        /// backed by a store with server-side copy (S3 <c>CopyObject</c>,
+        /// OCI <c>CopyObject</c>) override for cheaper bulk copy.
+        /// </summary>
+        public virtual FileDirectory CopyTo(FileDirectory directory, string name)
+        {
+            ThrowIfReadOnly();
+            if (directory == null) throw new ArgumentNullException(nameof(directory));
+
+            var newDir = directory.CreateDirectory(name);
+            foreach (var file in GetFiles())
+                file.CopyTo(newDir, file.Name);
+            foreach (var subDir in GetDirectories())
+                subDir.CopyTo(newDir, subDir.Name);
+            return newDir;
+        }
 
         // === Sync default implementations ===
 
@@ -44,6 +112,21 @@ namespace FileHub
             ThrowIfReadOnly();
             if (overwrite) DeleteIfExists(name);
             return CreateFile(name);
+        }
+
+        /// <summary>
+        /// Create a file with initial content and optional metadata applied in
+        /// a single call. Base implementation creates an empty file then writes
+        /// — drivers may override to fuse the calls (e.g., a single
+        /// <c>PutObject</c> on object-storage backends).
+        /// </summary>
+        public virtual FileEntry CreateFile(string name, byte[] bytes, FileWriteOptions options = null)
+        {
+            ThrowIfReadOnly();
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            var file = CreateFile(name);
+            file.SetBytes(bytes, options);
+            return file;
         }
 
         public virtual FileEntry OpenFile(string name)
@@ -153,6 +236,17 @@ namespace FileHub
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(CreateFile(name, overwrite));
+        }
+
+        /// <inheritdoc cref="CreateFile(string, byte[], FileWriteOptions)"/>
+        public virtual async Task<FileEntry> CreateFileAsync(string name, byte[] bytes, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (bytes == null) throw new ArgumentNullException(nameof(bytes));
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = await CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
+            await file.SetBytesAsync(bytes, options, cancellationToken).ConfigureAwait(false);
+            return file;
         }
 
         public virtual Task<FileEntry> OpenFileAsync(string name, CancellationToken cancellationToken = default)
@@ -276,6 +370,24 @@ namespace FileHub
             }
             await Task.CompletedTask.ConfigureAwait(false);
         }
+
+        /// <summary>
+        /// Paged async enumeration of directories. Drivers backed by a store
+        /// that paginates natively may override.
+        /// </summary>
+        public virtual async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+            string searchPattern,
+            FileListOffset offset,
+            int? limit = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            foreach (var dir in GetDirectories(searchPattern, offset, limit))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return dir;
+            }
+            await Task.CompletedTask.ConfigureAwait(false);
+        }
 #else
         public virtual Task<IEnumerable<FileEntry>> GetFilesAsync(string searchPattern = "*", FileListOffset offset = default, int? limit = null, CancellationToken cancellationToken = default)
         {
@@ -287,6 +399,12 @@ namespace FileHub
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(GetDirectories(searchPattern));
+        }
+
+        public virtual Task<IEnumerable<FileDirectory>> GetDirectoriesAsync(string searchPattern, FileListOffset offset, int? limit = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetDirectories(searchPattern, offset, limit));
         }
 #endif
 
