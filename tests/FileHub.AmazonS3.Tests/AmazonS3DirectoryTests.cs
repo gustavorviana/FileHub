@@ -122,6 +122,25 @@ public class AmazonS3DirectoryTests
     }
 
     [Fact]
+    public void Delete_DirectoryWithManyChildren_UsesBatchDeleteObjects()
+    {
+        // Regression: dir.Delete() used to issue one DeleteObject per child.
+        // Now it batches up to 1000 keys per DeleteObjects call — 50 children
+        // collapse into 1 round-trip instead of 50.
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        for (int i = 0; i < 50; i++)
+            hub.Root.CreateFile($"bulk/{i:D3}.bin").SetBytes(new byte[] { (byte)i });
+
+        var deleteBefore = client.DeleteInvocationCount;
+        hub.Root.Delete("bulk");
+
+        // 1 batch delete covers all 50 children + the prefix marker.
+        Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
+        Assert.Equal(0, hub.Root.GetDirectories().Count(d => d.Name == "bulk"));
+    }
+
+    [Fact]
     public void Delete_DirectoryName_DeletesAllChildren()
     {
         // Regression: before the fix, S3 DeleteObject's idempotency meant the

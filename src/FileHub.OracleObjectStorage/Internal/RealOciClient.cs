@@ -88,9 +88,7 @@ namespace FileHub.OracleObjectStorage.Internal
             string objectName,
             Stream body,
             long contentLength,
-            string contentType,
-            string cacheControl,
-            IReadOnlyDictionary<string, string> opcMeta,
+            OciWriteOptions options,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -103,9 +101,9 @@ namespace FileHub.OracleObjectStorage.Internal
                     ObjectName = objectName,
                     PutObjectBody = body,
                     ContentLength = contentLength,
-                    ContentType = contentType,
-                    CacheControl = cacheControl,
-                    OpcMeta = CopyMeta(opcMeta)
+                    ContentType = options?.ContentType,
+                    CacheControl = options?.CacheControl,
+                    OpcMeta = CopyMeta(options?.Metadata)
                 };
                 await _client.PutObject(request, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
             }, cancellationToken);
@@ -230,6 +228,12 @@ namespace FileHub.OracleObjectStorage.Internal
         }
 
         public async Task<string> CreatePreauthenticatedReadRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+            => await CreatePreauthenticatedRequestAsync(objectName, parName, timeExpiresUtc, AccessTypeEnum.ObjectRead, cancellationToken).ConfigureAwait(false);
+
+        public async Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+            => await CreatePreauthenticatedRequestAsync(objectName, parName, timeExpiresUtc, AccessTypeEnum.ObjectWrite, cancellationToken).ConfigureAwait(false);
+
+        private async Task<string> CreatePreauthenticatedRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, AccessTypeEnum accessType, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             return await TranslateAsync(objectName, async ct =>
@@ -242,7 +246,7 @@ namespace FileHub.OracleObjectStorage.Internal
                     {
                         Name = parName,
                         ObjectName = objectName,
-                        AccessType = AccessTypeEnum.ObjectRead,
+                        AccessType = accessType,
                         TimeExpires = timeExpiresUtc
                     }
                 }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);

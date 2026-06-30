@@ -54,4 +54,42 @@ public class AmazonS3UrlAccessTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => file.GetSignedUrl(TimeSpan.Zero));
     }
+
+    [Fact]
+    public void GetSignedUploadUrl_OnDirectory_ReturnsPresignedPutUri_NoCallsBackend()
+    {
+        var client = new InMemoryS3Client(bucket: "my-bucket", region: "us-east-1");
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        var dir = (ISignedUploadable)hub.Root;
+        var putBefore = client.PutInvocationCount;
+
+        var url = dir.GetSignedUploadUrl("uploads/new.bin", TimeSpan.FromMinutes(15));
+
+        Assert.StartsWith("https://my-bucket.s3.us-east-1.amazonaws.com/uploads/new.bin", url.ToString());
+        Assert.Contains("X-Amz-Method=PUT", url.ToString());
+        Assert.Contains("X-Amz-Signature=", url.ToString());
+        // Pre-signed URLs are computed offline — no PutObject yet, object does not exist.
+        Assert.Equal(putBefore, client.PutInvocationCount);
+        Assert.False(hub.Root.FileExists("uploads/new.bin"));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_NonPositiveExpires_Throws()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        var dir = (ISignedUploadable)hub.Root;
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("x.txt", TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_NullName_Throws()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        var dir = (ISignedUploadable)hub.Root;
+
+        Assert.Throws<ArgumentException>(() => dir.GetSignedUploadUrl("", TimeSpan.FromMinutes(1)));
+    }
 }

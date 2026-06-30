@@ -8,7 +8,7 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageDirectory : FileDirectory, IRefreshable
+    public class OracleObjectStorageDirectory : FileDirectory, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -118,7 +118,9 @@ namespace FileHub.OracleObjectStorage
         {
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
-                _prefix, empty, contentLength: 0, contentType: DirectoryContentType, cacheControl: null, opcMeta: null, cancellationToken).ConfigureAwait(false);
+                _prefix, empty, contentLength: 0,
+                options: new OciWriteOptions { ContentType = DirectoryContentType },
+                cancellationToken).ConfigureAwait(false);
         }
 
         // === Existence ===
@@ -147,7 +149,7 @@ namespace FileHub.OracleObjectStorage
             var objectName = OciPathUtil.ResolveSafeObjectName(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(objectName, empty, 0, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(objectName, empty, 0, options: null, cancellationToken).ConfigureAwait(false);
             }
             var created = new OracleObjectStorageFile(this, head, 0, DateTime.UtcNow);
             created.MarkLoaded();
@@ -370,7 +372,8 @@ namespace FileHub.OracleObjectStorage
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(childPrefix, empty, 0,
+                    new OciWriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
             }
             return new OracleObjectStorageDirectory(this, leaf);
         }
@@ -426,7 +429,8 @@ namespace FileHub.OracleObjectStorage
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0,
+                    new OciWriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
             }
             return BuildDirectoryChain(segments);
         }
@@ -448,6 +452,39 @@ namespace FileHub.OracleObjectStorage
             if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
                 return BuildDirectoryChain(segments);
             return null;
+        }
+
+        // === ISignedUploadable ===
+
+        public Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetSignedUploadUrlAsync(name, expiresIn, options, ct));
+
+        // OCI PARs can't bind request headers to the URL — the caller is free
+        // to send any Content-Type/metadata on the PUT, so 'options' is
+        // accepted for API parity with S3 but silently ignored here.
+        public async Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name cannot be null or empty.", nameof(name));
+            if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
+
+            // Resolve to a full object name under this prefix. Reuses the
+            // nested-path validation OciPathUtil already applies — rejects
+            // ".." / absolute paths / invalid segments.
+            var segments = ValidateAndSplitNestedSegments(name);
+            if (segments.Length == 0) throw new ArgumentException("Name cannot be empty.", nameof(name));
+
+            var prefix = _prefix ?? string.Empty;
+            for (int i = 0; i < segments.Length - 1; i++)
+                prefix += segments[i] + "/";
+            var leafName = segments[segments.Length - 1];
+            var objectName = OciPathUtil.CombineObjectName(prefix, leafName);
+
+            var client = _session.Client;
+            var parName = $"filehub-upload-{Guid.NewGuid():N}";
+            var timeExpires = DateTime.UtcNow.Add(expiresIn);
+
+            var accessUri = await client.CreatePreauthenticatedWriteRequestAsync(objectName, parName, timeExpires, cancellationToken).ConfigureAwait(false);
+            return new Uri($"https://objectstorage.{client.Region}.oraclecloud.com{accessUri}");
         }
 
         private static string[] ValidateAndSplitNestedSegments(string nestedName)

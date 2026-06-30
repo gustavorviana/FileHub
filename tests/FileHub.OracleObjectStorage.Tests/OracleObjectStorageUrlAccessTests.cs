@@ -83,4 +83,28 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => file.GetSignedUrlAsync(TimeSpan.FromMinutes(1), cts.Token));
     }
+
+    [Fact]
+    public async Task GetSignedUploadUrlAsync_OnDirectory_CreatesWritePar_NoObjectNeeded()
+    {
+        // The directory mints the URL; the target object never has to exist
+        // (no CreateFile call below). Caller PUTs straight to the access URI.
+        var dir = (ISignedUploadable)Root;
+
+        var url = await dir.GetSignedUploadUrlAsync("upload.bin", TimeSpan.FromMinutes(5));
+
+        Assert.Contains("/p/filehub-upload-", url.ToString());
+        Assert.Contains("/n/test-ns/", url.ToString());
+        Assert.Contains("/b/test-bucket/", url.ToString());
+        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "upload.bin" && p.Name.StartsWith("filehub-upload-")));
+        Assert.False(Root.FileExists("upload.bin"));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_ExpiresInMustBePositive()
+    {
+        var dir = (ISignedUploadable)Root;
+        Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.FromMinutes(-1)));
+    }
 }

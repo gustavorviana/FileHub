@@ -8,7 +8,7 @@ using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
-    public class AmazonS3Directory : FileDirectory, IRefreshable
+    public class AmazonS3Directory : FileDirectory, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -101,8 +101,8 @@ namespace FileHub.AmazonS3
         {
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
-                _prefix, empty, contentLength: 0, contentType: DirectoryContentType,
-                cacheControl: null, userMetadata: null, storageClass: null, serverSideEncryption: null,
+                _prefix, empty, contentLength: 0,
+                options: new S3WriteOptions { ContentType = DirectoryContentType },
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -134,11 +134,7 @@ namespace FileHub.AmazonS3
             {
                 await _session.Client.PutObjectAsync(
                     key, empty, 0,
-                    contentType: null,
-                    cacheControl: null,
-                    userMetadata: null,
-                    storageClass: null,
-                    serverSideEncryption: null,
+                    options: null,
                     cancellationToken).ConfigureAwait(false);
             }
             var file = new AmazonS3File(this, head, 0, DateTime.UtcNow);
@@ -368,7 +364,8 @@ namespace FileHub.AmazonS3
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(childPrefix, empty, 0,
+                    new S3WriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
             }
             return new AmazonS3Directory(this, leaf);
         }
@@ -422,7 +419,8 @@ namespace FileHub.AmazonS3
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0,
+                    new S3WriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
             }
             return BuildDirectoryChain(segments);
         }
@@ -608,6 +606,48 @@ namespace FileHub.AmazonS3
             await _session.Client.DeleteObjectAsync(fileKey, cancellationToken).ConfigureAwait(false);
         }
 
+        // === ISignedUploadable ===
+
+        public Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetSignedUploadUrlAsync(name, expiresIn, options, ct));
+
+        public async Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name cannot be null or empty.", nameof(name));
+            if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
+
+            // Resolve to a full key under this prefix. Accepts nested paths and
+            // rejects sandbox escapes via the same SplitPath used by CreateFile.
+            var key = ResolveLeafKey(name);
+            var expiresUtc = DateTime.UtcNow.Add(expiresIn);
+            var url = await _session.Client.GetPreSignedUploadUrlAsync(
+                key,
+                expiresUtc,
+                AmazonS3File.NormalizeOptions(options),
+                cancellationToken).ConfigureAwait(false);
+            return new Uri(url);
+        }
+
+        private string ResolveLeafKey(string name)
+        {
+            // Walk the path through SplitPath to validate each segment (rejects
+            // "..", absolute paths, etc) without actually opening any directories.
+            var prefix = _prefix;
+            var remaining = name;
+            while (true)
+            {
+                var (head, rest) = SplitPath(remaining);
+                if (rest == null)
+                {
+                    S3PathUtil.ValidateName(head);
+                    return S3PathUtil.CombineObjectKey(prefix, head);
+                }
+                S3PathUtil.ValidateName(head);
+                prefix = S3PathUtil.CombinePrefix(prefix, head);
+                remaining = rest;
+            }
+        }
+
         public override void DeleteIfExists(string name) => SyncBridge.Run(ct => DeleteIfExistsAsync(name, ct));
 
         /// <summary>
@@ -709,50 +749,63 @@ namespace FileHub.AmazonS3
 
         private async Task DeleteAllUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
         {
-            // Collect per-object failures instead of aborting on the first
-            // one. A single 403 from a granular IAM rule, or a transient
-            // throttle, would otherwise leave the rest of the directory
-            // intact and force the caller to retry from a half-deleted state.
-            List<Exception> failures = null;
+            // Batch deletes in chunks of S3's per-request maximum (1000 keys
+            // per DeleteObjects call). Each chunk is one round-trip instead
+            // of N individual DELETE calls — for a 10k-object prefix this
+            // collapses 10 000 requests into 10. Collect per-key errors S3
+            // reports so callers see the full picture instead of aborting
+            // on the first granular IAM rule or transient throttle.
+            const int BatchSize = 1000;
+            var failures = new List<Exception>();
+            var pending = new List<string>(BatchSize);
             string continuationToken = null;
             do
             {
                 var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: null, continuationToken: continuationToken, startAfter: null, cancellationToken).ConfigureAwait(false);
                 foreach (var obj in page.Objects)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
+                    pending.Add(obj.Key);
+                    if (pending.Count >= BatchSize)
                     {
-                        await _session.Client.DeleteObjectAsync(obj.Key, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (!(ex is OperationCanceledException))
-                    {
-                        (failures ??= new List<Exception>()).Add(ex);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await FlushDeleteBatchAsync(pending, failures, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 continuationToken = page.NextContinuationToken;
             } while (!string.IsNullOrEmpty(continuationToken));
 
+            // Also include the prefix marker key in the trailing batch when
+            // present. S3 treats it as just another object — same DeleteObjects
+            // call deletes it. If the marker doesn't exist, S3 silently ignores
+            // it (idempotent).
             if (!string.IsNullOrEmpty(prefix))
+                pending.Add(prefix);
+
+            if (pending.Count > 0)
             {
-                try
-                {
-                    await _session.Client.DeleteObjectAsync(prefix, cancellationToken).ConfigureAwait(false);
-                }
-                catch (FileNotFoundException)
-                {
-                    // no marker to delete
-                }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
-                {
-                    (failures ??= new List<Exception>()).Add(ex);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                await FlushDeleteBatchAsync(pending, failures, cancellationToken).ConfigureAwait(false);
             }
 
-            if (failures != null)
+            if (failures.Count > 0)
                 throw new AggregateException(
                     $"One or more objects under \"{prefix}\" could not be deleted ({failures.Count} failure(s)). The directory is partially deleted.",
                     failures);
+        }
+
+        private async Task FlushDeleteBatchAsync(List<string> keys, List<Exception> failures, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var errors = await _session.Client.DeleteObjectsAsync(keys, cancellationToken).ConfigureAwait(false);
+                foreach (var e in errors)
+                    failures.Add(new FileHubException($"S3 DeleteObjects failed for key \"{e.Key}\" ({e.Code}): {e.Message}"));
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                failures.Add(ex);
+            }
+            keys.Clear();
         }
 
         private async Task CopyAllObjectsAsync(string sourcePrefix, IS3Client destinationClient, string destinationPrefix, CancellationToken cancellationToken)
@@ -773,10 +826,7 @@ namespace FileHub.AmazonS3
                         obj.Key,
                         destKey,
                         metadataReplace: false,
-                        contentType: null,
-                        userMetadata: null,
-                        storageClass: null,
-                        serverSideEncryption: null,
+                        options: null,
                         cancellationToken).ConfigureAwait(false);
                 }
                 continuationToken = page.NextContinuationToken;

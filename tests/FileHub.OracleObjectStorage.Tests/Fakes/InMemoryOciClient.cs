@@ -153,9 +153,7 @@ internal sealed class InMemoryOciClient : IOciClient
         string objectName,
         Stream body,
         long contentLength,
-        string contentType,
-        string cacheControl,
-        IReadOnlyDictionary<string, string> opcMeta,
+        OciWriteOptions options,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -180,11 +178,11 @@ internal sealed class InMemoryOciClient : IOciClient
         var stored = new InMemoryStoredObject
         {
             Body = bytes,
-            ContentType = contentType,
-            CacheControl = cacheControl,
-            OpcMeta = opcMeta is null
+            ContentType = options?.ContentType,
+            CacheControl = options?.CacheControl,
+            OpcMeta = options?.Metadata is null
                 ? null
-                : new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase),
+                : new Dictionary<string, string>(options.Metadata, StringComparer.OrdinalIgnoreCase),
             LastModified = DateTime.UtcNow
         };
 
@@ -332,6 +330,17 @@ internal sealed class InMemoryOciClient : IOciClient
         if (!_store.Objects.ContainsKey(objectName))
             throw new FileNotFoundException($"Object \"{objectName}\" not found.");
 
+        var accessUri = $"/p/{parName}/n/{Namespace}/b/{Bucket}/o/{Uri.EscapeDataString(objectName)}";
+        _store.Pars[parName] = new ParRecord(parName, objectName, timeExpiresUtc, accessUri);
+        return Task.FromResult(accessUri);
+    }
+
+    public Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        // Write PAR doesn't require the object to exist yet — it's the URL
+        // the caller PUTs bytes to.
         var accessUri = $"/p/{parName}/n/{Namespace}/b/{Bucket}/o/{Uri.EscapeDataString(objectName)}";
         _store.Pars[parName] = new ParRecord(parName, objectName, timeExpiresUtc, accessUri);
         return Task.FromResult(accessUri);

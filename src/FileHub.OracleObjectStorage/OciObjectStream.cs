@@ -244,9 +244,7 @@ namespace FileHub.OracleObjectStorage
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType,
-                cacheControl,
-                meta,
+                new OciWriteOptions { ContentType = contentType, CacheControl = cacheControl, Metadata = meta },
                 cancellationToken).ConfigureAwait(false);
 
             // Replace the file's snapshot now that the object is durable.

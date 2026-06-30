@@ -35,9 +35,7 @@ namespace FileHub.OracleObjectStorage.Internal
             string objectName,
             Stream body,
             long contentLength,
-            string contentType,
-            string cacheControl,
-            IReadOnlyDictionary<string, string> opcMeta,
+            OciWriteOptions options,
             CancellationToken cancellationToken = default);
 
         Task DeleteObjectAsync(string objectName, CancellationToken cancellationToken = default);
@@ -57,6 +55,13 @@ namespace FileHub.OracleObjectStorage.Internal
         Task<OciBucketInfo> GetBucketAsync(CancellationToken cancellationToken = default);
 
         Task<string> CreatePreauthenticatedReadRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Pre-authenticated request granting <c>ObjectWrite</c> access — the
+        /// caller can <c>PUT</c> bytes to the returned access URI without
+        /// authenticating against OCI.
+        /// </summary>
+        Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default);
     }
 
     internal sealed class OciHeadResult

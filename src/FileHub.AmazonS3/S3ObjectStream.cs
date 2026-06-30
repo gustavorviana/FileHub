@@ -219,11 +219,7 @@ namespace FileHub.AmazonS3
                 _file.ObjectKey,
                 _writeBuffer,
                 _writeBuffer.Length,
-                contentType: _options?.ContentType,
-                cacheControl: _options?.CacheControl,
-                userMetadata: _options?.Metadata,
-                storageClass: _options?.StorageClass,
-                serverSideEncryption: _options?.ServerSideEncryption,
+                _options,
                 cancellationToken).ConfigureAwait(false);
 
             _file.OnWriteCommitted(_writeBuffer.Length, _options);

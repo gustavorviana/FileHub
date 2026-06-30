@@ -61,9 +61,7 @@ public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
             objectName,
             new MemoryStream(Encoding.UTF8.GetBytes("completely-new-content")),
             contentLength: 22,
-            contentType: null!,
-            cacheControl: null!,
-            opcMeta: null!);
+            options: null);
 
         Assert.Equal(2, file.Length);
 
@@ -84,9 +82,7 @@ public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
             objectName,
             new MemoryStream(new byte[] { 1, 2, 3, 4 }),
             contentLength: 4,
-            contentType: null!,
-            cacheControl: null!,
-            opcMeta: null!);
+            options: null);
 
         // Sync call — this is what we're verifying: no deadlock, result reflects server state.
         ((IRefreshable)file).Refresh();

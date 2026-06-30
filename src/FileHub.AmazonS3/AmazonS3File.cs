@@ -221,10 +221,7 @@ namespace FileHub.AmazonS3
             await client.CopyFromBucketAsync(
                 client.Bucket, sourceKey, destinationKey,
                 metadataReplace: false,
-                contentType: null,
-                userMetadata: null,
-                storageClass: null,
-                serverSideEncryption: null,
+                options: null,
                 cancellationToken).ConfigureAwait(false);
             await client.DeleteObjectAsync(sourceKey, cancellationToken).ConfigureAwait(false);
             Name = newName;
@@ -296,7 +293,7 @@ namespace FileHub.AmazonS3
         // Normalize FileWriteOptions to S3WriteOptions so internal paths
         // can read StorageClass / SSE slots even when the caller passed the
         // base type.
-        private static S3WriteOptions NormalizeOptions(FileWriteOptions options)
+        internal static S3WriteOptions NormalizeOptions(FileWriteOptions options)
         {
             if (options == null) return null;
             if (options is S3WriteOptions s3) return s3;
@@ -336,10 +333,7 @@ namespace FileHub.AmazonS3
                     ObjectKey,
                     destinationKey,
                     metadataReplace: false,
-                    contentType: null,
-                    userMetadata: null,
-                    storageClass: null,
-                    serverSideEncryption: null,
+                    options: null,
                     cancellationToken).ConfigureAwait(false);
                 return new AmazonS3File(s3Dir, name, _length, _lastWriteTimeUtc);
             }
@@ -388,13 +382,7 @@ namespace FileHub.AmazonS3
             // Options are bound to the object at CreateMultipartUpload; the stream
             // re-applies them to the cached snapshot when the upload completes.
             var uploadId = await SessionInternal.Client.BeginMultipartUploadAsync(
-                ObjectKey,
-                contentType: s3Options?.ContentType,
-                cacheControl: s3Options?.CacheControl,
-                userMetadata: s3Options?.Metadata,
-                storageClass: s3Options?.StorageClass,
-                serverSideEncryption: s3Options?.ServerSideEncryption,
-                cancellationToken).ConfigureAwait(false);
+                ObjectKey, s3Options, cancellationToken).ConfigureAwait(false);
             return new S3MultipartWriteStream(this, uploadId, s3Options);
         }
 
@@ -423,13 +411,7 @@ namespace FileHub.AmazonS3
             var client = SessionInternal.Client;
             var s3Options = NormalizeOptions(options);
             var uploadId = await client.BeginMultipartUploadAsync(
-                ObjectKey,
-                contentType: s3Options?.ContentType,
-                cacheControl: s3Options?.CacheControl,
-                userMetadata: s3Options?.Metadata,
-                storageClass: s3Options?.StorageClass,
-                serverSideEncryption: s3Options?.ServerSideEncryption,
-                cancellationToken).ConfigureAwait(false);
+                ObjectKey, s3Options, cancellationToken).ConfigureAwait(false);
 
             // The metadata is bound to the object at CreateMultipartUpload, so
             // reflect it in the cached snapshot now — it becomes real once the
