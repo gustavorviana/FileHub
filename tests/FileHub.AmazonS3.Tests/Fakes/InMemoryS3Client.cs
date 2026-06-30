@@ -188,8 +188,7 @@ internal sealed class InMemoryS3Client : IS3Client
         var injected = DeleteFailureInjector?.Invoke(key);
         if (injected is not null)
             throw injected;
-        if (!_store.Objects.TryRemove(key, out _))
-            throw new FileNotFoundException($"Object \"{key}\" not found.");
+        _store.Objects.TryRemove(key, out _);
         return Task.CompletedTask;
     }
 

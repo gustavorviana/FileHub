@@ -803,4 +803,91 @@ public class MemoryDirectoryTests
         Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
+
+    // === CreateFile(name, bytes, options) ===
+
+    [Fact]
+    public void CreateFile_WithBytesAndOptions_WritesContentAndAppliesMetadata()
+    {
+        var root = NewRoot();
+        var opts = new FileWriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "public,max-age=3600",
+            Metadata = new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["uploaded-by"] = "gustavo"
+            }
+        };
+
+        var file = root.CreateFile("img.png", new byte[] { 1, 2, 3, 4 }, opts);
+
+        Assert.Equal(4, file.Length);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, file.ReadAllBytes());
+
+        var md = file.GetMetadata();
+        Assert.Equal("image/png", md.ContentType);
+        Assert.Equal("public,max-age=3600", md.CacheControl);
+        Assert.Equal("gustavo", md.Tags["uploaded-by"]);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CreateFileAsync_WithBytesAndOptions_WritesContentAndAppliesMetadata()
+    {
+        var root = NewRoot();
+        var opts = new FileWriteOptions { ContentType = "text/plain" };
+
+        var file = await root.CreateFileAsync("a.txt", new byte[] { 0xAA }, opts);
+
+        Assert.Equal(1, file.Length);
+        var md = await file.GetMetadataAsync();
+        Assert.Equal("text/plain", md.ContentType);
+    }
+
+    [Fact]
+    public void CreateFile_BytesNull_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<System.ArgumentNullException>(() => root.CreateFile("x.txt", bytes: null));
+    }
+
+    // === GetDirectories paging ===
+
+    [Fact]
+    public void GetDirectories_IndexOffsetAndLimit_PaginatesSlice()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("a");
+        root.CreateDirectory("b");
+        root.CreateDirectory("c");
+        root.CreateDirectory("d");
+
+        var page = root.GetDirectories("*", offset: FileListOffset.FromIndex(1), limit: 2).ToArray();
+        Assert.Equal(2, page.Length);
+    }
+
+    [Fact]
+    public void GetDirectories_NamedOffset_StartsFromCursorInclusive()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("a");
+        root.CreateDirectory("b");
+        root.CreateDirectory("c");
+        root.CreateDirectory("d");
+
+        var names = root.GetDirectories("*", offset: FileListOffset.FromName("c"))
+            .Select(d => d.Name)
+            .OrderBy(n => n)
+            .ToArray();
+
+        Assert.Equal(new[] { "c", "d" }, names);
+    }
+
+    [Fact]
+    public void GetDirectories_NegativeLimit_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<System.ArgumentOutOfRangeException>(
+            () => root.GetDirectories("*", offset: default, limit: -1).ToArray());
+    }
 }

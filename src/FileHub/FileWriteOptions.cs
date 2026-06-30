@@ -8,7 +8,7 @@ namespace FileHub
     /// <see cref="FileEntry.CopyFromStreamAsync"/>).
     /// <para>
     /// Drivers that do not support a field silently ignore it — never throw. Check
-    /// <see cref="IFileHub.Features"/> to discover what each driver actually applies.
+    /// the driver's documentation to know which fields it actually applies.
     /// </para>
     /// <para>
     /// Drivers backed by storage with per-object metadata can expose typed

@@ -7,6 +7,19 @@ using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
+    /// <summary>
+    /// <see cref="FileEntry"/> backed by an S3 object.
+    /// <para>
+    /// <b>Thread safety.</b> Not thread-safe. Cached state
+    /// (<see cref="Length"/>, <see cref="LastWriteTimeUtc"/>, the metadata
+    /// snapshot, the <c>IsLoaded</c> flag, and the single-stream latch) is
+    /// mutated from multiple driver paths without locks. A single
+    /// <see cref="AmazonS3File"/> instance must be used from one logical
+    /// thread at a time. Cross-instance concurrency (different
+    /// <see cref="AmazonS3File"/> handles to the same or different objects)
+    /// is fine.
+    /// </para>
+    /// </summary>
     public class AmazonS3File : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, IMultipartUploadSignable, ILazyLoad
     {
         /// <summary>S3 minimum for multipart parts (except the last). 5 MiB.</summary>

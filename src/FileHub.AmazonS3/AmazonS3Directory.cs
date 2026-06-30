@@ -590,25 +590,22 @@ namespace FileHub.AmazonS3
             }
             S3PathUtil.ValidateName(head);
 
-            var key = S3PathUtil.CombineObjectKey(_prefix, head);
-            try
-            {
-                await _session.Client.DeleteObjectAsync(key, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            catch (FileNotFoundException)
-            {
-                // fall through to directory delete attempt
-            }
+            var fileKey = S3PathUtil.CombineObjectKey(_prefix, head);
+            var dirPrefix = S3PathUtil.CombinePrefix(_prefix, head);
 
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, head);
-            if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
+            // S3's DeleteObject is idempotent — it returns 204 whether or not
+            // the key existed, so we can't infer "is this a file or a directory?"
+            // from a DELETE alone. Probe with a single LIST(limit=1): if any
+            // object lives under the dir-prefix, delete the tree; otherwise
+            // issue an idempotent DELETE on the file key.
+            if (await AnyObjectUnderPrefixAsync(dirPrefix, cancellationToken).ConfigureAwait(false))
             {
-                await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
+                await DeleteAllUnderPrefixAsync(dirPrefix, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+            // Plain file delete — idempotent (no throw if missing) to match S3.
+            await _session.Client.DeleteObjectAsync(fileKey, cancellationToken).ConfigureAwait(false);
         }
 
         public override void DeleteIfExists(string name) => SyncBridge.Run(ct => DeleteIfExistsAsync(name, ct));

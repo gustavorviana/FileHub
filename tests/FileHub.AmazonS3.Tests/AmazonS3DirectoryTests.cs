@@ -87,7 +87,7 @@ public class AmazonS3DirectoryTests
     }
 
     [Fact]
-    public void DeleteIfExists_ExistingFile_OneDeleteNoProbe()
+    public void DeleteIfExists_ExistingFile_NoHeadProbe()
     {
         var client = new InMemoryS3Client();
         using var hub = AmazonS3FileHub.FromS3Client(client);
@@ -99,9 +99,11 @@ public class AmazonS3DirectoryTests
 
         hub.Root.DeleteIfExists("a.txt");
 
-        // No HEAD/LIST probe — base impl's FileExists + DirectoryExists is skipped.
+        // Base impl's FileExists probe (HEAD) is skipped. One LIST is needed to
+        // decide between file-leaf and directory-prefix (S3 DeleteObject is
+        // idempotent — we can't infer "what was it" from a DELETE alone).
         Assert.Equal(headBefore, client.HeadInvocationCount);
-        Assert.Equal(listBefore, client.ListInvocationCount);
+        Assert.Equal(listBefore + 1, client.ListInvocationCount);
         Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
         Assert.False(hub.Root.FileExists("a.txt"));
     }
@@ -112,10 +114,30 @@ public class AmazonS3DirectoryTests
         var client = new InMemoryS3Client();
         using var hub = AmazonS3FileHub.FromS3Client(client);
 
-        // No throw even though target never existed — DeleteIfExists swallows
-        // the "nothing to delete" case.
+        // No throw even though target never existed — S3 DeleteObject is
+        // idempotent and DeleteIfExists swallows any residual FileNotFoundException.
         hub.Root.DeleteIfExists("missing.txt");
 
         Assert.False(hub.Root.FileExists("missing.txt"));
+    }
+
+    [Fact]
+    public void Delete_DirectoryName_DeletesAllChildren()
+    {
+        // Regression: before the fix, S3 DeleteObject's idempotency meant the
+        // try/catch FileNotFoundException + directory-fallback was dead code in
+        // production, so dir.Delete("sub") silently no-op'd when "sub" was a
+        // prefix with children. Now the LIST probe runs first.
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        hub.Root.CreateFile("sub/a.txt").SetBytes(new byte[] { 1 });
+        hub.Root.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
+        hub.Root.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
+
+        hub.Root.Delete("sub");
+
+        Assert.False(hub.Root.FileExists("sub/a.txt"));
+        Assert.False(hub.Root.FileExists("sub/b.txt"));
+        Assert.True(hub.Root.FileExists("sibling.txt"));
     }
 }

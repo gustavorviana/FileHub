@@ -19,7 +19,6 @@ namespace FileHub.Ftp
         private bool _disposed;
 
         public FileDirectory Root { get; }
-        public FileHubFeatures Features => FileHubFeatures.None;
 
         private FtpFileHub(FtpSession session, string rootPath, DirectoryPathMode pathMode)
         {

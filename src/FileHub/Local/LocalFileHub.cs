@@ -6,7 +6,6 @@ namespace FileHub.Local
     public class LocalFileHub : ILocalFileHub
     {
         public FileDirectory Root { get; }
-        public FileHubFeatures Features => FileHubFeatures.None;
 
         public LocalFileHub(string rootPath)
             : this(rootPath, DirectoryPathMode.OpenIntermediates) { }
