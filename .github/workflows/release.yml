@@ -18,9 +18,8 @@ jobs:
     name: Pack & publish to NuGet
     runs-on: ubuntu-latest
     # Bind to a GitHub environment so the Trusted Publishing policy on
-    # NuGet.org can pin against it (see docs/nuget-trusted-publishing.md).
-    # Optional environment protection rules (required reviewers, wait timer)
-    # apply automatically once configured in repo Settings → Environments.
+    # NuGet.org can pin against it. Optional protection rules (required
+    # reviewers, wait timer) apply once configured in repo Settings → Environments.
     environment: release
 
     steps:
@@ -79,8 +78,7 @@ jobs:
 
       # Exchange the workflow's GitHub OIDC token for a short-lived NuGet
       # API key. Requires a Trusted Publishing policy on NuGet.org matching
-      # this repo + workflow file + environment (see docs/nuget-trusted-publishing.md).
-      # No long-lived secret is stored on the repo for this step.
+      # this repo + workflow file + environment. No long-lived secret stored.
       - name: NuGet login (Trusted Publishing)
         uses: NuGet/login@v1
         id: nuget-login
