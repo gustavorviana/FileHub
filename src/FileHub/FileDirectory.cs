@@ -134,7 +134,7 @@ namespace FileHub
             return (head, remainder);
         }
 
-        public void DeleteIfExists(string name)
+        public virtual void DeleteIfExists(string name)
         {
             ThrowIfReadOnly();
             if (FileExists(name) || DirectoryExists(name))

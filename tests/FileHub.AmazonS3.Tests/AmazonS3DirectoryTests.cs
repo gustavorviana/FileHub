@@ -85,4 +85,37 @@ public class AmazonS3DirectoryTests
         using var hub = NewHub();
         Assert.Throws<System.NotSupportedException>(() => hub.Root.Delete());
     }
+
+    [Fact]
+    public void DeleteIfExists_ExistingFile_OneDeleteNoProbe()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        hub.Root.CreateFile("a.txt").SetBytes(new byte[] { 1 });
+
+        var headBefore = client.HeadInvocationCount;
+        var listBefore = client.ListInvocationCount;
+        var deleteBefore = client.DeleteInvocationCount;
+
+        hub.Root.DeleteIfExists("a.txt");
+
+        // No HEAD/LIST probe — base impl's FileExists + DirectoryExists is skipped.
+        Assert.Equal(headBefore, client.HeadInvocationCount);
+        Assert.Equal(listBefore, client.ListInvocationCount);
+        Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
+        Assert.False(hub.Root.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_MissingFile_DoesNotThrow()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        // No throw even though target never existed — DeleteIfExists swallows
+        // the "nothing to delete" case.
+        hub.Root.DeleteIfExists("missing.txt");
+
+        Assert.False(hub.Root.FileExists("missing.txt"));
+    }
 }

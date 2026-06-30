@@ -611,6 +611,29 @@ namespace FileHub.AmazonS3
             throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
         }
 
+        public override void DeleteIfExists(string name) => SyncBridge.Run(ct => DeleteIfExistsAsync(name, ct));
+
+        /// <summary>
+        /// Single-call delete on S3. <c>DeleteObject</c> is idempotent — returns
+        /// <c>204</c> whether the object existed or not — so skipping the base
+        /// implementation's <c>FileExists</c> + <c>DirectoryExists</c> probe
+        /// saves up to one HEAD and one LIST per call. If <paramref name="name"/>
+        /// resolves only as a directory, the LIST/DELETE cascade in
+        /// <see cref="DeleteAsync(string, CancellationToken)"/> still runs.
+        /// </summary>
+        public override async Task DeleteIfExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            try
+            {
+                await DeleteAsync(name, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+                // DeleteIfExists swallows the "nothing to delete" case.
+            }
+        }
+
         public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         public override async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)

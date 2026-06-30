@@ -33,6 +33,8 @@ internal sealed class InMemoryS3Client : IS3Client
     private int _copyInvocationCount;
     private int _headInvocationCount;
     private int _putInvocationCount;
+    private int _deleteInvocationCount;
+    private int _listInvocationCount;
     private long _uploadCounter;
 
     public string Bucket { get; }
@@ -43,6 +45,8 @@ internal sealed class InMemoryS3Client : IS3Client
     public int CopyInvocationCount => _copyInvocationCount;
     public int HeadInvocationCount => _headInvocationCount;
     public int PutInvocationCount => _putInvocationCount;
+    public int DeleteInvocationCount => _deleteInvocationCount;
+    public int ListInvocationCount => _listInvocationCount;
 
     public Func<string, Exception?>? DeleteFailureInjector { get; set; }
 
@@ -180,6 +184,7 @@ internal sealed class InMemoryS3Client : IS3Client
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _deleteInvocationCount);
         var injected = DeleteFailureInjector?.Invoke(key);
         if (injected is not null)
             throw injected;
@@ -259,6 +264,7 @@ internal sealed class InMemoryS3Client : IS3Client
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _listInvocationCount);
 
         prefix ??= string.Empty;
         // Mirrors S3: StartAfter is exclusive and only honored on page 1.
