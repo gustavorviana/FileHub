@@ -28,6 +28,15 @@ namespace FileHub
         Uri GetPublicUrl();
 
         /// <summary>
+        /// Async version of <see cref="GetPublicUrl"/>. Drivers that probe the
+        /// backing store to resolve public access should override this.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the item is not public.
+        /// </exception>
+        Task<Uri> GetPublicUrlAsync(CancellationToken cancellationToken = default);
+
+        /// <summary>
         /// Returns a time-limited pre-signed URL that grants temporary access to this item.
         /// Works for both public and private items.
         /// </summary>

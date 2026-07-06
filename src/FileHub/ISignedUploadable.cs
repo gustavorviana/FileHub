@@ -36,9 +36,9 @@ namespace FileHub
         /// <param name="name">File name or relative path under this directory.</param>
         /// <param name="expiresIn">Duration until the URL expires.</param>
         /// <param name="options">Optional headers to bind into the signature.</param>
-        Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null);
-
-        /// <summary>Async version of <see cref="GetSignedUploadUrl(string, TimeSpan, FileWriteOptions)"/>.</summary>
         Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default);
+
+        /// <summary>Sync version of <see cref="GetSignedUploadUrlAsync(string, TimeSpan, FileWriteOptions, CancellationToken)"/>.</summary>
+        Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null);
     }
 }

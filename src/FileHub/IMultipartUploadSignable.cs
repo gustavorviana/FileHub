@@ -23,10 +23,13 @@ namespace FileHub
 
         // === Sync (delegates to async) ===
 
+        /// <summary>Sync version of <see cref="BeginSignedMultipartUploadAsync"/>.</summary>
         SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn, FileWriteOptions options = null);
 
+        /// <summary>Sync version of <see cref="CompleteSignedMultipartUploadAsync"/>.</summary>
         void CompleteSignedMultipartUpload(string uploadId, IReadOnlyList<UploadedPart> parts);
 
+        /// <summary>Sync version of <see cref="AbortSignedMultipartUploadAsync"/>.</summary>
         void AbortSignedMultipartUpload(string uploadId);
 
         // === Async (source of truth) ===

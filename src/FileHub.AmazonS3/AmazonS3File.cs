@@ -344,9 +344,11 @@ namespace FileHub.AmazonS3
 
         public bool IsPublic => SessionInternal.GetIsPublic();
 
-        public Uri GetPublicUrl()
+        public Uri GetPublicUrl() => SyncBridge.Run(ct => GetPublicUrlAsync(ct));
+
+        public async Task<Uri> GetPublicUrlAsync(CancellationToken cancellationToken = default)
         {
-            if (!SessionInternal.GetIsPublic())
+            if (!await SessionInternal.GetIsPublicAsync(cancellationToken).ConfigureAwait(false))
                 throw new InvalidOperationException(
                     $"Bucket \"{SessionInternal.Client.Bucket}\" is not public. Use GetSignedUrl(TimeSpan) instead.");
 
