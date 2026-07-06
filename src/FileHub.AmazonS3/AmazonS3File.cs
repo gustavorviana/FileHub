@@ -63,7 +63,7 @@ namespace FileHub.AmazonS3
         /// </summary>
         public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc;
 
-        internal string ObjectKey => S3PathUtil.CombineObjectKey(_parent.PrefixInternal, Name);
+        internal string ObjectKey => PathUtil.CombineKey(_parent.PrefixInternal, Name);
         internal IS3Session SessionInternal => _parent.SessionInternal;
         internal long LengthInternal { get => _length; set => _length = value; }
 
@@ -213,9 +213,9 @@ namespace FileHub.AmazonS3
             // S3 has no atomic rename. Fall back to copy+delete in-place.
             // Always default COPY — source metadata is preserved on the new key.
             ThrowIfReadOnly();
-            S3PathUtil.ValidateName(newName);
+            PathUtil.ValidateName(newName);
             var sourceKey = ObjectKey;
-            var destinationKey = S3PathUtil.CombineObjectKey(_parent.PrefixInternal, newName);
+            var destinationKey = PathUtil.CombineKey(_parent.PrefixInternal, newName);
             var client = SessionInternal.Client;
 
             await client.CopyFromBucketAsync(
@@ -313,14 +313,14 @@ namespace FileHub.AmazonS3
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
             {
-                S3PathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
                 // Ensure we know the source size — without this, a stub created
                 // via OpenFile(name, createIfNotExists: true) that was never
                 // refreshed would propagate _length = -1 into the new file,
                 // making consumers see a "missing" object.
                 if (!_isLoaded)
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
-                var destinationKey = S3PathUtil.CombineObjectKey(s3Dir.PrefixInternal, name);
+                var destinationKey = PathUtil.CombineKey(s3Dir.PrefixInternal, name);
                 var sourceClient = SessionInternal.Client;
                 var destClient = s3Dir.SessionInternal.Client;
                 // Issue CopyObject via the destination client — its endpoint

@@ -36,7 +36,7 @@ namespace FileHub.Local
         public LocalFile(LocalDirectory directory, string fileName) : base(fileName)
         {
             if (directory == null) throw new ArgumentNullException(nameof(directory));
-            ValidateName(fileName);
+            PathUtil.ValidateLocalName(fileName);
             Parent = directory;
             _rootPath = directory.RootPathInternal;
         }
@@ -63,7 +63,7 @@ namespace FileHub.Local
         public override FileEntry Rename(string newName)
         {
             ThrowIfReadOnly();
-            ValidateName(newName);
+            PathUtil.ValidateLocalName(newName);
             var newPath = ((LocalDirectory)Parent).ResolveSafeChildPath(newName);
             File.Move(Path, newPath);
             Name = newName;

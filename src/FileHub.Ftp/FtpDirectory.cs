@@ -62,7 +62,7 @@ namespace FileHub.Ftp
         {
             if (string.IsNullOrEmpty(rootPath) || rootPath == "/")
                 return "/";
-            return FtpPathUtil.GetLeafName(rootPath);
+            return PathUtil.GetLeafName(rootPath);
         }
 
         // === IRefreshable ===
@@ -138,7 +138,7 @@ namespace FileHub.Ftp
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
-            FtpPathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, head);
@@ -181,7 +181,7 @@ namespace FileHub.Ftp
         {
             try
             {
-                FtpPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
             }
             catch (ArgumentException)
             {
@@ -218,7 +218,7 @@ namespace FileHub.Ftp
 
         private IEnumerable<FtpFile> EnumerateFiles(IReadOnlyList<FtpItemInfo> listing, string searchPattern, FileListOffset offset, int? limit)
         {
-            var regex = FtpPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
 
             IEnumerable<FtpItemInfo> filtered = listing
                 .Where(i => !i.IsDirectory)
@@ -278,7 +278,7 @@ namespace FileHub.Ftp
             }
 
             var leaf = head ?? name;
-            FtpPathUtil.ValidateName(leaf);
+            PathUtil.ValidateName(leaf);
             var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, leaf);
             await _session.Client.CreateDirectoryAsync(fullPath, recursive: false, cancellationToken).ConfigureAwait(false);
             return new FtpDirectory(this, leaf);
@@ -314,7 +314,7 @@ namespace FileHub.Ftp
             var leaf = head ?? name;
             try
             {
-                FtpPathUtil.ValidateName(leaf);
+                PathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
@@ -330,7 +330,7 @@ namespace FileHub.Ftp
 
         private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
         {
-            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(nestedName);
             var fullPath = BuildNestedPath(segments);
             FtpPathUtil.EnsureWithinRoot(_rootPathFtp, fullPath);
 
@@ -343,7 +343,7 @@ namespace FileHub.Ftp
             string[] segments;
             try
             {
-                segments = ValidateAndSplitNestedSegments(nestedName);
+                segments = PathUtil.SplitAndValidateSegments(nestedName);
             }
             catch (ArgumentException)
             {
@@ -355,21 +355,6 @@ namespace FileHub.Ftp
 
             var exists = await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
             return exists ? BuildDirectoryChain(segments) : null;
-        }
-
-        private static string[] ValidateAndSplitNestedSegments(string nestedName)
-        {
-            var normalized = nestedName.Replace('\\', '/').Trim('/');
-            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                // Keep the exception type aligned with NestedPath.TrySplit — callers
-                // expect FileHubException for any path-level traversal attempt.
-                if (seg == "." || seg == "..")
-                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
-                FtpPathUtil.ValidateName(seg);
-            }
-            return segments;
         }
 
         private string BuildNestedPath(string[] segments)
@@ -398,7 +383,7 @@ namespace FileHub.Ftp
 
         private IEnumerable<FtpDirectory> EnumerateDirectories(IReadOnlyList<FtpItemInfo> listing, string searchPattern)
         {
-            var regex = FtpPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             return listing
                 .Where(i => i.IsDirectory)
                 .Where(i => regex.IsMatch(i.Name))
@@ -435,7 +420,7 @@ namespace FileHub.Ftp
                     return await ftpDir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { FtpPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             var fullPath = FtpPathUtil.Combine(_path, head);
@@ -454,7 +439,7 @@ namespace FileHub.Ftp
                     return await ftpDir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { FtpPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             var fullPath = FtpPathUtil.Combine(_path, head);
@@ -489,7 +474,7 @@ namespace FileHub.Ftp
                 }
                 throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
             }
-            FtpPathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var fullPath = FtpPathUtil.Combine(_path, head);
@@ -517,7 +502,7 @@ namespace FileHub.Ftp
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
 
-            FtpPathUtil.ValidateName(newName);
+            PathUtil.ValidateName(newName);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _parent._path, newName);
@@ -535,7 +520,7 @@ namespace FileHub.Ftp
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir._session.Client, _session.Client))
             {
-                FtpPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
                 await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir._rootPathFtp, ftpDir._path, name);
                 await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);

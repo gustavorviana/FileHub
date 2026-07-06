@@ -20,7 +20,7 @@ namespace FileHub.OracleObjectStorage
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
-        public override string Path => OciPathUtil.DisplayPath(_prefix);
+        public override string Path => PathUtil.DisplayPath(_prefix);
         public override FileDirectory Parent => _parent;
 
         /// <summary>
@@ -59,7 +59,7 @@ namespace FileHub.OracleObjectStorage
             _parent = parent ?? throw new ArgumentNullException(nameof(parent));
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
-            _prefix = OciPathUtil.CombinePrefix(parent._prefix, name);
+            _prefix = PathUtil.CombinePrefix(parent._prefix, name);
             _pathMode = parent._pathMode;
         }
 
@@ -67,7 +67,7 @@ namespace FileHub.OracleObjectStorage
         {
             if (string.IsNullOrEmpty(rootPrefix))
                 return "/";
-            return OciPathUtil.GetLeafName(rootPrefix);
+            return PathUtil.GetLeafName(rootPrefix);
         }
 
         // === IRefreshable ===
@@ -146,7 +146,7 @@ namespace FileHub.OracleObjectStorage
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
-            var objectName = OciPathUtil.ResolveSafeObjectName(_rootPrefix, _prefix, head);
+            var objectName = PathUtil.ResolveSafeKey(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
                 await _session.Client.PutObjectAsync(objectName, empty, 0, options: null, cancellationToken).ConfigureAwait(false);
@@ -197,7 +197,7 @@ namespace FileHub.OracleObjectStorage
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return dir.OpenFile(rest, createIfNotExists: true);
             }
-            OciPathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
             return new OracleObjectStorageFile(this, head);   // stub, IsLoaded = false
         }
 
@@ -218,7 +218,7 @@ namespace FileHub.OracleObjectStorage
         {
             if (createIfNotExists)
             {
-                OciPathUtil.ValidateName(segment);
+                PathUtil.ValidateName(segment);
                 return new OracleObjectStorageDirectory(this, segment);
             }
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
@@ -228,14 +228,14 @@ namespace FileHub.OracleObjectStorage
         {
             try
             {
-                OciPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var objectName = OciPathUtil.CombineObjectName(_prefix, name);
+            var objectName = PathUtil.CombineKey(_prefix, name);
             try
             {
                 var head = await _session.Client.HeadObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
@@ -279,7 +279,7 @@ namespace FileHub.OracleObjectStorage
 
         private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
-            var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string start = offset.IsNamed ? _prefix + offset.Name : null;
             int skipped = 0;
@@ -317,7 +317,7 @@ namespace FileHub.OracleObjectStorage
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             ValidatePaging(limit);
-            var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string start = offset.IsNamed ? _prefix + offset.Name : null;
             int skipped = 0;
@@ -368,7 +368,7 @@ namespace FileHub.OracleObjectStorage
             }
 
             var leaf = head ?? name;
-            var childPrefix = OciPathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
+            var childPrefix = PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
 
             using (var empty = new MemoryStream())
             {
@@ -406,14 +406,14 @@ namespace FileHub.OracleObjectStorage
             var leaf = head ?? name;
             try
             {
-                OciPathUtil.ValidateName(leaf);
+                PathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, leaf);
+            var childPrefix = PathUtil.CombinePrefix(_prefix, leaf);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
                 return new OracleObjectStorageDirectory(this, leaf);
             return null;
@@ -423,9 +423,9 @@ namespace FileHub.OracleObjectStorage
 
         private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
         {
-            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(nestedName);
             var fullPrefix = BuildNestedPrefix(segments);
-            OciPathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
             using (var empty = new MemoryStream())
             {
@@ -440,14 +440,14 @@ namespace FileHub.OracleObjectStorage
             string[] segments;
             try
             {
-                segments = ValidateAndSplitNestedSegments(nestedName);
+                segments = PathUtil.SplitAndValidateSegments(nestedName);
             }
             catch (ArgumentException)
             {
                 return null;
             }
             var fullPrefix = BuildNestedPrefix(segments);
-            OciPathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
             if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
                 return BuildDirectoryChain(segments);
@@ -468,16 +468,16 @@ namespace FileHub.OracleObjectStorage
             if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
 
             // Resolve to a full object name under this prefix. Reuses the
-            // nested-path validation OciPathUtil already applies — rejects
+            // nested-path validation PathUtil already applies — rejects
             // ".." / absolute paths / invalid segments.
-            var segments = ValidateAndSplitNestedSegments(name);
+            var segments = PathUtil.SplitAndValidateSegments(name);
             if (segments.Length == 0) throw new ArgumentException("Name cannot be empty.", nameof(name));
 
             var prefix = _prefix ?? string.Empty;
             for (int i = 0; i < segments.Length - 1; i++)
                 prefix += segments[i] + "/";
             var leafName = segments[segments.Length - 1];
-            var objectName = OciPathUtil.CombineObjectName(prefix, leafName);
+            var objectName = PathUtil.CombineKey(prefix, leafName);
 
             var client = _session.Client;
             var parName = $"filehub-upload-{Guid.NewGuid():N}";
@@ -485,21 +485,6 @@ namespace FileHub.OracleObjectStorage
 
             var accessUri = await client.CreatePreauthenticatedWriteRequestAsync(objectName, parName, timeExpires, cancellationToken).ConfigureAwait(false);
             return new Uri($"https://objectstorage.{client.Region}.oraclecloud.com{accessUri}");
-        }
-
-        private static string[] ValidateAndSplitNestedSegments(string nestedName)
-        {
-            var normalized = nestedName.Replace('\\', '/').Trim('/');
-            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                // Keep the exception type aligned with NestedPath.TrySplit — callers
-                // expect FileHubException for any path-level traversal attempt.
-                if (seg == "." || seg == "..")
-                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
-                OciPathUtil.ValidateName(seg);
-            }
-            return segments;
         }
 
         private string BuildNestedPrefix(string[] segments)
@@ -520,14 +505,14 @@ namespace FileHub.OracleObjectStorage
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
         {
-            var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string start = null;
             do
             {
                 var page = SyncBridge.Run(ct => _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, start: start, ct));
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = OciPathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new OracleObjectStorageDirectory(this, leaf);
                 }
@@ -540,7 +525,7 @@ namespace FileHub.OracleObjectStorage
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var regex = OciPathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string start = null;
             do
             {
@@ -548,7 +533,7 @@ namespace FileHub.OracleObjectStorage
                 var page = await _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, start: start, cancellationToken).ConfigureAwait(false);
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = OciPathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new OracleObjectStorageDirectory(this, leaf);
                 }
@@ -571,8 +556,8 @@ namespace FileHub.OracleObjectStorage
                     return await ociDir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { OciPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
-            var objectName = OciPathUtil.CombineObjectName(_prefix, head);
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var objectName = PathUtil.CombineKey(_prefix, head);
             try
             {
                 await _session.Client.HeadObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
@@ -600,8 +585,8 @@ namespace FileHub.OracleObjectStorage
                     return await ociDir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { OciPathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, head);
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
@@ -632,9 +617,9 @@ namespace FileHub.OracleObjectStorage
                 }
                 throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
             }
-            OciPathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
 
-            var objectName = OciPathUtil.CombineObjectName(_prefix, head);
+            var objectName = PathUtil.CombineKey(_prefix, head);
             try
             {
                 await _session.Client.DeleteObjectAsync(objectName, cancellationToken).ConfigureAwait(false);
@@ -645,7 +630,7 @@ namespace FileHub.OracleObjectStorage
                 // fall through to directory delete attempt
             }
 
-            var childPrefix = OciPathUtil.CombinePrefix(_prefix, head);
+            var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
             {
                 await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
@@ -663,8 +648,8 @@ namespace FileHub.OracleObjectStorage
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
 
-            OciPathUtil.ValidateName(newName);
-            var destinationPrefix = OciPathUtil.CombinePrefix(_parent._prefix, newName);
+            PathUtil.ValidateName(newName);
+            var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
             return new OracleObjectStorageDirectory(_parent, newName);
@@ -701,7 +686,7 @@ namespace FileHub.OracleObjectStorage
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir._session.Client, _session.Client))
             {
-                var destinationPrefix = OciPathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
+                var destinationPrefix = PathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
                 await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }

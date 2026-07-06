@@ -158,7 +158,7 @@ namespace FileHub.Ftp
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            FtpPathUtil.ValidateName(newName);
+            PathUtil.ValidateName(newName);
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_parent.RootPathInternal, _parent.PathInternal, newName);
@@ -178,7 +178,7 @@ namespace FileHub.Ftp
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
-                FtpPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
                 await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);

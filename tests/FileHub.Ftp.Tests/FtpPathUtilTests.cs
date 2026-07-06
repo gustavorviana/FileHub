@@ -1,5 +1,10 @@
 namespace FileHub.Ftp.Tests;
 
+/// <summary>
+/// Covers only what is specific to the FTP path model. Name validation,
+/// glob matching and leaf extraction are shared via PathUtil and covered
+/// by the core suite.
+/// </summary>
 public class FtpPathUtilTests
 {
     [Theory]
@@ -31,13 +36,12 @@ public class FtpPathUtilTests
     }
 
     [Theory]
-    [InlineData("/", "")]
-    [InlineData("/file.txt", "file.txt")]
-    [InlineData("/a/b/c", "c")]
-    [InlineData("/a/b/c/", "c")]
-    public void GetLeafName_ReturnsLastSegment(string path, string expected)
+    [InlineData("/", "/")]
+    [InlineData("/file.txt", "/")]
+    [InlineData("/a/b/c", "/a/b")]
+    public void GetParent_ReturnsContainingDirectory(string path, string expected)
     {
-        Assert.Equal(expected, FtpPathUtil.GetLeafName(path));
+        Assert.Equal(expected, FtpPathUtil.GetParent(path));
     }
 
     [Fact]
@@ -70,41 +74,10 @@ public class FtpPathUtilTests
         FtpPathUtil.EnsureWithinRoot("/", "/anywhere/at/all");
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData(".")]
-    [InlineData("..")]
-    [InlineData("a/b")]
-    [InlineData("a\\b")]
-    public void ValidateName_RejectsInvalid(string name)
-    {
-        Assert.Throws<ArgumentException>(() => FtpPathUtil.ValidateName(name));
-    }
-
     [Fact]
-    public void ValidateName_Null_Rejected()
+    public void ResolveSafeChildPath_ValidatesAndConfines()
     {
-        Assert.Throws<ArgumentException>(() => FtpPathUtil.ValidateName(null!));
-    }
-
-    [Fact]
-    public void ValidateName_AcceptsLeafName()
-    {
-        FtpPathUtil.ValidateName("report-2026.csv");
-    }
-
-    [Fact]
-    public void BuildSearchPatternRegex_StarMatchesEverything()
-    {
-        var rx = FtpPathUtil.BuildSearchPatternRegex("*");
-        Assert.Matches(rx, "anything");
-    }
-
-    [Fact]
-    public void BuildSearchPatternRegex_HonoursStarSegment()
-    {
-        var rx = FtpPathUtil.BuildSearchPatternRegex("*.csv");
-        Assert.Matches(rx, "data.csv");
-        Assert.DoesNotMatch(rx, "data.txt");
+        Assert.Equal("/uploads/file.txt", FtpPathUtil.ResolveSafeChildPath("/uploads", "/uploads", "file.txt"));
+        Assert.Throws<ArgumentException>(() => FtpPathUtil.ResolveSafeChildPath("/uploads", "/uploads", "a/b"));
     }
 }

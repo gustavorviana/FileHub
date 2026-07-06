@@ -20,7 +20,7 @@ namespace FileHub.AmazonS3
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
-        public override string Path => S3PathUtil.DisplayPath(_prefix);
+        public override string Path => PathUtil.DisplayPath(_prefix);
         public override FileDirectory Parent => _parent;
 
         public override DateTime CreationTimeUtc => _creationTimeUtc;
@@ -49,7 +49,7 @@ namespace FileHub.AmazonS3
             _parent = parent ?? throw new ArgumentNullException(nameof(parent));
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
-            _prefix = S3PathUtil.CombinePrefix(parent._prefix, name);
+            _prefix = PathUtil.CombinePrefix(parent._prefix, name);
             _pathMode = parent._pathMode;
         }
 
@@ -57,7 +57,7 @@ namespace FileHub.AmazonS3
         {
             if (string.IsNullOrEmpty(rootPrefix))
                 return "/";
-            return S3PathUtil.GetLeafName(rootPrefix);
+            return PathUtil.GetLeafName(rootPrefix);
         }
 
         // === IRefreshable ===
@@ -129,7 +129,7 @@ namespace FileHub.AmazonS3
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
-            var key = S3PathUtil.ResolveSafeObjectKey(_rootPrefix, _prefix, head);
+            var key = PathUtil.ResolveSafeKey(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
                 await _session.Client.PutObjectAsync(
@@ -183,7 +183,7 @@ namespace FileHub.AmazonS3
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return dir.OpenFile(rest, createIfNotExists: true);
             }
-            S3PathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
             return new AmazonS3File(this, head);   // stub, IsLoaded = false
         }
 
@@ -204,7 +204,7 @@ namespace FileHub.AmazonS3
         {
             if (createIfNotExists)
             {
-                S3PathUtil.ValidateName(segment);
+                PathUtil.ValidateName(segment);
                 return new AmazonS3Directory(this, segment);
             }
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
@@ -214,14 +214,14 @@ namespace FileHub.AmazonS3
         {
             try
             {
-                S3PathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var key = PathUtil.CombineKey(_prefix, name);
             try
             {
                 var head = await _session.Client.HeadObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -266,7 +266,7 @@ namespace FileHub.AmazonS3
 
         private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string continuationToken = null;
             // S3 StartAfter is an exclusive cursor. Build it from the current
@@ -308,7 +308,7 @@ namespace FileHub.AmazonS3
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             ValidatePaging(limit);
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string continuationToken = null;
             string startAfter = offset.IsNamed ? _prefix + offset.Name : null;
@@ -360,7 +360,7 @@ namespace FileHub.AmazonS3
             }
 
             var leaf = head ?? name;
-            var childPrefix = S3PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
+            var childPrefix = PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
 
             using (var empty = new MemoryStream())
             {
@@ -398,14 +398,14 @@ namespace FileHub.AmazonS3
             var leaf = head ?? name;
             try
             {
-                S3PathUtil.ValidateName(leaf);
+                PathUtil.ValidateName(leaf);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, leaf);
+            var childPrefix = PathUtil.CombinePrefix(_prefix, leaf);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
                 return new AmazonS3Directory(this, leaf);
             return null;
@@ -413,9 +413,9 @@ namespace FileHub.AmazonS3
 
         private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
         {
-            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(nestedName);
             var fullPrefix = BuildNestedPrefix(segments);
-            S3PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
             using (var empty = new MemoryStream())
             {
@@ -430,31 +430,18 @@ namespace FileHub.AmazonS3
             string[] segments;
             try
             {
-                segments = ValidateAndSplitNestedSegments(nestedName);
+                segments = PathUtil.SplitAndValidateSegments(nestedName);
             }
             catch (ArgumentException)
             {
                 return null;
             }
             var fullPrefix = BuildNestedPrefix(segments);
-            S3PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
             if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
                 return BuildDirectoryChain(segments);
             return null;
-        }
-
-        private static string[] ValidateAndSplitNestedSegments(string nestedName)
-        {
-            var normalized = nestedName.Replace('\\', '/').Trim('/');
-            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                if (seg == "." || seg == "..")
-                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
-                S3PathUtil.ValidateName(seg);
-            }
-            return segments;
         }
 
         private string BuildNestedPrefix(string[] segments)
@@ -475,14 +462,14 @@ namespace FileHub.AmazonS3
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string continuationToken = null;
             do
             {
                 var page = SyncBridge.Run(ct => _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, continuationToken: continuationToken, startAfter: null, ct));
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = S3PathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new AmazonS3Directory(this, leaf);
                 }
@@ -495,7 +482,7 @@ namespace FileHub.AmazonS3
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string continuationToken = null;
             do
             {
@@ -503,7 +490,7 @@ namespace FileHub.AmazonS3
                 var page = await _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, continuationToken: continuationToken, startAfter: null, cancellationToken).ConfigureAwait(false);
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = S3PathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new AmazonS3Directory(this, leaf);
                 }
@@ -524,8 +511,8 @@ namespace FileHub.AmazonS3
                     return await s3Dir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { S3PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
-            var key = S3PathUtil.CombineObjectKey(_prefix, head);
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var key = PathUtil.CombineKey(_prefix, head);
             try
             {
                 await _session.Client.HeadObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -554,8 +541,8 @@ namespace FileHub.AmazonS3
                     return await s3Dir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
                 return false;
             }
-            try { S3PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, head);
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
@@ -586,10 +573,10 @@ namespace FileHub.AmazonS3
                 }
                 throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
             }
-            S3PathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
 
-            var fileKey = S3PathUtil.CombineObjectKey(_prefix, head);
-            var dirPrefix = S3PathUtil.CombinePrefix(_prefix, head);
+            var fileKey = PathUtil.CombineKey(_prefix, head);
+            var dirPrefix = PathUtil.CombinePrefix(_prefix, head);
 
             // S3's DeleteObject is idempotent — it returns 204 whether or not
             // the key existed, so we can't infer "is this a file or a directory?"
@@ -639,11 +626,11 @@ namespace FileHub.AmazonS3
                 var (head, rest) = SplitPath(remaining);
                 if (rest == null)
                 {
-                    S3PathUtil.ValidateName(head);
-                    return S3PathUtil.CombineObjectKey(prefix, head);
+                    PathUtil.ValidateName(head);
+                    return PathUtil.CombineKey(prefix, head);
                 }
-                S3PathUtil.ValidateName(head);
-                prefix = S3PathUtil.CombinePrefix(prefix, head);
+                PathUtil.ValidateName(head);
+                prefix = PathUtil.CombinePrefix(prefix, head);
                 remaining = rest;
             }
         }
@@ -679,8 +666,8 @@ namespace FileHub.AmazonS3
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
 
-            S3PathUtil.ValidateName(newName);
-            var destinationPrefix = S3PathUtil.CombinePrefix(_parent._prefix, newName);
+            PathUtil.ValidateName(newName);
+            var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
             return new AmazonS3Directory(_parent, newName);
@@ -717,7 +704,7 @@ namespace FileHub.AmazonS3
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir._session.Client, _session.Client))
             {
-                var destinationPrefix = S3PathUtil.ResolveSafeChildPrefix(s3Dir._rootPrefix, s3Dir._prefix, name);
+                var destinationPrefix = PathUtil.ResolveSafeChildPrefix(s3Dir._rootPrefix, s3Dir._prefix, name);
                 await CopyAllObjectsAsync(_prefix, s3Dir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new AmazonS3Directory(s3Dir, name);
             }

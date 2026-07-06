@@ -24,7 +24,7 @@ namespace FileHub.OracleObjectStorage
         private OracleObjectStorageFileHub(OciSession session, string rootPath, DirectoryPathMode pathMode)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
-            var rootPrefix = OciPathUtil.NormalizePrefix(rootPath);
+            var rootPrefix = PathUtil.NormalizePrefix(rootPath);
             Root = new OracleObjectStorageDirectory(_session, rootPrefix, pathMode);
         }
 
@@ -292,7 +292,7 @@ namespace FileHub.OracleObjectStorage
             CancellationToken cancellationToken)
         {
             var hub = new OracleObjectStorageFileHub(new OciSession(client), rootPath, pathMode);
-            var normalized = OciPathUtil.NormalizePrefix(rootPath);
+            var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);
             return hub;

@@ -24,7 +24,7 @@ namespace FileHub.AmazonS3
         private AmazonS3FileHub(S3Session session, string rootPath, DirectoryPathMode pathMode)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
-            var rootPrefix = S3PathUtil.NormalizePrefix(rootPath);
+            var rootPrefix = PathUtil.NormalizePrefix(rootPath);
             Root = new AmazonS3Directory(_session, rootPrefix, pathMode);
         }
 
@@ -271,7 +271,7 @@ namespace FileHub.AmazonS3
             CancellationToken cancellationToken)
         {
             var hub = new AmazonS3FileHub(new S3Session(client), rootPath, pathMode);
-            var normalized = S3PathUtil.NormalizePrefix(rootPath);
+            var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);
             return hub;

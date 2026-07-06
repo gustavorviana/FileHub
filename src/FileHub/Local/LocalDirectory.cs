@@ -41,7 +41,7 @@ namespace FileHub.Local
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return dir.CreateFile(rest);
             }
-            ValidateName(head);
+            PathUtil.ValidateLocalName(head);
             var filePath = ResolveSafePath(head);
             File.Create(filePath).Dispose();
             InvalidateInfo();
@@ -60,7 +60,7 @@ namespace FileHub.Local
                 }
                 return dir.TryOpenFile(rest, out file);
             }
-            ValidateName(head);
+            PathUtil.ValidateLocalName(head);
             file = null;
 
             var filePath = ResolveSafePath(head);
@@ -116,7 +116,7 @@ namespace FileHub.Local
                 return intermediate.CreateDirectory(rest);
             }
             var leaf = head ?? name;
-            ValidateName(leaf);
+            PathUtil.ValidateLocalName(leaf);
             var dirPath = ResolveSafePath(leaf);
             InvalidateInfo();
             return new LocalDirectory(dirPath, RootPath, this, _pathMode);
@@ -137,7 +137,7 @@ namespace FileHub.Local
                 return child.TryOpenDirectory(rest, out directory);
             }
             var leaf = head ?? name;
-            ValidateName(leaf);
+            PathUtil.ValidateLocalName(leaf);
             directory = null;
 
             var dirPath = ResolveSafePath(leaf);
@@ -162,7 +162,7 @@ namespace FileHub.Local
 
         private LocalDirectory CreateDirectoryDirect(string nestedName)
         {
-            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(nestedName, PathUtil.ValidateLocalName);
             var relative = string.Join("/", segments);
             var dirPath = ResolveSafePath(relative);
             Directory.CreateDirectory(dirPath);
@@ -175,7 +175,7 @@ namespace FileHub.Local
             string[] segments;
             try
             {
-                segments = ValidateAndSplitNestedSegments(nestedName);
+                segments = PathUtil.SplitAndValidateSegments(nestedName, PathUtil.ValidateLocalName);
             }
             catch (ArgumentException)
             {
@@ -191,21 +191,6 @@ namespace FileHub.Local
             }
             directory = BuildDirectoryChain(segments);
             return true;
-        }
-
-        private static string[] ValidateAndSplitNestedSegments(string nestedName)
-        {
-            var normalized = nestedName.Replace('\\', '/').Trim('/');
-            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                // Keep the exception type aligned with NestedPath.TrySplit — callers
-                // expect FileHubException for any path-level traversal attempt.
-                if (seg == "." || seg == "..")
-                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
-                ValidateName(seg);
-            }
-            return segments;
         }
 
         private LocalDirectory BuildDirectoryChain(string[] segments)
@@ -229,7 +214,7 @@ namespace FileHub.Local
                 if (!TryOpenDirectory(head, out var dir)) return false;
                 return dir.FileExists(rest);
             }
-            ValidateName(head);
+            PathUtil.ValidateLocalName(head);
             return File.Exists(ResolveSafePath(head));
         }
 
@@ -241,7 +226,7 @@ namespace FileHub.Local
                 if (!TryOpenDirectory(head, out var dir)) return false;
                 return dir.DirectoryExists(rest);
             }
-            ValidateName(head);
+            PathUtil.ValidateLocalName(head);
             return Directory.Exists(ResolveSafePath(head));
         }
 
@@ -265,7 +250,7 @@ namespace FileHub.Local
                 dir.Delete(rest);
                 return;
             }
-            ValidateName(head);
+            PathUtil.ValidateLocalName(head);
             var fullPath = ResolveSafePath(head);
             if (Directory.Exists(fullPath))
                 Directory.Delete(fullPath, recursive: true);
@@ -279,7 +264,7 @@ namespace FileHub.Local
         public override FileDirectory Rename(string newName)
         {
             ThrowIfReadOnly();
-            ValidateName(newName);
+            PathUtil.ValidateLocalName(newName);
 
             var parentPath = System.IO.Path.GetDirectoryName(Path);
             var newPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(parentPath, newName));

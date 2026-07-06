@@ -34,16 +34,10 @@ namespace FileHub
                 throw new FileHubException("This item is read-only.");
         }
 
-        protected static void ValidateName(string name)
-        {
-            if (string.IsNullOrEmpty(name))
-                throw new ArgumentException("Name cannot be null or empty.", nameof(name));
-            if (name == "." || name == "..")
-                throw new ArgumentException($"The name \"{name}\" is not allowed.", nameof(name));
-            var invalidChars = System.IO.Path.GetInvalidFileNameChars();
-            if (name.Any(c => invalidChars.Contains(c)))
-                throw new ArgumentException($"The name \"{name}\" contains invalid characters.", nameof(name));
-        }
+        // Portable rule set (see PathUtil): a name accepted here is accepted
+        // by every driver on every OS. OS-backed drivers layer
+        // PathUtil.ValidateLocalName on top.
+        protected static void ValidateName(string name) => PathUtil.ValidateName(name);
 
         public virtual void Dispose()
         {

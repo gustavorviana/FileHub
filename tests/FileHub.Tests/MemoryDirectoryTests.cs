@@ -125,14 +125,10 @@ public class MemoryDirectoryTests
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
 
-        // ValidateName uses System.IO.Path.GetInvalidFileNameChars(), whose
-        // set varies by OS — pick the first char from that set that isn't a
-        // path separator (those route to nested-directory creation instead).
-        // On Linux the only candidate is NUL ('\0'); on Windows there are
-        // many. The assertion follows the BCL contract per host.
-        var invalid = System.IO.Path.GetInvalidFileNameChars()
-            .First(c => c != '/' && c != '\\');
-        Assert.Throws<ArgumentException>(() => root.CreateDirectory($"bad{invalid}name"));
+        // ValidateName applies the portable rule set (PathUtil): control
+        // characters are rejected on every OS, so the memory driver behaves
+        // the same on Windows and Linux.
+        Assert.Throws<ArgumentException>(() => root.CreateDirectory("bad\tname"));
     }
 
     [Fact]
