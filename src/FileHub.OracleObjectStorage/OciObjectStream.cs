@@ -12,8 +12,16 @@ namespace FileHub.OracleObjectStorage
     /// to the backing object on <see cref="Flush"/> / <see cref="FlushAsync"/>;
     /// disposing a dirty stream also triggers a flush.
     /// Sync methods delegate to their async counterparts via
-    /// <c>GetAwaiter().GetResult()</c> — the driver paths all call
-    /// <c>ConfigureAwait(false)</c>, so blocking here is deadlock-free.
+    /// <c>SyncBridge.Run</c>, which queues the work to the thread pool —
+    /// deadlock-free on any host.
+    /// <para>
+    /// Dispose contract: like <see cref="FileStream"/>, disposing a dirty
+    /// stream commits the write, and a failed commit propagates out of
+    /// <c>Dispose</c> — swallowing it would silently lose data. Internal
+    /// state is cleaned up regardless, so the parent file is never left
+    /// locked. Callers that need to separate commit errors from disposal
+    /// should call <see cref="Flush"/> / <see cref="FlushAsync"/> first.
+    /// </para>
     /// </summary>
     internal sealed class OciObjectStream : Stream
     {

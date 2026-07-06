@@ -53,7 +53,7 @@ namespace FileHub.Ftp
 
         // === IRefreshable ===
 
-        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+        public void Refresh() => SyncBridge.Run(RefreshAsync);
 
         public async Task RefreshAsync(CancellationToken cancellationToken = default)
         {
@@ -76,7 +76,7 @@ namespace FileHub.Ftp
 
         // === Existence ===
 
-        public override bool Exists() => ExistsAsync().GetAwaiter().GetResult();
+        public override bool Exists() => SyncBridge.Run(ExistsAsync);
 
         public override async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
         {
@@ -86,7 +86,7 @@ namespace FileHub.Ftp
 
         // === Streams ===
 
-        public override Stream GetReadStream() => GetReadStreamAsync().GetAwaiter().GetResult();
+        public override Stream GetReadStream() => SyncBridge.Run(GetReadStreamAsync);
 
         public override async Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
@@ -94,7 +94,7 @@ namespace FileHub.Ftp
             return await OpenStreamAsync(isWrite: false, cancellationToken).ConfigureAwait(false);
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null) => GetWriteStreamAsync(options).GetAwaiter().GetResult();
+        public override Stream GetWriteStream(FileWriteOptions options = null) => SyncBridge.Run(ct => GetWriteStreamAsync(options, ct));
 
         public override async Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
@@ -143,7 +143,7 @@ namespace FileHub.Ftp
 
         // === Mutations ===
 
-        public override void Delete() => DeleteAsync().GetAwaiter().GetResult();
+        public override void Delete() => SyncBridge.Run(DeleteAsync);
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
@@ -153,7 +153,7 @@ namespace FileHub.Ftp
             _length = -1;
         }
 
-        public override FileEntry Rename(string newName) => RenameAsync(newName).GetAwaiter().GetResult();
+        public override FileEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
@@ -169,7 +169,7 @@ namespace FileHub.Ftp
         }
 
         public override FileEntry MoveTo(FileDirectory directory, string name)
-            => MoveToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
 
         public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
@@ -207,7 +207,7 @@ namespace FileHub.Ftp
         }
 
         public override FileEntry CopyTo(FileDirectory directory, string name)
-            => CopyToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
 
         // CopyTo intentionally falls back to the base implementation (stream copy).
         // FTP has no server-side copy command, even within the same connection.

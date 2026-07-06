@@ -23,7 +23,7 @@ namespace FileHub
         /// <summary>
         /// Synchronously re-fetches this entity's metadata from the backing
         /// store. Implementations typically delegate to <see cref="RefreshAsync"/>
-        /// via <c>GetAwaiter().GetResult()</c>.
+        /// via <c>SyncBridge.Run</c> (thread-pool hop, deadlock-free on any host).
         /// </summary>
         void Refresh();
 

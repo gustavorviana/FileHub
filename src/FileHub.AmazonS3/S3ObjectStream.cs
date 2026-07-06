@@ -13,6 +13,14 @@ namespace FileHub.AmazonS3
     /// disposing a dirty stream also triggers a flush. Suitable for small
     /// and medium payloads that fit in memory — use
     /// <see cref="AmazonS3File.GetMultipartWriteStream"/> for large uploads.
+    /// <para>
+    /// Dispose contract: like <see cref="FileStream"/>, disposing a dirty
+    /// stream commits the write, and a failed commit propagates out of
+    /// <c>Dispose</c> — swallowing it would silently lose data. Internal
+    /// state is cleaned up regardless, so the parent file is never left
+    /// locked. Callers that need to separate commit errors from disposal
+    /// should call <see cref="Flush"/> / <see cref="FlushAsync"/> first.
+    /// </para>
     /// </summary>
     internal sealed class S3ObjectStream : Stream
     {

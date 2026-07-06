@@ -195,7 +195,7 @@ namespace FileHub
 
         /// <summary>Sync sibling of <see cref="GetMetadataAsync"/>.</summary>
         public virtual FileMetadata GetMetadata()
-            => GetMetadataAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            => SyncBridge.Run(GetMetadataAsync);
 
 
         /// <summary>

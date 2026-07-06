@@ -67,7 +67,7 @@ namespace FileHub.Ftp
 
         // === IRefreshable ===
 
-        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+        public void Refresh() => SyncBridge.Run(RefreshAsync);
 
         /// <summary>
         /// Re-fetches this directory's metadata from the server. If this is the
@@ -117,7 +117,7 @@ namespace FileHub.Ftp
 
         // === Existence ===
 
-        public override bool Exists() => ExistsAsync().GetAwaiter().GetResult();
+        public override bool Exists() => SyncBridge.Run(ExistsAsync);
 
         public override async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
         {
@@ -127,7 +127,7 @@ namespace FileHub.Ftp
 
         // === File operations ===
 
-        public override FileEntry CreateFile(string name) => CreateFileAsync(name).GetAwaiter().GetResult();
+        public override FileEntry CreateFile(string name) => SyncBridge.Run(ct => CreateFileAsync(name, ct));
 
         public override async Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -158,7 +158,7 @@ namespace FileHub.Ftp
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {
-            var result = TryOpenFileAsync(name).GetAwaiter().GetResult();
+            var result = SyncBridge.Run(ct => TryOpenFileAsync(name, ct));
             file = result.File;
             return result.Exists;
         }
@@ -210,8 +210,11 @@ namespace FileHub.Ftp
 
         private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
-            _session.EnsureConnectedAsync(CancellationToken.None).GetAwaiter().GetResult();
-            var listing = _session.Client.ListAsync(_path, CancellationToken.None).GetAwaiter().GetResult();
+            var listing = SyncBridge.Run(async ct =>
+            {
+                await _session.EnsureConnectedAsync(ct).ConfigureAwait(false);
+                return await _session.Client.ListAsync(_path, ct).ConfigureAwait(false);
+            });
             foreach (var item in EnumerateFiles(listing, searchPattern, offset, limit))
                 yield return item;
         }
@@ -259,7 +262,7 @@ namespace FileHub.Ftp
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name) => CreateDirectoryAsync(name).GetAwaiter().GetResult();
+        public override FileDirectory CreateDirectory(string name) => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
 
         public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -286,7 +289,7 @@ namespace FileHub.Ftp
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
         {
-            directory = TryOpenDirectoryCoreAsync(name).GetAwaiter().GetResult();
+            directory = SyncBridge.Run(ct => TryOpenDirectoryCoreAsync(name, ct));
             return directory != null;
         }
 
@@ -375,8 +378,11 @@ namespace FileHub.Ftp
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
         {
-            _session.EnsureConnectedAsync(CancellationToken.None).GetAwaiter().GetResult();
-            var listing = _session.Client.ListAsync(_path, CancellationToken.None).GetAwaiter().GetResult();
+            var listing = SyncBridge.Run(async ct =>
+            {
+                await _session.EnsureConnectedAsync(ct).ConfigureAwait(false);
+                return await _session.Client.ListAsync(_path, ct).ConfigureAwait(false);
+            });
             foreach (var dir in EnumerateDirectories(listing, searchPattern))
                 yield return dir;
         }
@@ -408,7 +414,7 @@ namespace FileHub.Ftp
 
         // === Common ===
 
-        public override bool FileExists(string name) => FileExistsAsync(name).GetAwaiter().GetResult();
+        public override bool FileExists(string name) => SyncBridge.Run(ct => FileExistsAsync(name, ct));
 
         public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -427,7 +433,7 @@ namespace FileHub.Ftp
             return await _session.Client.FileExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 
-        public override bool DirectoryExists(string name) => DirectoryExistsAsync(name).GetAwaiter().GetResult();
+        public override bool DirectoryExists(string name) => SyncBridge.Run(ct => DirectoryExistsAsync(name, ct));
 
         public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -446,7 +452,7 @@ namespace FileHub.Ftp
             return await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete() => DeleteAsync().GetAwaiter().GetResult();
+        public override void Delete() => SyncBridge.Run(DeleteAsync);
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
@@ -458,7 +464,7 @@ namespace FileHub.Ftp
             await _session.Client.DeleteDirectoryAsync(_path, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete(string name) => DeleteAsync(name).GetAwaiter().GetResult();
+        public override void Delete(string name) => SyncBridge.Run(ct => DeleteAsync(name, ct));
 
         public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
         {
@@ -494,7 +500,7 @@ namespace FileHub.Ftp
             throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
         }
 
-        public override FileDirectory Rename(string newName) => RenameAsync(newName).GetAwaiter().GetResult();
+        public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         public override async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
@@ -511,7 +517,7 @@ namespace FileHub.Ftp
         }
 
         public override FileDirectory MoveTo(FileDirectory directory, string name)
-            => MoveToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
 
         public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
@@ -545,7 +551,7 @@ namespace FileHub.Ftp
         }
 
         public override FileDirectory CopyTo(FileDirectory directory, string name)
-            => CopyToAsync(directory, name).GetAwaiter().GetResult();
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
 
         public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
