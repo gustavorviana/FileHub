@@ -319,9 +319,14 @@ namespace FileHub.OracleObjectStorage
                     $"Bucket \"{SessionInternal.Client.Bucket}\" is not public. Use GetSignedUrl(TimeSpan) instead.");
 
             var client = SessionInternal.Client;
+            // OCI object names are flat: "/" is part of the name, so the whole
+            // name is a single encoded path segment. Namespace and bucket are
+            // caller-supplied — encode them too.
+            var encodedNamespace = Uri.EscapeDataString(client.Namespace);
+            var encodedBucket = Uri.EscapeDataString(client.Bucket);
             var encodedObject = Uri.EscapeDataString(ObjectName);
             return new Uri(
-                $"https://objectstorage.{client.Region}.oraclecloud.com/n/{client.Namespace}/b/{client.Bucket}/o/{encodedObject}");
+                $"https://objectstorage.{client.Region}.oraclecloud.com/n/{encodedNamespace}/b/{encodedBucket}/o/{encodedObject}");
         }
 
         public Uri GetSignedUrl(TimeSpan expiresIn)

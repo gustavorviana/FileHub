@@ -166,6 +166,18 @@ public class PathUtilTests
     }
 
     [Fact]
+    public void EnsureWithinRootPrefix_RejectsPrefixCollision()
+    {
+        // Root without trailing slash must not be escaped by a sibling
+        // prefix that merely starts with the same characters.
+        Assert.Throws<FileHubException>(() =>
+            PathUtil.EnsureWithinRootPrefix("tenant", "tenant2/file.txt"));
+
+        PathUtil.EnsureWithinRootPrefix("tenant", "tenant/file.txt");
+        PathUtil.EnsureWithinRootPrefix("tenant", "tenant"); // the root itself
+    }
+
+    [Fact]
     public void ResolveSafeKey_AppliesContainment()
     {
         Assert.Throws<FileHubException>(() =>

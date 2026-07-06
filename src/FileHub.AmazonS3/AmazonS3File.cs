@@ -39,7 +39,10 @@ namespace FileHub.AmazonS3
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from the
         /// store. <c>false</c> on pending stubs from
-        /// <c>OpenFile(name, createIfNotExists: true)</c>.
+        /// <c>OpenFile(name, createIfNotExists: true)</c> and after
+        /// <see cref="CompleteSignedMultipartUploadAsync"/> — the bytes went
+        /// client-to-store, so the local snapshot (<see cref="Length"/>,
+        /// metadata) is unknown until the next refresh.
         /// </summary>
         public bool IsLoaded => _isLoaded;
 
@@ -353,7 +356,9 @@ namespace FileHub.AmazonS3
                     $"Bucket \"{SessionInternal.Client.Bucket}\" is not public. Use GetSignedUrl(TimeSpan) instead.");
 
             var client = SessionInternal.Client;
-            var encodedKey = Uri.EscapeDataString(ObjectKey).Replace("%2F", "/");
+            // Encode each segment separately: a key containing a literal "%2F"
+            // must survive as "%252F", not turn into a path separator.
+            var encodedKey = string.Join("/", Array.ConvertAll(ObjectKey.Split('/'), Uri.EscapeDataString));
             return new Uri($"https://{client.Bucket}.s3.{client.Region}.amazonaws.com/{encodedKey}");
         }
 
@@ -445,8 +450,12 @@ namespace FileHub.AmazonS3
                 completed.Add(new S3CompletedPart { PartNumber = p.PartNumber, ETag = p.ETag });
 
             await SessionInternal.Client.CompleteMultipartUploadAsync(ObjectKey, uploadId, completed, cancellationToken).ConfigureAwait(false);
+            // The bytes never passed through this process — only the server
+            // knows the final size. Invalidate the snapshot so the next
+            // metadata access lazy-refreshes instead of reporting stale Length.
+            _length = -1;
             _lastWriteTimeUtc = DateTime.UtcNow;
-            _isLoaded = true;
+            _isLoaded = false;
         }
 
         public Task AbortSignedMultipartUploadAsync(string uploadId, CancellationToken cancellationToken = default)

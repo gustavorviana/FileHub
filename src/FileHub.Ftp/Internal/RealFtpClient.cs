@@ -195,9 +195,12 @@ namespace FileHub.Ftp.Internal
 
         private Exception Translate(FtpException raw, string contextPath)
         {
+            // Do not surface auth.Message: FTP servers echo parts of the
+            // handshake (including the user) in it, and the string ends up in
+            // logs. The inner exception keeps the detail for local debugging.
             if (raw is FtpAuthenticationException auth)
                 return new UnauthorizedAccessException(
-                    $"FTP authentication failed for \"{contextPath}\": {auth.Message}",
+                    $"FTP authentication failed (path: \"{contextPath}\").",
                     auth);
 
             if (raw is FtpCommandException cmd)

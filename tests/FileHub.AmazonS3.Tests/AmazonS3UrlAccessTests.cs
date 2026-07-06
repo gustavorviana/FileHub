@@ -20,6 +20,21 @@ public class AmazonS3UrlAccessTests
     }
 
     [Fact]
+    public void GetPublicUrl_KeyWithPercent_EncodesPerSegment()
+    {
+        var client = new InMemoryS3Client(bucket: "my-bucket", region: "us-east-1");
+        client.SetIsPublic(true);
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        hub.Root.CreateFile("docs/report%2Fdate.csv").SetText("x");
+
+        var url = ((IUrlAccessible)hub.Root.OpenFile("docs/report%2Fdate.csv")).GetPublicUrl();
+
+        // Literal "%2F" in the key must survive as "%252F" — it is part of the
+        // name, not a path separator. Real slashes stay as separators.
+        Assert.Equal("https://my-bucket.s3.us-east-1.amazonaws.com/docs/report%252Fdate.csv", url.ToString());
+    }
+
+    [Fact]
     public void GetPublicUrl_PrivateBucket_Throws()
     {
         var client = new InMemoryS3Client();

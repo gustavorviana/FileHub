@@ -157,7 +157,10 @@ namespace FileHub
         {
             if (string.IsNullOrEmpty(rootPrefix))
                 return;
-            if (candidate == null || !candidate.StartsWith(rootPrefix, StringComparison.Ordinal))
+            var boundedRoot = rootPrefix[rootPrefix.Length - 1] == '/' ? rootPrefix : rootPrefix + "/";
+            if (candidate == null
+                || (!candidate.StartsWith(boundedRoot, StringComparison.Ordinal)
+                    && !string.Equals(candidate, rootPrefix, StringComparison.Ordinal)))
                 throw new FileHubException($"Access denied: \"{candidate}\" is outside the root \"{rootPrefix}\".");
         }
 
