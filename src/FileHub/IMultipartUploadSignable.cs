@@ -16,11 +16,8 @@ namespace FileHub
     /// Use when the backend does not hold the bytes — typically when
     /// offloading large uploads from the web tier to clients.
     /// </summary>
-    public interface IMultipartUploadSignable
+    public interface IMultipartUploadSignable : IMultipartCapable
     {
-        /// <summary>Minimum part size (bytes) accepted by the backing store.</summary>
-        long MinimumPartSize { get; }
-
         // === Sync (delegates to async) ===
 
         /// <summary>Sync version of <see cref="BeginSignedMultipartUploadAsync"/>.</summary>

@@ -14,16 +14,8 @@ namespace FileHub
     /// which buffers the full payload in memory before issuing a single
     /// request — fine for small files but unsuitable for large ones.
     /// </summary>
-    public interface IMultipartUploadable
+    public interface IMultipartUploadable : IMultipartCapable
     {
-        /// <summary>
-        /// Minimum size (in bytes) the backing store accepts for any part
-        /// except the last one. Writes below this threshold are buffered
-        /// locally; crossing it triggers a part upload. Common object-storage
-        /// backends require parts of at least 5 MiB.
-        /// </summary>
-        long MinimumPartSize { get; }
-
         /// <summary>
         /// Opens a write stream that transparently chunks data into multipart
         /// parts as bytes accumulate. Disposing / closing the stream flushes the
