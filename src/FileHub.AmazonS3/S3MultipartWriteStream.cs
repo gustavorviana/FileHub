@@ -105,7 +105,13 @@ namespace FileHub.AmazonS3
                 if (disposing && !_aborted && !_completed)
                 {
                     try { SyncBridge.Run(ct => CompleteAsync(ct)); }
-                    catch { SyncBridge.Run(_ => AbortQuietlyAsync()); throw; }
+                    catch
+                    {
+                        // The abort must never replace the Complete failure —
+                        // that's the exception the caller needs to see.
+                        try { SyncBridge.Run(_ => AbortQuietlyAsync()); } catch { }
+                        throw;
+                    }
                 }
             }
             finally

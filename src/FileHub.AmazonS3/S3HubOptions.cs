@@ -23,25 +23,25 @@ namespace FileHub.AmazonS3
     public sealed class S3HubOptions
     {
         /// <summary>Target bucket. Required.</summary>
-        public string BucketName { get; set; }
+        public string BucketName { get; init; }
 
         /// <summary>Prefix inside the bucket that the hub treats as its root. Defaults to <c>""</c> (whole bucket).</summary>
-        public string RootPath { get; set; } = "";
+        public string RootPath { get; init; } = "";
 
         /// <summary>How nested-path operations descend. Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for S3.</summary>
-        public DirectoryPathMode PathMode { get; set; } = DirectoryPathMode.Direct;
+        public DirectoryPathMode PathMode { get; init; } = DirectoryPathMode.Direct;
 
         /// <summary>AWS profile name from <c>~/.aws/credentials</c>. Mutually exclusive with <see cref="Credentials"/> and <see cref="Client"/>. When all three are null, defaults to <c>"default"</c>.</summary>
-        public string Profile { get; set; }
+        public string Profile { get; init; }
 
         /// <summary>AWS region (e.g. <c>"us-east-1"</c>). Required when not derivable from the profile or an <see cref="AmazonS3Client"/>.</summary>
-        public string Region { get; set; }
+        public string Region { get; init; }
 
         /// <summary>Explicit credentials. Mutually exclusive with <see cref="Profile"/> and <see cref="Client"/>. The hub creates and owns an <see cref="AmazonS3Client"/> built from these.</summary>
-        public AWSCredentials Credentials { get; set; }
+        public AWSCredentials Credentials { get; init; }
 
         /// <summary>Externally-owned SDK client. Mutually exclusive with <see cref="Profile"/> and <see cref="Credentials"/>. Caller keeps ownership; hub disposal is a no-op on it.</summary>
-        public IAmazonS3 Client { get; set; }
+        public IAmazonS3 Client { get; init; }
 
         // === Typed factories: one per valid auth strategy ===
 

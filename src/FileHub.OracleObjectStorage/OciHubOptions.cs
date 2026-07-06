@@ -23,31 +23,31 @@ namespace FileHub.OracleObjectStorage
     public sealed class OciHubOptions
     {
         /// <summary>Target bucket. Required.</summary>
-        public string BucketName { get; set; }
+        public string BucketName { get; init; }
 
         /// <summary>Prefix inside the bucket that the hub treats as its root. Defaults to <c>""</c> (whole bucket).</summary>
-        public string RootPath { get; set; } = "";
+        public string RootPath { get; init; } = "";
 
         /// <summary>How nested-path operations descend. Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for OCI.</summary>
-        public DirectoryPathMode PathMode { get; set; } = DirectoryPathMode.Direct;
+        public DirectoryPathMode PathMode { get; init; } = DirectoryPathMode.Direct;
 
         /// <summary>OCI region id (e.g. <c>"sa-saopaulo-1"</c>). Required with <see cref="Client"/>; optional with <see cref="Provider"/> (falls back to <c>provider.Region.RegionId</c>); optional with the config-file strategy (falls back to profile's region).</summary>
-        public string RegionId { get; set; }
+        public string RegionId { get; init; }
 
         /// <summary>Tenancy namespace. Required with <see cref="Client"/>; resolved automatically via <c>GetNamespace</c> for the other strategies when omitted.</summary>
-        public string Namespace { get; set; }
+        public string Namespace { get; init; }
 
         /// <summary>Path to an OCI config file. Mutually exclusive with <see cref="Provider"/> and <see cref="Client"/>. Defaults to <c>~/.oci/config</c>.</summary>
-        public string ConfigFilePath { get; set; }
+        public string ConfigFilePath { get; init; }
 
         /// <summary>OCI config profile name. Mutually exclusive with <see cref="Provider"/> and <see cref="Client"/>. Defaults to <c>"DEFAULT"</c>.</summary>
-        public string Profile { get; set; }
+        public string Profile { get; init; }
 
         /// <summary>Explicit authentication provider (instance principals, resource principals, custom). Mutually exclusive with the config-file pair and <see cref="Client"/>. The hub creates and owns an <see cref="ObjectStorageClient"/> built from this provider.</summary>
-        public IAuthenticationDetailsProvider Provider { get; set; }
+        public IAuthenticationDetailsProvider Provider { get; init; }
 
         /// <summary>Externally-owned SDK client. Mutually exclusive with <see cref="Provider"/> and the config-file pair. Caller keeps ownership; hub disposal is a no-op on it.</summary>
-        public ObjectStorageClient Client { get; set; }
+        public ObjectStorageClient Client { get; init; }
 
         // === Typed factories: one per valid auth strategy ===
 
