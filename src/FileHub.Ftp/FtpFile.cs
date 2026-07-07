@@ -219,12 +219,25 @@ namespace FileHub.Ftp
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and move into it.
+            if (NestedPath.HasSeparator(newName))
+            {
+                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
+                {
+                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(targetDir, leaf, progress: null, overwrite: false, cancellationToken).ConfigureAwait(false);
+                }
+                newName = leaf;
+            }
+
             PathUtil.ValidateName(newName);
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
             // Rename never overwrites — behaviour on an existing target is
             // server-dependent, so check first and fail with a clear exception.
-            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
                 throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_parent.RootPathInternal, _parent.PathInternal, newName);
@@ -241,6 +254,18 @@ namespace FileHub.Ftp
         {
             ThrowIfReadOnly();
 
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
@@ -249,7 +274,7 @@ namespace FileHub.Ftp
                 // overwrite: false must not clobber an existing entry — many FTP
                 // servers reject RNTO onto an existing path anyway, but check
                 // explicitly so the failure is a clear FileAlreadyExistsException.
-                if (!overwrite && await ftpDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
@@ -293,13 +318,25 @@ namespace FileHub.Ftp
         /// </summary>
         public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
                 // overwrite: false must not clobber the destination — the upload
                 // below (STOR) would replace it. Check before spilling to temp.
-                if (!overwrite && await ftpDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
                 var tempPath = System.IO.Path.GetTempFileName();
                 try

@@ -546,6 +546,41 @@ namespace FileHub.AmazonS3
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
+        public override bool Exists(string name) => SyncBridge.Run(ct => ExistsAsync(name, ct));
+
+        // File-or-directory in ONE request. A delimited LIST on the key groups
+        // everything sharing the "<prefix>/name" prefix: the exact object (a
+        // file) lands in Objects, while any deeper "<prefix>/name/..." collapses
+        // into the "<prefix>/name/" common prefix (a directory). Siblings like
+        // "name-x" or "namebaz" appear too but under different keys/prefixes, so
+        // we match exactly and never false-positive. Beats HEAD-then-LIST, which
+        // costs two round-trips on a billed backend.
+        public override async Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.ExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+
+            var key = PathUtil.CombineKey(_prefix, head);
+            var dirPrefix = key + "/";
+            var page = await _session.Client.ListObjectsAsync(
+                key, delimiter: "/", limit: null, continuationToken: null, startAfter: null, cancellationToken).ConfigureAwait(false);
+
+            foreach (var obj in page.Objects)
+                if (string.Equals(obj.Key, key, StringComparison.Ordinal))
+                    return true; // exact object → a file
+            foreach (var p in page.Prefixes)
+                if (string.Equals(p, dirPrefix, StringComparison.Ordinal))
+                    return true; // "<key>/" common prefix → a directory
+            return false;
+        }
+
         public override void Delete() => SyncBridge.Run(ct => DeleteAsync(ct));
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
@@ -666,7 +701,24 @@ namespace FileHub.AmazonS3
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
 
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and move into it.
+            if (NestedPath.HasSeparator(newName))
+            {
+                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
+                {
+                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(targetDir, leaf, cancellationToken).ConfigureAwait(false);
+                }
+                newName = leaf;
+            }
+
             PathUtil.ValidateName(newName);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
@@ -701,6 +753,19 @@ namespace FileHub.AmazonS3
 
         public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory under the destination and
+            // recurse with the single leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir._session.Client, _session.Client))
             {

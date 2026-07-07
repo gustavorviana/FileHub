@@ -12,21 +12,40 @@ namespace FileHub
     public static class NestedPath
     {
         /// <summary>
-        /// Splits <paramref name="path"/> at the first <c>/</c> or <c>\</c>.
-        /// Returns <c>true</c> when the input is a genuinely nested path and
-        /// exposes the first segment via <paramref name="head"/> and the rest
-        /// (leading/trailing separators trimmed) via <paramref name="rest"/>.
-        /// Returns <c>false</c> for single-segment names — including those with
-        /// a trailing <c>/</c> or <c>\</c> (e.g. <c>"foo/"</c>) — and exposes
-        /// the normalized leaf via <paramref name="head"/> so callers can pass
-        /// it straight to <c>ValidateName</c> without the separator. Also
-        /// returns <c>false</c> for <c>null</c> or empty input, with
-        /// <paramref name="head"/> set to <c>null</c>.
+        /// Returns <c>true</c> if <paramref name="name"/> is nothing but a
+        /// single leaf (contains no <c>/</c> or <c>\</c> separator). A quick,
+        /// allocation-free pre-check so callers can skip the nested-path
+        /// machinery on the common single-segment case.
         /// </summary>
-        /// <exception cref="FileHubException">
-        /// Thrown when <paramref name="path"/> is absolute (starts with a
-        /// separator), or contains <c>.</c> or <c>..</c> as a segment.
-        /// </exception>
+        public static bool HasSeparator(string name)
+            => !string.IsNullOrEmpty(name) && (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0);
+
+        /// <summary>
+        /// Splits a caller-supplied name at its <em>last</em> separator so the
+        /// tail is the real entry name and everything before it is the path:
+        /// <c>"a/b/c.txt"</c> → <paramref name="subPath"/> <c>"a/b"</c>,
+        /// <paramref name="leaf"/> <c>"c.txt"</c>. Every segment is validated
+        /// (rejects <c>.</c>/<c>..</c> and, via <see cref="PathUtil.ValidateName"/>,
+        /// separators-in-segment and control chars). Returns <c>false</c> for a
+        /// single-segment name (or one with only a trailing separator, e.g.
+        /// <c>"foo/"</c>), exposing the normalized leaf via
+        /// <paramref name="leaf"/> and leaving <paramref name="subPath"/>
+        /// <c>null</c>.
+        /// </summary>
+        public static bool TrySplitLeaf(string name, out string subPath, out string leaf)
+        {
+            subPath = null;
+            leaf = null;
+            var segments = PathUtil.SplitAndValidateSegments(name);
+            if (segments.Length == 0) return false;
+
+            leaf = segments[segments.Length - 1];
+            if (segments.Length == 1) return false;
+
+            subPath = string.Join("/", segments, 0, segments.Length - 1);
+            return true;
+        }
+
         public static bool TrySplit(string path, out string head, out string rest)
         {
             head = null;

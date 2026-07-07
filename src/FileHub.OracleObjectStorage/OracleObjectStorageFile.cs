@@ -196,11 +196,24 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and move into it.
+            if (NestedPath.HasSeparator(newName))
+            {
+                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
+                {
+                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(targetDir, leaf, progress: null, overwrite: false, cancellationToken).ConfigureAwait(false);
+                }
+                newName = leaf;
+            }
+
             PathUtil.ValidateName(newName);
 
             // Rename never overwrites — the server-side rename would replace an
             // existing object silently, so guard with a HEAD. Best-effort.
-            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
                 throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
 
             var destinationObject = PathUtil.CombineKey(_parent.PrefixInternal, newName);
@@ -218,6 +231,18 @@ namespace FileHub.OracleObjectStorage
         {
             ThrowIfReadOnly();
 
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client)
                 && string.Equals(ociDir.SessionInternal.Client.Namespace, SessionInternal.Client.Namespace, StringComparison.Ordinal)
@@ -226,7 +251,7 @@ namespace FileHub.OracleObjectStorage
                 PathUtil.ValidateName(name);
                 // overwrite: false must not clobber an existing object — the
                 // server-side rename would replace it silently. Best-effort HEAD.
-                if (!overwrite && await ociDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
                 // Same rationale as CopyToAsync — load the source so the new
                 // file doesn't carry _length = -1.
@@ -264,12 +289,24 @@ namespace FileHub.OracleObjectStorage
 
         public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
                 // overwrite: false must not clobber — CopyObject overwrites. HEAD first.
-                if (!overwrite && await ociDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look

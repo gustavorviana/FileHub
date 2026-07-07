@@ -33,6 +33,26 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
+    public void Exists_DetectsFileAndDirectory_InOneStatCall()
+    {
+        Root.CreateFile("report.txt").SetText("x");
+        Root.CreateDirectory("logs");
+
+        var statsBefore = Client.StatInvocationCount;
+        var fileProbesBefore = Client.FileExistsInvocationCount;
+        var dirProbesBefore = Client.DirectoryExistsInvocationCount;
+
+        Assert.True(Root.Exists("report.txt"));   // file
+        Assert.True(Root.Exists("logs"));         // directory
+        Assert.False(Root.Exists("missing"));     // neither
+
+        // One STAT per probe — no separate file + directory round-trips.
+        Assert.Equal(statsBefore + 3, Client.StatInvocationCount);
+        Assert.Equal(fileProbesBefore, Client.FileExistsInvocationCount);
+        Assert.Equal(dirProbesBefore, Client.DirectoryExistsInvocationCount);
+    }
+
+    [Fact]
     public void TryOpenFile_ReturnsHandleWithSize()
     {
         var created = Root.CreateFile("a.txt");

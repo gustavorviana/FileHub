@@ -452,6 +452,32 @@ namespace FileHub.Ftp
             return await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
         }
 
+        public override bool Exists(string name) => SyncBridge.Run(ct => ExistsAsync(name, ct));
+
+        // File-or-directory in ONE request, for any depth. A single STAT
+        // (GetObjectInfo) on the full path returns an entry whether it's a file
+        // or a directory, and null when nothing is there — so we probe the
+        // composed path directly instead of opening each intermediate directory
+        // (which would cost one round-trip per segment). Every segment is
+        // validated up front (blocks "..", separators, control chars); an
+        // invalid name simply doesn't exist.
+        public override async Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            string[] segments;
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (Exception ex) when (ex is ArgumentException || ex is FileHubException) { return false; }
+            if (segments.Length == 0) return false;
+
+            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            var fullPath = _path;
+            foreach (var seg in segments)
+                fullPath = FtpPathUtil.Combine(fullPath, seg);
+            FtpPathUtil.EnsureWithinRoot(_rootPathFtp, fullPath);
+
+            var info = await _session.Client.StatAsync(fullPath, cancellationToken).ConfigureAwait(false);
+            return info != null;
+        }
+
         public override void Delete() => SyncBridge.Run(DeleteAsync);
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
@@ -508,8 +534,24 @@ namespace FileHub.Ftp
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
 
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and move into it.
+            if (NestedPath.HasSeparator(newName))
+            {
+                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
+                {
+                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(targetDir, leaf, cancellationToken).ConfigureAwait(false);
+                }
+                newName = leaf;
+            }
+
             PathUtil.ValidateName(newName);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _parent._path, newName);
             await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);
@@ -522,6 +564,18 @@ namespace FileHub.Ftp
         public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(deeper, leaf, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
 
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir._session.Client, _session.Client))

@@ -243,6 +243,84 @@ public class LocalFileTests
         Assert.Throws<ArgumentException>(() => new LocalFile(root, "a/b.txt"));
     }
 
+    // === Nested target names (path/leaf) ===
+
+    [Fact]
+    public void Rename_NestedName_MovesIntoSubPath()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+
+        var moved = file.Rename("sub/deep/b.txt");
+
+        Assert.Equal("b.txt", moved.Name);
+        Assert.Equal("data", moved.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "deep", "b.txt")));
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source gone
+    }
+
+    [Fact]
+    public void Rename_NestedNameBackslash_MovesIntoSubPath()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("x");
+
+        var moved = file.Rename(@"sub\b.txt");
+
+        Assert.Equal("x", moved.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "b.txt")));
+    }
+
+    [Fact]
+    public void CopyTo_NestedName_CreatesIntermediateDirs()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+
+        var copy = file.CopyTo(root, "x/y/z.txt");
+
+        Assert.Equal("z.txt", copy.Name);
+        Assert.Equal("data", copy.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));            // source kept
+        Assert.True(File.Exists(Path.Combine(temp.Path, "x", "y", "z.txt")));
+    }
+
+    [Fact]
+    public void MoveTo_NestedName_CreatesIntermediateDirs()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+        var dst = root.CreateDirectory("dst");
+
+        var moved = file.MoveTo(dst, "x/y/z.txt");
+
+        Assert.Equal("data", moved.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "dst", "x", "y", "z.txt")));
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
+    [Fact]
+    public void Rename_NestedOntoExisting_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("new");
+        root.CreateFile("sub/b.txt").SetText("old");
+
+        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("sub/b.txt"));
+        Assert.Equal("old", root.OpenFile("sub/b.txt").ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
     // === Progress reporting ===
 
     // Larger than the 80 KB copy-loop buffer so a streamed copy yields more

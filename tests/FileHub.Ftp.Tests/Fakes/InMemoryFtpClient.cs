@@ -33,10 +33,16 @@ internal sealed class InMemoryFtpClient : IFtpClient
     private bool _disposed;
     private bool _connected;
     private int _connectInvocationCount;
+    private int _statInvocationCount;
+    private int _fileExistsInvocationCount;
+    private int _directoryExistsInvocationCount;
 
     public object ConnectionScope => _server;
 
     public int ConnectInvocationCount => _connectInvocationCount;
+    public int StatInvocationCount => _statInvocationCount;
+    public int FileExistsInvocationCount => _fileExistsInvocationCount;
+    public int DirectoryExistsInvocationCount => _directoryExistsInvocationCount;
     public bool IsConnected => _connected;
 
     public InMemoryFtpClient()
@@ -66,6 +72,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<FtpItemInfo> StatAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _statInvocationCount);
         var node = _server.Find(path);
         if (node == null) return Task.FromResult<FtpItemInfo?>(null)!;
         return Task.FromResult<FtpItemInfo?>(node.ToInfo(path))!;
@@ -74,6 +81,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<bool> FileExistsAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _fileExistsInvocationCount);
         var node = _server.Find(path);
         return Task.FromResult(node is { IsDirectory: false });
     }
@@ -81,6 +89,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<bool> DirectoryExistsAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _directoryExistsInvocationCount);
         if (path == "/") return Task.FromResult(true);
         var node = _server.Find(path);
         return Task.FromResult(node is { IsDirectory: true });

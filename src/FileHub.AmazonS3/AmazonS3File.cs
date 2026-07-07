@@ -216,11 +216,24 @@ namespace FileHub.AmazonS3
             // S3 has no atomic rename. Fall back to copy+delete in-place.
             // Always default COPY — source metadata is preserved on the new key.
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and move into it.
+            if (NestedPath.HasSeparator(newName))
+            {
+                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
+                {
+                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(targetDir, leaf, progress: null, overwrite: false, cancellationToken).ConfigureAwait(false);
+                }
+                newName = leaf;
+            }
+
             PathUtil.ValidateName(newName);
 
             // Rename never overwrites — CopyObject would clobber an existing
             // key, so guard with a HEAD. Best-effort, not atomic.
-            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
                 throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
 
             var sourceKey = ObjectKey;
@@ -319,6 +332,19 @@ namespace FileHub.AmazonS3
 
         public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory under the destination and
+            // recurse with the single leaf so the server-side copy still applies.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
             {
@@ -326,7 +352,7 @@ namespace FileHub.AmazonS3
                 // overwrite: false must not clobber an existing object. S3 PutObject
                 // (and CopyObject) always overwrite, so guard with an explicit HEAD.
                 // Best-effort — not atomic against a concurrent writer.
-                if (!overwrite && await s3Dir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                if (!overwrite && await s3Dir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{s3Dir.Path}/{name}");
                 // Ensure we know the source size — without this, a stub created
                 // via OpenFile(name, createIfNotExists: true) that was never

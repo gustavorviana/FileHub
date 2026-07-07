@@ -51,6 +51,67 @@ public class AmazonS3FileTests
     }
 
     [Fact]
+    public void Exists_DetectsFileAndDirectory_InOneListCall()
+    {
+        using var hub = NewHub(out var client);
+        hub.Root.CreateFile("report.txt").SetText("x");
+        hub.Root.CreateDirectory("logs").CreateFile("app.log").SetText("y");
+
+        var listsBefore = client.ListInvocationCount;
+
+        Assert.True(hub.Root.Exists("report.txt"));   // file
+        Assert.True(hub.Root.Exists("logs"));         // directory
+        Assert.False(hub.Root.Exists("missing"));     // neither
+        // A sibling that merely shares the "report" prefix must not match.
+        Assert.False(hub.Root.Exists("rep"));
+
+        // No HEAD probes — Exists answers purely via LIST, one per call.
+        Assert.Equal(0, client.HeadInvocationCount);
+        Assert.Equal(listsBefore + 4, client.ListInvocationCount);
+    }
+
+    [Fact]
+    public void Rename_ToExistingName_ThrowsAndKeepsBoth()
+    {
+        using var hub = NewHub(out _);
+        hub.Root.CreateFile("a.txt").SetText("a");
+        hub.Root.CreateFile("b.txt").SetText("b");
+
+        var file = hub.Root.OpenFile("a.txt");
+        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("b.txt"));
+        Assert.Equal("a", hub.Root.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("b", hub.Root.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void Rename_NestedName_MovesToSubPathKey()
+    {
+        using var hub = NewHub(out var client);
+        hub.Root.CreateFile("a.txt").SetText("data");
+
+        var moved = hub.Root.OpenFile("a.txt").Rename("sub/deep/b.txt");
+
+        Assert.Equal("b.txt", moved.Name);
+        Assert.False(client.TryGetBody("a.txt", out _));            // source key gone
+        Assert.True(client.TryGetBody("sub/deep/b.txt", out var body));
+        Assert.Equal("data", Encoding.UTF8.GetString(body));
+    }
+
+    [Fact]
+    public void CopyTo_NestedName_WritesSubPathKey()
+    {
+        using var hub = NewHub(out var client);
+        hub.Root.CreateFile("a.txt").SetText("data");
+
+        var copy = hub.Root.OpenFile("a.txt").CopyTo(hub.Root, "x/y/z.txt");
+
+        Assert.Equal("z.txt", copy.Name);
+        Assert.True(client.TryGetBody("a.txt", out _));             // source kept
+        Assert.True(client.TryGetBody("x/y/z.txt", out var body));
+        Assert.Equal("data", Encoding.UTF8.GetString(body));
+    }
+
+    [Fact]
     public void Length_UpdatedAfterWrite_NoRefresh()
     {
         using var hub = NewHub(out _);
