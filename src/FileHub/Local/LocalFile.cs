@@ -5,7 +5,6 @@ namespace FileHub.Local
 {
     public class LocalFile : FileEntry
     {
-        private readonly string _rootPath;
         private FileInfo _info;
 
         public override string Path => System.IO.Path.Combine(Parent.Path, Name);
@@ -14,10 +13,9 @@ namespace FileHub.Local
         public override DateTime CreationTimeUtc => RefreshInfo().CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => RefreshInfo().LastWriteTimeUtc;
 
-        internal LocalFile(FileDirectory parent, string name, string rootPath) : base(name)
+        internal LocalFile(FileDirectory parent, string name) : base(name)
         {
             Parent = parent;
-            _rootPath = rootPath;
         }
 
         /// <summary>
@@ -30,15 +28,14 @@ namespace FileHub.Local
         /// <remarks>
         /// This is the only way to construct a <see cref="LocalFile"/> outside of
         /// the driver — it always anchors the file to a <see cref="LocalDirectory"/>
-        /// so the hub's sandbox root travels with the reference. Raw disk paths
-        /// are deliberately not accepted.
+        /// so the hub's sandbox root travels with the reference via the parent
+        /// chain. Raw disk paths are deliberately not accepted.
         /// </remarks>
         public LocalFile(LocalDirectory directory, string fileName) : base(fileName)
         {
             if (directory == null) throw new ArgumentNullException(nameof(directory));
             PathUtil.ValidateLocalName(fileName);
             Parent = directory;
-            _rootPath = directory.RootPathInternal;
         }
 
         public override bool Exists() => File.Exists(Path);

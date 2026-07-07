@@ -45,7 +45,7 @@ namespace FileHub.Local
             var filePath = ResolveSafePath(head);
             File.Create(filePath).Dispose();
             InvalidateInfo();
-            return new LocalFile(this, head, RootPath);
+            return new LocalFile(this, head);
         }
 
         public override bool TryOpenFile(string name, out FileEntry file)
@@ -67,7 +67,7 @@ namespace FileHub.Local
             if (!File.Exists(filePath))
                 return false;
 
-            file = new LocalFile(this, head, RootPath);
+            file = new LocalFile(this, head);
             return true;
         }
 
@@ -96,7 +96,7 @@ namespace FileHub.Local
                 if (!offset.IsNamed && skipped < offset.Index) { skipped++; continue; }
                 if (limit.HasValue && yielded >= limit.Value) yield break;
                 yielded++;
-                yield return new LocalFile(this, f.Name, RootPath);
+                yield return new LocalFile(this, f.Name);
             }
         }
 
@@ -309,13 +309,6 @@ namespace FileHub.Local
         /// without duplicating the root-containment logic.
         /// </summary>
         internal string ResolveSafeChildPath(string childName) => ResolveSafePath(childName);
-
-        /// <summary>
-        /// Exposes the protected <see cref="FileDirectory.RootPath"/> to sibling
-        /// types in the Local driver (e.g. the public <see cref="LocalFile"/>
-        /// constructor) so they can stay anchored to the hub's sandbox root.
-        /// </summary>
-        internal string RootPathInternal => RootPath;
 
         private DirectoryInfo RefreshInfo()
         {
