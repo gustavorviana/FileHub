@@ -231,14 +231,14 @@ namespace FileHub.AmazonS3
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -308,10 +308,10 @@ namespace FileHub.AmazonS3
             };
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
@@ -338,9 +338,13 @@ namespace FileHub.AmazonS3
                     metadataReplace: false,
                     options: null,
                     cancellationToken).ConfigureAwait(false);
+                // Server-side copy is a single atomic API call — no byte stream
+                // to meter. Report one completed tick so a progress consumer
+                // sees the transfer finish.
+                progress?.Report(new TransferStatus(_length, _length));
                 return new AmazonS3File(s3Dir, name, _length, _lastWriteTimeUtc);
             }
-            return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
         }
 
         // === IUrlAccessible ===

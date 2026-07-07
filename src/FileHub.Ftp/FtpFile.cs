@@ -229,10 +229,10 @@ namespace FileHub.Ftp
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -243,10 +243,11 @@ namespace FileHub.Ftp
                 await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new TransferStatus(_length, _length));
                 return new FtpFile(ftpDir, name, _length, _lastWriteTimeUtc, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -267,8 +268,8 @@ namespace FileHub.Ftp
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
 
         /// <summary>
         /// FTP has no server-side copy command. When source and destination
@@ -280,7 +281,7 @@ namespace FileHub.Ftp
         /// Both legs stream in chunks; memory usage is constant regardless of
         /// file size. Cross-connection copies still stream directly.
         /// </summary>
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
@@ -297,7 +298,9 @@ namespace FileHub.Ftp
                     var newFile = await ftpDir.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
                     using (var temp = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
                     {
-                        await newFile.CopyFromStreamAsync(temp, cancellationToken: cancellationToken).ConfigureAwait(false);
+                        // Meter progress on the upload leg — it's the transfer the
+                        // caller waits on; the download-to-temp leg is local disk.
+                        await newFile.CopyFromStreamAsync(temp, progress: progress, cancellationToken: cancellationToken).ConfigureAwait(false);
                     }
                     return newFile;
                 }
@@ -307,7 +310,7 @@ namespace FileHub.Ftp
                 }
             }
 
-            return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
         }
 
         public override void Dispose()

@@ -20,7 +20,7 @@ namespace FileHub
         public abstract Stream GetWriteStream(FileWriteOptions options = null);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
-        public abstract FileEntry MoveTo(FileDirectory directory, string name);
+        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null);
 
         // === Sync convenience (implemented using streams) ===
 
@@ -105,14 +105,14 @@ namespace FileHub
             }
         }
 
-        public virtual FileEntry CopyTo(string newName)
-            => CopyTo(Parent, newName);
+        public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null)
+            => CopyTo(Parent, newName, progress);
 
-        public virtual FileEntry CopyTo(FileDirectory directory, string name)
+        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
         {
             var newFile = directory.CreateFile(name);
             using (var writeStream = newFile.GetWriteStream())
-                CopyToStream(writeStream);
+                CopyToStream(writeStream, progress);
             return newFile;
         }
 
@@ -261,25 +261,25 @@ namespace FileHub
             return Task.CompletedTask;
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(string newName, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(string newName, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
-            return await CopyToAsync(Parent, newName, cancellationToken).ConfigureAwait(false);
+            return await CopyToAsync(Parent, newName, progress, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
             using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken).ConfigureAwait(false);
-            await CopyToStreamAsync(writeStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await CopyToStreamAsync(writeStream, progress, cancellationToken).ConfigureAwait(false);
 
             return newFile;
         }
 
-        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(cancellationToken).ConfigureAwait(false);
             return newFile;
         }

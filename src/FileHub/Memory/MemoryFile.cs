@@ -77,10 +77,10 @@ namespace FileHub.Memory
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
         {
             ThrowIfReadOnly();
-            var newFile = CopyTo(directory, name);
+            var newFile = CopyTo(directory, name, progress);
             Delete();
             return newFile;
         }

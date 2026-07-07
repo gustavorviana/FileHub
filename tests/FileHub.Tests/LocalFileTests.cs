@@ -227,4 +227,60 @@ public class LocalFileTests
         Assert.Throws<ArgumentException>(() => new LocalFile(root, ".."));
         Assert.Throws<ArgumentException>(() => new LocalFile(root, "a/b.txt"));
     }
+
+    // === Progress reporting ===
+
+    // Larger than the 80 KB copy-loop buffer so a streamed copy yields more
+    // than one progress report.
+    private static byte[] Payload(int size)
+    {
+        var data = new byte[size];
+        for (var i = 0; i < size; i++) data[i] = (byte)i;
+        return data;
+    }
+
+    // Synchronous collector — the driver calls Report() inline on the copy
+    // loop, so reads are deterministic (unlike Progress<T>, which posts async).
+    private sealed class ProgressCollector : IProgress<TransferStatus>
+    {
+        public List<TransferStatus> Reports { get; } = new();
+        public void Report(TransferStatus value) => Reports.Add(value);
+    }
+
+    [Fact]
+    public void CopyTo_ReportsGranularProgress()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.bin");
+        var payload = Payload(200_000);
+        file.SetBytes(payload);
+        var progress = new ProgressCollector();
+
+        var copy = file.CopyTo(root, "b.bin", progress);
+
+        Assert.Equal(payload, copy.ReadAllBytes());
+        Assert.True(progress.Reports.Count > 1, $"expected granular progress, got {progress.Reports.Count} report(s)");
+        Assert.Equal(payload.Length, progress.Reports[^1].BytesTransferred);
+        Assert.Equal(payload.Length, progress.Reports[^1].TotalBytes);
+    }
+
+    [Fact]
+    public void MoveTo_ReportsGranularProgress()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.bin");
+        var payload = Payload(200_000);
+        file.SetBytes(payload);
+        var dst = root.CreateDirectory("dst");
+        var progress = new ProgressCollector();
+
+        var moved = file.MoveTo(dst, "moved.bin", progress);
+
+        Assert.Equal(payload, moved.ReadAllBytes());
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.bin")));
+        Assert.True(progress.Reports.Count > 1, $"expected granular progress, got {progress.Reports.Count} report(s)");
+        Assert.Equal(payload.Length, progress.Reports[^1].BytesTransferred);
+    }
 }

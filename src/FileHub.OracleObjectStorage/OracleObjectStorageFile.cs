@@ -205,10 +205,10 @@ namespace FileHub.OracleObjectStorage
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -224,10 +224,11 @@ namespace FileHub.OracleObjectStorage
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var destinationObject = PathUtil.CombineKey(ociDir.PrefixInternal, name);
                 await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new TransferStatus(_length, _length));
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -248,10 +249,10 @@ namespace FileHub.OracleObjectStorage
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
         {
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
@@ -272,9 +273,10 @@ namespace FileHub.OracleObjectStorage
                     destinationObject,
                     cancellationToken).ConfigureAwait(false);
                 // Propagate what we know — content is identical, so length matches.
+                progress?.Report(new TransferStatus(_length, _length));
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
-            return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
         }
 
         // === FileWriteOptions / metadata-via-options surface ===
