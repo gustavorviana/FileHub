@@ -238,6 +238,119 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
         Assert.False(scope.DirectoryExists("to-delete"));
     }
 
+    // === Command-gate serialization (RealFtpClient) ===
+
+    [RequiresDockerFact]
+    public async Task ParallelOperations_SameHub_SerializeWithoutCorruptingSession()
+    {
+        if (_ftp.SkipReason != null) return;
+
+        using var hub = await NewHubAsync();
+        var scope = await ScopeAsync(hub, nameof(ParallelOperations_SameHub_SerializeWithoutCorruptingSession));
+
+        foreach (var n in new[] { "p1.txt", "p2.txt", "p3.txt" })
+            scope.CreateFile(n).SetText(n);
+
+        // Mixed concurrent traffic over ONE connection: without the
+        // per-connection gate in RealFtpClient these interleave FTP commands
+        // on the control channel and corrupt the session.
+        var tasks = new List<Task>();
+        for (int i = 0; i < 4; i++)
+        {
+            tasks.Add(scope.FileExistsAsync("p1.txt"));
+            tasks.Add(scope.FileExistsAsync("does-not-exist.txt"));
+            tasks.Add(((IRefreshable)scope.OpenFile("p2.txt")).RefreshAsync());
+            tasks.Add(scope.OpenFile("p3.txt").ReadAllTextAsync());
+        }
+        await Task.WhenAll(tasks);
+
+        // Session still healthy and answers correctly after the burst.
+        Assert.True(await scope.FileExistsAsync("p1.txt"));
+        Assert.Equal("p3.txt", await scope.OpenFile("p3.txt").ReadAllTextAsync());
+    }
+
+    [RequiresDockerFact]
+    public async Task ParallelWrites_DifferentFiles_BothCommit()
+    {
+        if (_ftp.SkipReason != null) return;
+
+        using var hub = await NewHubAsync();
+        var scope = await ScopeAsync(hub, nameof(ParallelWrites_DifferentFiles_BothCommit));
+
+        var a = scope.CreateFile("a.bin");
+        var b = scope.CreateFile("b.bin");
+        var payloadA = new byte[256 * 1024];
+        var payloadB = new byte[256 * 1024];
+        for (int i = 0; i < payloadA.Length; i++) { payloadA[i] = 0xAA; payloadB[i] = 0xBB; }
+
+        await Task.WhenAll(
+            a.SetBytesAsync(payloadA),
+            b.SetBytesAsync(payloadB));
+
+        var freshA = scope.OpenFile("a.bin");
+        await ((IRefreshable)freshA).RefreshAsync();
+        var freshB = scope.OpenFile("b.bin");
+        await ((IRefreshable)freshB).RefreshAsync();
+        var readA = (await scope.OpenFile("a.bin").ReadAllBytesAsync()).Length;
+        var readB = (await scope.OpenFile("b.bin").ReadAllBytesAsync()).Length;
+        Assert.Fail($"DIAG serverA={freshA.Length} serverB={freshB.Length} readA={readA} readB={readB} expected={payloadA.Length}");
+    }
+
+    [RequiresDockerFact]
+    public async Task Write_ThenImmediateDispose_CommitsEveryByte()
+    {
+        if (_ftp.SkipReason != null) return;
+        using var hub = await NewHubAsync();
+        var scope = await ScopeAsync(hub, nameof(Write_ThenImmediateDispose_CommitsEveryByte));
+
+        // Regression: without reading the final transfer reply ("226") on
+        // stream close, the next control-channel command desynchronizes the
+        // protocol and the server silently truncates the tail of the upload
+        // (256 KiB used to land as 192 KiB).
+        var payload = new byte[256 * 1024];
+        for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
+
+        var file = scope.CreateFile("exact.bin");
+        await file.SetBytesAsync(payload);
+
+        var fresh = scope.OpenFile("exact.bin");
+        await ((IRefreshable)fresh).RefreshAsync();
+        Assert.Equal(payload.Length, fresh.Length);
+        Assert.Equal(payload, await scope.OpenFile("exact.bin").ReadAllBytesAsync());
+    }
+
+    [RequiresDockerFact]
+    public async Task OpenReadStream_HoldsGate_UntilDisposed()
+    {
+        if (_ftp.SkipReason != null) return;
+
+        using var hub = await NewHubAsync();
+        var scope = await ScopeAsync(hub, nameof(OpenReadStream_HoldsGate_UntilDisposed));
+
+        scope.CreateFile("held.txt").SetText("held-by-stream");
+        scope.CreateFile("other.txt").SetText("x");
+
+        var stream = await scope.OpenFile("held.txt").GetReadStreamAsync();
+        try
+        {
+            // The data channel is busy — a command on the same connection must
+            // queue behind the gate, not interleave. It CANNOT complete while
+            // the stream is open (deterministic: the gate is held).
+            var pending = scope.FileExistsAsync("other.txt");
+            await Task.Delay(300);
+            Assert.False(pending.IsCompleted);
+
+            await stream.DisposeAsync();
+
+            Assert.True(await pending.WaitAsync(TimeSpan.FromSeconds(15)));
+            stream = null!;
+        }
+        finally
+        {
+            if (stream != null) await stream.DisposeAsync();
+        }
+    }
+
     [RequiresDockerFact]
     public async Task Refresh_ReflectsExternalMutation()
     {

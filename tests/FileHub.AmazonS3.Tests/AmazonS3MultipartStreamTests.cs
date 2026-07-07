@@ -56,6 +56,51 @@ public class AmazonS3MultipartStreamTests
     }
 
     [Fact]
+    public async Task RegularWriteStream_LargePayload_SpillsToMultipart()
+    {
+        using var hub = NewHub(out var client);
+        var file = hub.Root.CreateFile("spill.bin");
+
+        // 12 MiB through the REGULAR write stream (not the multipart API):
+        // the stream must spill to multipart past 5 MiB instead of buffering
+        // the whole payload in memory.
+        var payload = new byte[PartSize * 2 + 1024];
+        for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 17) & 0xFF);
+
+        using (var stream = await file.GetWriteStreamAsync())
+        {
+            // 80 KiB chunks, like FileEntry's copy helpers.
+            var chunk = 81920;
+            for (int off = 0; off < payload.Length; off += chunk)
+                await stream.WriteAsync(payload, off, Math.Min(chunk, payload.Length - off));
+        }
+
+        Assert.True(client.TryGetBody("spill.bin", out var body));
+        Assert.Equal(payload, body);
+        Assert.Equal(0, client.ActiveMultipartUploadCount);
+        Assert.Equal(payload.Length, file.Length);
+    }
+
+    [Fact]
+    public async Task RegularWriteStream_SmallPayload_StaysSinglePut()
+    {
+        using var hub = NewHub(out var client);
+        var file = hub.Root.CreateFile("no-spill.bin");
+        var putsBefore = client.PutInvocationCount;
+
+        var payload = new byte[1024];
+        using (var stream = await file.GetWriteStreamAsync())
+        {
+            await stream.WriteAsync(payload, 0, payload.Length);
+        }
+
+        Assert.True(client.TryGetBody("no-spill.bin", out var body));
+        Assert.Equal(payload, body);
+        // Single PutObject, no multipart machinery for small payloads.
+        Assert.Equal(putsBefore + 1, client.PutInvocationCount);
+    }
+
+    [Fact]
     public async Task ExceptionDuringWrite_AbortsUpload()
     {
         using var hub = NewHub(out var client);

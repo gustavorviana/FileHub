@@ -63,9 +63,12 @@ public sealed class FtpServerFixture : IAsyncLifetime
             _container = builder.Build();
             await _container.StartAsync();
 
-            // vsftpd comes up a beat after the container is marked running.
-            // Poll the control port via FluentFTP until it accepts a login.
-            await WaitForFtpReadyAsync(timeout: TimeSpan.FromSeconds(30));
+            // pure-ftpd comes up a beat after the container is marked running
+            // (user creation + daemon start), and the first FluentFTP login
+            // can take several seconds on a cold Docker Desktop. 30s proved
+            // too tight on dev machines — keep a generous window; the poll
+            // returns as soon as a login succeeds.
+            await WaitForFtpReadyAsync(timeout: TimeSpan.FromSeconds(90));
         }
         catch (Exception ex)
         {

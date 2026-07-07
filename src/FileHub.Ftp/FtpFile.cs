@@ -209,8 +209,45 @@ namespace FileHub.Ftp
         public override FileEntry CopyTo(FileDirectory directory, string name)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
 
-        // CopyTo intentionally falls back to the base implementation (stream copy).
-        // FTP has no server-side copy command, even within the same connection.
+        /// <summary>
+        /// FTP has no server-side copy command. When source and destination
+        /// share the same connection, the copy is spilled through a temporary
+        /// file on local disk and runs strictly sequentially (download fully,
+        /// close the data channel, then upload) — a single FTP connection
+        /// supports only one data transfer at a time, so the base
+        /// stream-to-stream copy would require two simultaneous data channels.
+        /// Both legs stream in chunks; memory usage is constant regardless of
+        /// file size. Cross-connection copies still stream directly.
+        /// </summary>
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        {
+            if (directory is FtpDirectory ftpDir
+                && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
+            {
+                PathUtil.ValidateName(name);
+                var tempPath = System.IO.Path.GetTempFileName();
+                try
+                {
+                    using (var temp = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                    {
+                        await CopyToStreamAsync(temp, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var newFile = await ftpDir.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
+                    using (var temp = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+                    {
+                        await newFile.CopyFromStreamAsync(temp, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+                    return newFile;
+                }
+                finally
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort — temp dir cleanup */ }
+                }
+            }
+
+            return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+        }
 
         public override void Dispose()
         {
