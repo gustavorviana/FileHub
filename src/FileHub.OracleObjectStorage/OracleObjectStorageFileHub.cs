@@ -21,11 +21,11 @@ namespace FileHub.OracleObjectStorage
 
         public FileDirectory Root { get; }
 
-        private OracleObjectStorageFileHub(OciSession session, string rootPath, DirectoryPathMode pathMode)
+        private OracleObjectStorageFileHub(OciSession session, string rootPath)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             var rootPrefix = PathUtil.NormalizePrefix(rootPath);
-            Root = new OracleObjectStorageDirectory(_session, rootPrefix, pathMode);
+            Root = new OracleObjectStorageDirectory(_session, rootPrefix);
         }
 
         // === Canonical factory: options bag (preferred from v0.next onward) ===
@@ -67,7 +67,7 @@ namespace FileHub.OracleObjectStorage
                 if (string.IsNullOrEmpty(options.Namespace))
                     throw new ArgumentException("Namespace is required when Client is provided.", nameof(options));
                 var real = new RealOciClient(options.Client, options.Namespace, options.BucketName, options.RegionId, ownsClient: false);
-                return await BuildAsync(real, options.RootPath, options.PathMode, cancellationToken).ConfigureAwait(false);
+                return await BuildAsync(real, options.RootPath, cancellationToken).ConfigureAwait(false);
             }
 
             IAuthenticationDetailsProvider provider;
@@ -122,7 +122,7 @@ namespace FileHub.OracleObjectStorage
             }
 
             var realClient = new RealOciClient(sdkClient, @namespace, options.BucketName, regionId, ownsClient: true);
-            return await BuildAsync(realClient, options.RootPath, options.PathMode, cancellationToken).ConfigureAwait(false);
+            return await BuildAsync(realClient, options.RootPath, cancellationToken).ConfigureAwait(false);
         }
 
         // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===
@@ -135,15 +135,13 @@ namespace FileHub.OracleObjectStorage
             string rootPath,
             string bucketName,
             string configFilePath = null,
-            string profile = "DEFAULT",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string profile = "DEFAULT")
             => Create(new OciHubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 ConfigFilePath = configFilePath,
                 Profile = profile,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(OciHubOptions.FromConfigFile(bucketName, profile, configFilePath, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -152,7 +150,6 @@ namespace FileHub.OracleObjectStorage
             string bucketName,
             string configFilePath = null,
             string profile = "DEFAULT",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new OciHubOptions
             {
@@ -160,7 +157,6 @@ namespace FileHub.OracleObjectStorage
                 RootPath = rootPath,
                 ConfigFilePath = configFilePath,
                 Profile = profile,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -171,15 +167,13 @@ namespace FileHub.OracleObjectStorage
             string rootPath,
             string bucketName,
             IAuthenticationDetailsProvider provider,
-            string regionId,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string regionId)
             => Create(new OciHubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Provider = provider,
                 RegionId = regionId,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(OciHubOptions.FromProvider(bucketName, provider, regionId, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -188,7 +182,6 @@ namespace FileHub.OracleObjectStorage
             string bucketName,
             IAuthenticationDetailsProvider provider,
             string regionId,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new OciHubOptions
             {
@@ -196,7 +189,6 @@ namespace FileHub.OracleObjectStorage
                 RootPath = rootPath,
                 Provider = provider,
                 RegionId = regionId,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -207,14 +199,12 @@ namespace FileHub.OracleObjectStorage
         public static OracleObjectStorageFileHub FromProvider(
             string rootPath,
             string bucketName,
-            ConfigFileAuthenticationDetailsProvider provider,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            ConfigFileAuthenticationDetailsProvider provider)
             => Create(new OciHubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Provider = provider,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(OciHubOptions.FromProvider(bucketName, ConfigFileAuthenticationDetailsProvider, rootPath), ct) — region is read from provider.Region.RegionId. This overload will be removed in v1.")]
@@ -222,14 +212,12 @@ namespace FileHub.OracleObjectStorage
             string rootPath,
             string bucketName,
             ConfigFileAuthenticationDetailsProvider provider,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new OciHubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Provider = provider,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -241,8 +229,7 @@ namespace FileHub.OracleObjectStorage
             string rootPath,
             ObjectStorageClient client,
             string regionId,
-            string @namespace,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string @namespace)
             => Create(new OciHubOptions
             {
                 BucketName = bucketName,
@@ -250,7 +237,6 @@ namespace FileHub.OracleObjectStorage
                 Client = client,
                 RegionId = regionId,
                 Namespace = @namespace,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(OciHubOptions.FromClient(bucketName, client, regionId, namespace, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -260,7 +246,6 @@ namespace FileHub.OracleObjectStorage
             ObjectStorageClient client,
             string regionId,
             string @namespace,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new OciHubOptions
             {
@@ -269,7 +254,6 @@ namespace FileHub.OracleObjectStorage
                 Client = client,
                 RegionId = regionId,
                 Namespace = @namespace,
-                PathMode = pathMode,
             }, cancellationToken);
 
         // === Internal factories (used by tests with an in-memory fake) ===
@@ -281,27 +265,24 @@ namespace FileHub.OracleObjectStorage
         /// </summary>
         internal static OracleObjectStorageFileHub FromOciClient(
             IOciClient client,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromOciClientAsync(client, rootPath, pathMode, ct));
+            string rootPath = "")
+            => SyncBridge.Run(ct => FromOciClientAsync(client, rootPath, ct));
 
         internal static Task<OracleObjectStorageFileHub> FromOciClientAsync(
             IOciClient client,
             string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            return BuildAsync(client, rootPath, pathMode, cancellationToken);
+            return BuildAsync(client, rootPath, cancellationToken);
         }
 
         private static async Task<OracleObjectStorageFileHub> BuildAsync(
             IOciClient client,
             string rootPath,
-            DirectoryPathMode pathMode,
             CancellationToken cancellationToken)
         {
-            var hub = new OracleObjectStorageFileHub(new OciSession(client), rootPath, pathMode);
+            var hub = new OracleObjectStorageFileHub(new OciSession(client), rootPath);
             var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.Memory
 {
@@ -14,7 +16,6 @@ namespace FileHub.Memory
             = new Dictionary<string, MemoryDirectory>(StringComparer.OrdinalIgnoreCase);
 
         private readonly MemoryDirectory _parent;
-        private readonly DirectoryPathMode _pathMode;
 
         public override string Path { get; }
         public override FileDirectory Parent => _parent;
@@ -22,13 +23,9 @@ namespace FileHub.Memory
         public override DateTime LastWriteTimeUtc { get; }
 
         public MemoryDirectory(string name, MemoryDirectory parent = null)
-            : this(name, parent, DirectoryPathMode.OpenIntermediates) { }
-
-        public MemoryDirectory(string name, MemoryDirectory parent, DirectoryPathMode pathMode)
             : base(name, rootPath: null)
         {
             _parent = parent;
-            _pathMode = pathMode;
             Path = parent != null
                 ? System.IO.Path.Combine(parent.Path, name)
                 : name;
@@ -48,6 +45,10 @@ namespace FileHub.Memory
                 return dir.CreateFile(rest);
             }
             ValidateName(head);
+            // A file and a directory cannot share a name (mirrors the
+            // local-filesystem driver).
+            if (_directories.ContainsKey(head))
+                throw new FileAlreadyExistsException($"{Path}/{head}");
             var data = new MemoryFileData(head);
             _files[head] = data;
             return new MemoryFile(this, data);
@@ -93,42 +94,60 @@ namespace FileHub.Memory
 
         // === Directory operations ===
 
+        // === Directory resolution (whole path; in-process walk, no I/O) ===
+
         public override FileDirectory CreateDirectory(string name)
         {
             ThrowIfReadOnly();
-            if (NestedPath.TrySplit(name, out var head, out var rest))
+            var current = this;
+            foreach (var seg in PathUtil.SplitAndValidateSegments(name))
             {
-                var intermediate = TryOpenDirectory(head, out var existing)
-                    ? existing
-                    : CreateDirectory(head);
-                return intermediate.CreateDirectory(rest);
+                if (!current._directories.TryGetValue(seg, out var child))
+                {
+                    // A file and a directory cannot share a name (mirrors the
+                    // local-filesystem driver).
+                    if (current._files.ContainsKey(seg))
+                        throw new FileAlreadyExistsException($"{current.Path}/{seg}");
+                    child = new MemoryDirectory(seg, current);
+                    current._directories[seg] = child;
+                }
+                current = child;
             }
-            var leaf = head ?? name;
-            ValidateName(leaf);
-            var dir = new MemoryDirectory(leaf, this, _pathMode);
-            _directories[leaf] = dir;
-            return dir;
+            return current;
         }
 
         public override bool TryOpenDirectory(string name, out FileDirectory directory)
         {
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (!TryOpenDirectory(head, out var child) || child == null)
-                {
-                    directory = null;
-                    return false;
-                }
-                return child.TryOpenDirectory(rest, out directory);
-            }
-            var leaf = head ?? name;
-            ValidateName(leaf);
             directory = null;
-            if (!_directories.TryGetValue(leaf, out var dir))
-                return false;
+            // Invalid leaf name → not found (false); absolute/traversal are
+            // security violations and propagate as FileHubException.
+            string[] segments;
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (ArgumentException) { return false; }
 
-            directory = dir;
+            var current = this;
+            foreach (var seg in segments)
+            {
+                if (!current._directories.TryGetValue(seg, out var child))
+                    return false;
+                current = child;
+            }
+            directory = current;
             return true;
+        }
+
+        // In-memory ops are synchronous; the async surface wraps them.
+        public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CreateDirectory(name));
+        }
+
+        public override Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var exists = TryOpenDirectory(name, out var directory);
+            return Task.FromResult((directory, exists));
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
@@ -211,7 +230,7 @@ namespace FileHub.Memory
                 throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
 
             _parent?.RemoveDirectory(Name);
-            var renamed = new MemoryDirectory(newName, _parent, _pathMode);
+            var renamed = new MemoryDirectory(newName, _parent);
             CopyContentsTo(this, renamed);
             _parent?.AddDirectory(renamed);
 
@@ -262,7 +281,7 @@ namespace FileHub.Memory
 
             foreach (var kvp in source._directories)
             {
-                var subDir = new MemoryDirectory(kvp.Key, destination, destination._pathMode);
+                var subDir = new MemoryDirectory(kvp.Key, destination);
                 CopyContentsTo(kvp.Value, subDir);
                 destination._directories[kvp.Key] = subDir;
             }

@@ -26,9 +26,23 @@ namespace FileHub
         public abstract bool TryOpenFile(string name, out FileEntry file);
         public abstract IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null);
 
-        public abstract FileDirectory CreateDirectory(string name);
-        public abstract bool TryOpenDirectory(string name, out FileDirectory directory);
         public abstract IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*");
+
+        /// <summary>Create the directory named <paramref name="name"/> and every missing ancestor.</summary>
+        public abstract Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default);
+
+        /// <summary>Resolve the whole path; <c>Exists</c> is <c>false</c> and <c>Directory</c> is <c>null</c> when it doesn't exist.</summary>
+        public abstract Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default);
+
+        public virtual FileDirectory CreateDirectory(string name)
+            => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
+
+        public virtual bool TryOpenDirectory(string name, out FileDirectory directory)
+        {
+            var (dir, exists) = SyncBridge.Run(ct => TryOpenDirectoryAsync(name, ct));
+            directory = dir;
+            return exists;
+        }
 
         /// <summary>
         /// Paged enumeration of directories. Base implementation applies
@@ -295,19 +309,6 @@ namespace FileHub
             cancellationToken.ThrowIfCancellationRequested();
             var ok = TryOpenFile(name, out var file);
             return Task.FromResult((file, ok));
-        }
-
-        public virtual Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var ok = TryOpenDirectory(name, out var dir);
-            return Task.FromResult((dir, ok));
-        }
-
-        public virtual Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(CreateDirectory(name));
         }
 
         public virtual Task<FileDirectory> OpenDirectoryAsync(string name, CancellationToken cancellationToken = default)

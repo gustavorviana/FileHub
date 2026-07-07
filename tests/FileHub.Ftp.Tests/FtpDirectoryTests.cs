@@ -72,7 +72,7 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void CreateDirectory_NestedOpenIntermediates_CreatesEachSegment()
+    public void CreateDirectory_Nested_CreatesEachSegment()
     {
         var deep = Root.CreateDirectory("a/b/c");
 
@@ -83,10 +83,10 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void CreateDirectory_NestedDirect_CreatesInOneRecursiveCall()
+    public void CreateDirectory_Nested_CreatesInOneRecursiveCall()
     {
         using var client = new InMemoryFtpClient();
-        using var hub = FtpFileHub.FromFtpClient(client, "/", DirectoryPathMode.Direct);
+        using var hub = FtpFileHub.FromFtpClient(client, "/");
 
         var deep = hub.Root.CreateDirectory("x/y/z");
 

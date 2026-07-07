@@ -102,6 +102,12 @@ namespace FileHub
             return false;
         }
 
+        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var (d, exists) = await _inner.TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
+            return (exists ? d.AsReadOnly() : null, exists);
+        }
+
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
         {
             return _inner.GetDirectories(searchPattern).Select(d => d.AsReadOnly());
@@ -110,6 +116,7 @@ namespace FileHub
         // Write operations - all throw
         public override FileEntry CreateFile(string name) { ThrowIfReadOnly(); return null; }
         public override FileDirectory CreateDirectory(string name) { ThrowIfReadOnly(); return null; }
+        public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileDirectory>(null); }
         public override void Delete() => ThrowIfReadOnly();
         public override void Delete(string name) => ThrowIfReadOnly();
         public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }

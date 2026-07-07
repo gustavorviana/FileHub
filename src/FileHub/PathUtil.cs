@@ -63,7 +63,16 @@ namespace FileHub
         /// </summary>
         public static string[] SplitAndValidateSegments(string nestedName, Action<string> validateSegment)
         {
-            var normalized = (nestedName ?? string.Empty).Replace('\\', '/').Trim('/');
+            if (string.IsNullOrEmpty(nestedName))
+                throw new ArgumentException("Name cannot be null or empty.", nameof(nestedName));
+                
+            if (nestedName[0] == '/' || nestedName[0] == '\\')
+                throw new FileHubException($"Absolute paths are not allowed; \"{nestedName}\" must be relative.");
+
+            var normalized = nestedName.Replace('\\', '/').Trim('/');
+            if (normalized.Length == 0)
+                throw new FileHubException($"Absolute paths are not allowed; \"{nestedName}\" must be relative.");
+
             var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var seg in segments)
             {

@@ -800,6 +800,35 @@ public class MemoryDirectoryTests
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
 
+    // === File/directory name collision ===
+
+    [Fact]
+    public void CreateDirectory_NameTakenByFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken"));
+    }
+
+    [Fact]
+    public void CreateDirectory_IntermediateTakenByFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken/child"));
+    }
+
+    [Fact]
+    public void CreateFile_NameTakenByDirectory_Throws()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("taken"));
+    }
+
     // === CreateFile(name, bytes, options) ===
 
     [Fact]

@@ -16,7 +16,6 @@ namespace FileHub.OracleObjectStorage
         private readonly OracleObjectStorageDirectory _parent;
         private readonly string _prefix;
         private readonly string _rootPrefix;
-        private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
@@ -38,18 +37,14 @@ namespace FileHub.OracleObjectStorage
         internal string RootPrefixInternal => _rootPrefix;
 
         /// <summary>Constructor used for the root directory of a FileHub.</summary>
-        internal OracleObjectStorageDirectory(IOciSession session, string rootPrefix)
-            : this(session, rootPrefix, DirectoryPathMode.Direct) { }
-
         /// <summary>Constructor used for the root directory of a FileHub.</summary>
-        internal OracleObjectStorageDirectory(IOciSession session, string rootPrefix, DirectoryPathMode pathMode)
+        internal OracleObjectStorageDirectory(IOciSession session, string rootPrefix)
             : base(GetDisplayName(rootPrefix), rootPath: rootPrefix)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _prefix = rootPrefix ?? string.Empty;
             _rootPrefix = _prefix;
             _parent = null;
-            _pathMode = pathMode;
         }
 
         /// <summary>Constructor used for child directories.</summary>
@@ -60,7 +55,6 @@ namespace FileHub.OracleObjectStorage
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
             _prefix = PathUtil.CombinePrefix(parent._prefix, name);
-            _pathMode = parent._pathMode;
         }
 
         private static string GetDisplayName(string rootPrefix)
@@ -351,79 +345,17 @@ namespace FileHub.OracleObjectStorage
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name) => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
+        // === Directory leaf primitives (base drives split/branch/recurse) ===
 
+        // Nullable handle for the internal callers.
+        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+            => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
+
+        // One PUT creates the whole path's marker.
         public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await CreateDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var existing = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                var intermediate = existing
-                    ?? await CreateDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
-                return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
-            }
-
-            var leaf = head ?? name;
-            var childPrefix = PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
-
-            using (var empty = new MemoryStream())
-            {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0,
-                    new OciWriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
-            }
-            return new OracleObjectStorageDirectory(this, leaf);
-        }
-
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
-        {
-            directory = SyncBridge.Run(ct => TryOpenDirectoryCoreAsync(name, ct));
-            return directory != null;
-        }
-
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            var dir = await TryOpenDirectoryCoreAsync(name, cancellationToken).ConfigureAwait(false);
-            return (dir, dir != null);
-        }
-
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
-        {
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await TryOpenDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var childResult = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                if (childResult is OracleObjectStorageDirectory ociChild)
-                    return await ociChild.TryOpenDirectoryCoreAsync(rest, cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            var leaf = head ?? name;
-            try
-            {
-                PathUtil.ValidateName(leaf);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-
-            var childPrefix = PathUtil.CombinePrefix(_prefix, leaf);
-            if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-                return new OracleObjectStorageDirectory(this, leaf);
-            return null;
-        }
-
-        // --- Direct-mode implementations: one PUT / one HEAD for the nested leaf ---
-
-        private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
-        {
-            var segments = PathUtil.SplitAndValidateSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(name);
             var fullPrefix = BuildNestedPrefix(segments);
             PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
@@ -435,23 +367,19 @@ namespace FileHub.OracleObjectStorage
             return BuildDirectoryChain(segments);
         }
 
-        private async Task<FileDirectory> TryOpenDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        // One LIST proves the whole path exists.
+        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
-            try
-            {
-                segments = PathUtil.SplitAndValidateSegments(nestedName);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (ArgumentException) { return (null, false); }
+
             var fullPrefix = BuildNestedPrefix(segments);
             PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
-            if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
-                return BuildDirectoryChain(segments);
-            return null;
+            return await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false)
+                ? (BuildDirectoryChain(segments), true)
+                : (null, false);
         }
 
         // === ISignedUploadable ===

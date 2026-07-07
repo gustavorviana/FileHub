@@ -243,12 +243,13 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         Assert.Throws<FileHubException>(() => scope.CreateDirectory("a/../escape"));
     }
 
-    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+    // === Nested path resolution (whole path in one op) ===
 
     [Fact]
-    public void CreateDirectory_DirectMode_CreatesOnlyLeafMarker()
+    public void CreateDirectory_CreatesOnlyLeafMarker()
     {
-        // Default for OCI is Direct — only the leaf prefix is PUT.
+        // The whole nested path is one PUT — only the leaf prefix marker,
+        // no per-segment "a/" / "a/b/" junk objects.
         using var client = new InMemoryOciClient();
         using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
@@ -261,21 +262,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
-    public void CreateDirectory_OpenIntermediatesMode_CreatesEachMarker()
-    {
-        using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub.FromOciClient(client, "", DirectoryPathMode.OpenIntermediates);
-
-        hub.Root.CreateDirectory("a/b/c");
-
-        Assert.Equal(3, client.ObjectCount);
-        Assert.Contains("a/", client.Keys);
-        Assert.Contains("a/b/", client.Keys);
-        Assert.Contains("a/b/c/", client.Keys);
-    }
-
-    [Fact]
-    public void TryOpenDirectory_DirectMode_ResolvesExistingNestedPath()
+    public void TryOpenDirectory_ResolvesExistingNestedPath()
     {
         using var client = new InMemoryOciClient();
         using var hub = OracleObjectStorageFileHub.FromOciClient(client);

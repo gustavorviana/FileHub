@@ -47,7 +47,7 @@ public class PathUtilTests
     [Theory]
     [InlineData("a/b/c", new[] { "a", "b", "c" })]
     [InlineData("a\\b", new[] { "a", "b" })]
-    [InlineData("/a/b/", new[] { "a", "b" })]
+    [InlineData("a/b/", new[] { "a", "b" })]
     [InlineData("single", new[] { "single" })]
     public void SplitAndValidateSegments_SplitsOnBothSeparators(string input, string[] expected)
     {
@@ -60,6 +60,23 @@ public class PathUtilTests
     public void SplitAndValidateSegments_RejectsTraversal(string input)
     {
         Assert.Throws<FileHubException>(() => PathUtil.SplitAndValidateSegments(input));
+    }
+
+    [Theory]
+    [InlineData("/a/b")]
+    [InlineData("\\a")]
+    [InlineData("/")]
+    public void SplitAndValidateSegments_RejectsAbsolute(string input)
+    {
+        Assert.Throws<FileHubException>(() => PathUtil.SplitAndValidateSegments(input));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    public void SplitAndValidateSegments_RejectsEmpty(string input)
+    {
+        Assert.Throws<ArgumentException>(() => PathUtil.SplitAndValidateSegments(input));
     }
 
     [Fact]

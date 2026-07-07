@@ -595,13 +595,13 @@ public class LocalDirectoryTests
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
 
-    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+    // === Nested path resolution (whole path in one op) ===
 
     [Fact]
-    public void CreateDirectory_DirectMode_CreatesFullTreeInSingleCall()
+    public void CreateDirectory_CreatesFullTreeInSingleCall()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         var leaf = root.CreateDirectory("a/b/c");
 
@@ -611,22 +611,46 @@ public class LocalDirectoryTests
     }
 
     [Fact]
-    public void CreateDirectory_DirectMode_ParentTraversal_Throws()
+    public void CreateDirectory_NestedParentTraversal_Throws()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
 
     [Fact]
-    public void TryOpenDirectory_DirectMode_Missing_ReturnsFalse()
+    public void TryOpenDirectory_MissingNestedPath_ReturnsFalse()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         Assert.False(root.TryOpenDirectory("x/y/z", out var dir));
         Assert.Null(dir);
+    }
+
+    // === File/directory name collision ===
+
+    [Fact]
+    public void CreateDirectory_NameTakenByFile_ThrowsFileAlreadyExists()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path).Root;
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken"));
+    }
+
+    [Fact]
+    public void CreateDirectory_IntermediateTakenByFile_ThrowsFileHubException()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path).Root;
+        root.CreateFile("taken");
+
+        // The file occupies an intermediate segment, not the leaf, so the
+        // failure surfaces as a wrapped FileHubException.
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("taken/child"));
     }
 }

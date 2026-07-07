@@ -21,11 +21,11 @@ namespace FileHub.AmazonS3
 
         public FileDirectory Root { get; }
 
-        private AmazonS3FileHub(S3Session session, string rootPath, DirectoryPathMode pathMode)
+        private AmazonS3FileHub(S3Session session, string rootPath)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             var rootPrefix = PathUtil.NormalizePrefix(rootPath);
-            Root = new AmazonS3Directory(_session, rootPrefix, pathMode);
+            Root = new AmazonS3Directory(_session, rootPrefix);
         }
 
         // === Canonical factory: options bag (preferred from v0.next onward) ===
@@ -64,11 +64,11 @@ namespace FileHub.AmazonS3
                         throw new ArgumentException("Region is required when Client is provided (unless the client is an AmazonS3Client with a RegionEndpoint).", nameof(options));
                     return BuildAsync(
                         new RealS3Client(options.Client, options.BucketName, fromClient, ownsClient: false),
-                        options.RootPath, options.PathMode, cancellationToken);
+                        options.RootPath, cancellationToken);
                 }
                 return BuildAsync(
                     new RealS3Client(options.Client, options.BucketName, options.Region, ownsClient: false),
-                    options.RootPath, options.PathMode, cancellationToken);
+                    options.RootPath, cancellationToken);
             }
 
             if (options.Credentials != null)
@@ -81,7 +81,7 @@ namespace FileHub.AmazonS3
                 var sdkClient = new AmazonS3Client(options.Credentials, PrepareSdkConfig(options.SdkConfig, region));
                 return BuildAsync(
                     new RealS3Client(sdkClient, options.BucketName, region, ownsClient: true),
-                    options.RootPath, options.PathMode, cancellationToken);
+                    options.RootPath, cancellationToken);
             }
 
             // Profile path (also the default if everything is null)
@@ -107,7 +107,7 @@ namespace FileHub.AmazonS3
             var sdk = new AmazonS3Client(credsFromProfile, PrepareSdkConfig(options.SdkConfig, resolvedRegion));
             return BuildAsync(
                 new RealS3Client(sdk, options.BucketName, resolvedRegion, ownsClient: true),
-                options.RootPath, options.PathMode, cancellationToken);
+                options.RootPath, cancellationToken);
         }
 
         /// <summary>
@@ -138,15 +138,13 @@ namespace FileHub.AmazonS3
             string rootPath,
             string bucketName,
             string profile = "default",
-            string region = null,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string region = null)
             => Create(new S3HubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Profile = profile,
                 Region = region,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(S3HubOptions.FromProfile(bucketName, profile, region, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -155,7 +153,6 @@ namespace FileHub.AmazonS3
             string bucketName,
             string profile = "default",
             string region = null,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new S3HubOptions
             {
@@ -163,7 +160,6 @@ namespace FileHub.AmazonS3
                 RootPath = rootPath,
                 Profile = profile,
                 Region = region,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -174,15 +170,13 @@ namespace FileHub.AmazonS3
             string rootPath,
             string bucketName,
             AWSCredentials credentials,
-            string region,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string region)
             => Create(new S3HubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Credentials = credentials,
                 Region = region,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(S3HubOptions.FromCredentials(bucketName, credentials, region, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -191,7 +185,6 @@ namespace FileHub.AmazonS3
             string bucketName,
             AWSCredentials credentials,
             string region,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new S3HubOptions
             {
@@ -199,7 +192,6 @@ namespace FileHub.AmazonS3
                 RootPath = rootPath,
                 Credentials = credentials,
                 Region = region,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -210,15 +202,13 @@ namespace FileHub.AmazonS3
             string bucketName,
             string rootPath,
             IAmazonS3 client,
-            string region,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string region)
             => Create(new S3HubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Client = client,
                 Region = region,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, client, region, rootPath), ct) instead. This overload will be removed in v1.")]
@@ -227,7 +217,6 @@ namespace FileHub.AmazonS3
             string rootPath,
             IAmazonS3 client,
             string region,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new S3HubOptions
             {
@@ -235,7 +224,6 @@ namespace FileHub.AmazonS3
                 RootPath = rootPath,
                 Client = client,
                 Region = region,
-                PathMode = pathMode,
             }, cancellationToken);
 
         /// <summary>
@@ -246,14 +234,12 @@ namespace FileHub.AmazonS3
         public static AmazonS3FileHub FromClient(
             string bucketName,
             string rootPath,
-            AmazonS3Client client,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            AmazonS3Client client)
             => Create(new S3HubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Client = client,
-                PathMode = pathMode,
             });
 
         [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, AmazonS3Client, rootPath), ct) — region is read from client.Config.RegionEndpoint. This overload will be removed in v1.")]
@@ -261,41 +247,36 @@ namespace FileHub.AmazonS3
             string bucketName,
             string rootPath,
             AmazonS3Client client,
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
             => CreateAsync(new S3HubOptions
             {
                 BucketName = bucketName,
                 RootPath = rootPath,
                 Client = client,
-                PathMode = pathMode,
             }, cancellationToken);
 
         // === Internal factory (tests with in-memory fake) ===
 
         internal static AmazonS3FileHub FromS3Client(
             IS3Client client,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
-            => SyncBridge.Run(ct => FromS3ClientAsync(client, rootPath, pathMode, ct));
+            string rootPath = "")
+            => SyncBridge.Run(ct => FromS3ClientAsync(client, rootPath, ct));
 
         internal static Task<AmazonS3FileHub> FromS3ClientAsync(
             IS3Client client,
             string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct,
             CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            return BuildAsync(client, rootPath, pathMode, cancellationToken);
+            return BuildAsync(client, rootPath, cancellationToken);
         }
 
         private static async Task<AmazonS3FileHub> BuildAsync(
             IS3Client client,
             string rootPath,
-            DirectoryPathMode pathMode,
             CancellationToken cancellationToken)
         {
-            var hub = new AmazonS3FileHub(new S3Session(client), rootPath, pathMode);
+            var hub = new AmazonS3FileHub(new S3Session(client), rootPath);
             var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);

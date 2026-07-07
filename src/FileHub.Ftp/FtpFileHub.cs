@@ -20,11 +20,11 @@ namespace FileHub.Ftp
 
         public FileDirectory Root { get; }
 
-        private FtpFileHub(FtpSession session, string rootPath, DirectoryPathMode pathMode)
+        private FtpFileHub(FtpSession session, string rootPath)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             var normalizedRoot = FtpPathUtil.NormalizeRoot(rootPath);
-            Root = new FtpDirectory(_session, normalizedRoot, pathMode);
+            Root = new FtpDirectory(_session, normalizedRoot);
         }
 
         // === Public factories: sync delegates to async at the top-level boundary ===
@@ -41,9 +41,8 @@ namespace FileHub.Ftp
             int port = 21,
             string user = "anonymous",
             string password = "",
-            string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => SyncBridge.Run(ct => ConnectAsync(host, port, user, password, rootPath, pathMode, ct));
+            string rootPath = "/")
+            => SyncBridge.Run(ct => ConnectAsync(host, port, user, password, rootPath, ct));
 
         public static async Task<FtpFileHub> ConnectAsync(
             string host,
@@ -51,7 +50,6 @@ namespace FileHub.Ftp
             string user = "anonymous",
             string password = "",
             string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(host))
@@ -61,27 +59,25 @@ namespace FileHub.Ftp
 
             var client = new AsyncFtpClient(host, user ?? "anonymous", password ?? string.Empty, port);
             var real = new RealFtpClient(client, ownsClient: true);
-            return await BuildAsync(real, rootPath, pathMode, cancellationToken).ConfigureAwait(false);
+            return await BuildAsync(real, rootPath, cancellationToken).ConfigureAwait(false);
         }
 
         public static FtpFileHub FromCredentials(
             string host,
             int port,
             NetworkCredential credentials,
-            string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => SyncBridge.Run(ct => FromCredentialsAsync(host, port, credentials, rootPath, pathMode, ct));
+            string rootPath = "/")
+            => SyncBridge.Run(ct => FromCredentialsAsync(host, port, credentials, rootPath, ct));
 
         public static Task<FtpFileHub> FromCredentialsAsync(
             string host,
             int port,
             NetworkCredential credentials,
             string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates,
             CancellationToken cancellationToken = default)
         {
             if (credentials == null) throw new ArgumentNullException(nameof(credentials));
-            return ConnectAsync(host, port, credentials.UserName, credentials.Password, rootPath, pathMode, cancellationToken);
+            return ConnectAsync(host, port, credentials.UserName, credentials.Password, rootPath, cancellationToken);
         }
 
         /// <summary>
@@ -95,47 +91,42 @@ namespace FileHub.Ftp
         public static FtpFileHub FromClient(
             AsyncFtpClient client,
             bool ownsClient = false,
-            string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => SyncBridge.Run(ct => FromClientAsync(client, ownsClient, rootPath, pathMode, ct));
+            string rootPath = "/")
+            => SyncBridge.Run(ct => FromClientAsync(client, ownsClient, rootPath, ct));
 
         public static Task<FtpFileHub> FromClientAsync(
             AsyncFtpClient client,
             bool ownsClient = false,
             string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates,
             CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
             var real = new RealFtpClient(client, ownsClient);
-            return BuildAsync(real, rootPath, pathMode, cancellationToken);
+            return BuildAsync(real, rootPath, cancellationToken);
         }
 
         // === Internal factories (used by tests with an in-memory fake) ===
 
         internal static FtpFileHub FromFtpClient(
             FileHub.Ftp.Internal.IFtpClient client,
-            string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates)
-            => SyncBridge.Run(ct => FromFtpClientAsync(client, rootPath, pathMode, ct));
+            string rootPath = "/")
+            => SyncBridge.Run(ct => FromFtpClientAsync(client, rootPath, ct));
 
         internal static Task<FtpFileHub> FromFtpClientAsync(
             FileHub.Ftp.Internal.IFtpClient client,
             string rootPath = "/",
-            DirectoryPathMode pathMode = DirectoryPathMode.OpenIntermediates,
             CancellationToken cancellationToken = default)
         {
             if (client == null) throw new ArgumentNullException(nameof(client));
-            return BuildAsync(client, rootPath, pathMode, cancellationToken);
+            return BuildAsync(client, rootPath, cancellationToken);
         }
 
         private static async Task<FtpFileHub> BuildAsync(
             FileHub.Ftp.Internal.IFtpClient client,
             string rootPath,
-            DirectoryPathMode pathMode,
             CancellationToken cancellationToken)
         {
-            var hub = new FtpFileHub(new FtpSession(client), rootPath, pathMode);
+            var hub = new FtpFileHub(new FtpSession(client), rootPath);
             var normalized = FtpPathUtil.NormalizeRoot(rootPath);
             if (normalized != "/" && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);

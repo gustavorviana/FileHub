@@ -28,8 +28,6 @@ namespace FileHub.AmazonS3
         /// <summary>Prefix inside the bucket that the hub treats as its root. Defaults to <c>""</c> (whole bucket).</summary>
         public string RootPath { get; init; } = "";
 
-        /// <summary>How nested-path operations descend. Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for S3.</summary>
-        public DirectoryPathMode PathMode { get; init; } = DirectoryPathMode.Direct;
 
         /// <summary>AWS profile name from <c>~/.aws/credentials</c>. Mutually exclusive with <see cref="Credentials"/> and <see cref="Client"/>. When all three are null, defaults to <c>"default"</c>.</summary>
         public string Profile { get; init; }
@@ -66,15 +64,13 @@ namespace FileHub.AmazonS3
             string bucketName,
             string profile = "default",
             string region = null,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new S3HubOptions
             {
                 BucketName = bucketName,
                 Profile = profile,
                 Region = region,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -84,15 +80,13 @@ namespace FileHub.AmazonS3
             string bucketName,
             AWSCredentials credentials,
             string region,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new S3HubOptions
             {
                 BucketName = bucketName,
                 Credentials = credentials,
                 Region = region,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -104,15 +98,13 @@ namespace FileHub.AmazonS3
             string bucketName,
             IAmazonS3 client,
             string region,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new S3HubOptions
             {
                 BucketName = bucketName,
                 Client = client,
                 Region = region,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -123,14 +115,12 @@ namespace FileHub.AmazonS3
         public static S3HubOptions FromClient(
             string bucketName,
             AmazonS3Client client,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new S3HubOptions
             {
                 BucketName = bucketName,
                 Client = client,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
     }
 }

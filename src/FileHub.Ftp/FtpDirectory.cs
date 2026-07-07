@@ -15,7 +15,6 @@ namespace FileHub.Ftp
         private readonly FtpDirectory _parent;
         private readonly string _path;
         private readonly string _rootPathFtp;
-        private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
@@ -37,14 +36,13 @@ namespace FileHub.Ftp
         internal string RootPathInternal => _rootPathFtp;
 
         /// <summary>Constructor used for the root directory of a FileHub.</summary>
-        internal FtpDirectory(IFtpSession session, string rootPath, DirectoryPathMode pathMode)
+        internal FtpDirectory(IFtpSession session, string rootPath)
             : base(GetDisplayName(rootPath), rootPath: rootPath)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _path = rootPath ?? "/";
             _rootPathFtp = _path;
             _parent = null;
-            _pathMode = pathMode;
         }
 
         /// <summary>Constructor used for child directories.</summary>
@@ -55,7 +53,6 @@ namespace FileHub.Ftp
             _session = parent._session;
             _rootPathFtp = parent._rootPathFtp;
             _path = FtpPathUtil.Combine(parent._path, name);
-            _pathMode = parent._pathMode;
         }
 
         private static string GetDisplayName(string rootPath)
@@ -262,102 +259,39 @@ namespace FileHub.Ftp
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name) => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
+        // === Directory resolution primitives (base validates the whole path) ===
 
+        // Nullable handle for the internal callers.
+        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+            => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
+
+        // One recursive MKDIR creates the whole path.
         public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await CreateDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var existing = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                var intermediate = existing
-                    ?? await CreateDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
-                return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
-            }
-
-            var leaf = head ?? name;
-            PathUtil.ValidateName(leaf);
-            var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, leaf);
-            await _session.Client.CreateDirectoryAsync(fullPath, recursive: false, cancellationToken).ConfigureAwait(false);
-            return new FtpDirectory(this, leaf);
-        }
-
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
-        {
-            directory = SyncBridge.Run(ct => TryOpenDirectoryCoreAsync(name, ct));
-            return directory != null;
-        }
-
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            var dir = await TryOpenDirectoryCoreAsync(name, cancellationToken).ConfigureAwait(false);
-            return (dir, dir != null);
-        }
-
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
-        {
-            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await TryOpenDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var childResult = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                if (childResult is FtpDirectory ftpChild)
-                    return await ftpChild.TryOpenDirectoryCoreAsync(rest, cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            var leaf = head ?? name;
-            try
-            {
-                PathUtil.ValidateName(leaf);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-
-            var fullPath = FtpPathUtil.Combine(_path, leaf);
-            var exists = await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
-            return exists ? new FtpDirectory(this, leaf) : null;
-        }
-
-        // --- Direct-mode implementations: one MKDIR / one CWD-style probe ---
-
-        private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
-        {
-            var segments = PathUtil.SplitAndValidateSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(name);
             var fullPath = BuildNestedPath(segments);
             FtpPathUtil.EnsureWithinRoot(_rootPathFtp, fullPath);
 
+            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
             await _session.Client.CreateDirectoryAsync(fullPath, recursive: true, cancellationToken).ConfigureAwait(false);
             return BuildDirectoryChain(segments);
         }
 
-        private async Task<FileDirectory> TryOpenDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        // One probe proves the whole path exists.
+        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
-            try
-            {
-                segments = PathUtil.SplitAndValidateSegments(nestedName);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (ArgumentException) { return (null, false); }
 
             var fullPath = BuildNestedPath(segments);
             FtpPathUtil.EnsureWithinRoot(_rootPathFtp, fullPath);
 
-            var exists = await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false);
-            return exists ? BuildDirectoryChain(segments) : null;
+            await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+            return await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false)
+                ? (BuildDirectoryChain(segments), true)
+                : (null, false);
         }
 
         private string BuildNestedPath(string[] segments)

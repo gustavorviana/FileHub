@@ -16,7 +16,6 @@ namespace FileHub.AmazonS3
         private readonly AmazonS3Directory _parent;
         private readonly string _prefix;
         private readonly string _rootPrefix;
-        private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
@@ -31,16 +30,12 @@ namespace FileHub.AmazonS3
         internal string RootPrefixInternal => _rootPrefix;
 
         internal AmazonS3Directory(IS3Session session, string rootPrefix)
-            : this(session, rootPrefix, DirectoryPathMode.Direct) { }
-
-        internal AmazonS3Directory(IS3Session session, string rootPrefix, DirectoryPathMode pathMode)
             : base(GetDisplayName(rootPrefix), rootPath: rootPrefix)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _prefix = rootPrefix ?? string.Empty;
             _rootPrefix = _prefix;
             _parent = null;
-            _pathMode = pathMode;
         }
 
         internal AmazonS3Directory(AmazonS3Directory parent, string name)
@@ -50,7 +45,6 @@ namespace FileHub.AmazonS3
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
             _prefix = PathUtil.CombinePrefix(parent._prefix, name);
-            _pathMode = parent._pathMode;
         }
 
         private static string GetDisplayName(string rootPrefix)
@@ -163,14 +157,6 @@ namespace FileHub.AmazonS3
             return (file, file != null);
         }
 
-        // Strict (createIfNotExists == false): fall through to base, which
-        // calls TryOpenFile → 1 × HEAD → loaded file or FileNotFoundException.
-        //
-        // createIfNotExists == true: RETURN STUB. No HEAD, no PutObject.
-        // S3 is pay-per-request; deferring creation to the first write saves
-        // round-trips. Caller's responsibility: write to materialize, read
-        // fails with FileNotFoundException if the object doesn't exist.
-
         public override FileEntry OpenFile(string name, bool createIfNotExists)
         {
             if (!createIfNotExists) return base.OpenFile(name, createIfNotExists);
@@ -194,12 +180,6 @@ namespace FileHub.AmazonS3
             return Task.FromResult(OpenFile(name, createIfNotExists: true));
         }
 
-        // S3 "directories" are only key prefixes — there is no real container
-        // entity. When the caller signals `createIfNotExists: true` we don't
-        // need to HEAD the marker, LIST children, nor PUT an empty marker:
-        // the prefix is implicitly usable the moment a child key is written.
-        // Strict (false) keeps the base semantics so missing paths still
-        // throw DirectoryNotFoundException.
         protected override FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
         {
             if (createIfNotExists)
@@ -343,77 +323,17 @@ namespace FileHub.AmazonS3
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name) => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
+        // === Directory resolution (whole path in one request) ===
 
+        // Nullable handle for the internal callers (FileExists / Delete / ...).
+        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+            => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
+
+        // One PUT creates the whole path's marker.
         public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await CreateDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var existing = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                var intermediate = existing
-                    ?? await CreateDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
-                return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
-            }
-
-            var leaf = head ?? name;
-            var childPrefix = PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, leaf);
-
-            using (var empty = new MemoryStream())
-            {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0,
-                    new S3WriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
-            }
-            return new AmazonS3Directory(this, leaf);
-        }
-
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
-        {
-            directory = SyncBridge.Run(ct => TryOpenDirectoryCoreAsync(name, ct));
-            return directory != null;
-        }
-
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            var dir = await TryOpenDirectoryCoreAsync(name, cancellationToken).ConfigureAwait(false);
-            return (dir, dir != null);
-        }
-
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
-        {
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await TryOpenDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var childResult = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                if (childResult is AmazonS3Directory s3Child)
-                    return await s3Child.TryOpenDirectoryCoreAsync(rest, cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            var leaf = head ?? name;
-            try
-            {
-                PathUtil.ValidateName(leaf);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-
-            var childPrefix = PathUtil.CombinePrefix(_prefix, leaf);
-            if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-                return new AmazonS3Directory(this, leaf);
-            return null;
-        }
-
-        private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
-        {
-            var segments = PathUtil.SplitAndValidateSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(name);
             var fullPrefix = BuildNestedPrefix(segments);
             PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
@@ -425,23 +345,19 @@ namespace FileHub.AmazonS3
             return BuildDirectoryChain(segments);
         }
 
-        private async Task<FileDirectory> TryOpenDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        // One LIST proves the whole path exists.
+        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
-            try
-            {
-                segments = PathUtil.SplitAndValidateSegments(nestedName);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (ArgumentException) { return (null, false); }
+
             var fullPrefix = BuildNestedPrefix(segments);
             PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
-            if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
-                return BuildDirectoryChain(segments);
-            return null;
+            return await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false)
+                ? (BuildDirectoryChain(segments), true)
+                : (null, false);
         }
 
         private string BuildNestedPrefix(string[] segments)

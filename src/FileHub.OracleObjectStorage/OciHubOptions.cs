@@ -29,8 +29,6 @@ namespace FileHub.OracleObjectStorage
         /// <summary>Prefix inside the bucket that the hub treats as its root. Defaults to <c>""</c> (whole bucket).</summary>
         public string RootPath { get; init; } = "";
 
-        /// <summary>How nested-path operations descend. Defaults to <see cref="DirectoryPathMode.Direct"/> — cost-optimised for OCI.</summary>
-        public DirectoryPathMode PathMode { get; init; } = DirectoryPathMode.Direct;
 
         /// <summary>OCI region id (e.g. <c>"sa-saopaulo-1"</c>). Required with <see cref="Client"/>; optional with <see cref="Provider"/> (falls back to <c>provider.Region.RegionId</c>); optional with the config-file strategy (falls back to profile's region).</summary>
         public string RegionId { get; init; }
@@ -74,15 +72,13 @@ namespace FileHub.OracleObjectStorage
             string bucketName,
             string profile = "DEFAULT",
             string configFilePath = null,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new OciHubOptions
             {
                 BucketName = bucketName,
                 Profile = profile,
                 ConfigFilePath = configFilePath,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -96,15 +92,13 @@ namespace FileHub.OracleObjectStorage
             string bucketName,
             IAuthenticationDetailsProvider provider,
             string regionId,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new OciHubOptions
             {
                 BucketName = bucketName,
                 Provider = provider,
                 RegionId = regionId,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -115,14 +109,12 @@ namespace FileHub.OracleObjectStorage
         public static OciHubOptions FromProvider(
             string bucketName,
             ConfigFileAuthenticationDetailsProvider provider,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new OciHubOptions
             {
                 BucketName = bucketName,
                 Provider = provider,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
 
         /// <summary>
@@ -136,8 +128,7 @@ namespace FileHub.OracleObjectStorage
             ObjectStorageClient client,
             string regionId,
             string @namespace,
-            string rootPath = "",
-            DirectoryPathMode pathMode = DirectoryPathMode.Direct)
+            string rootPath = "")
             => new OciHubOptions
             {
                 BucketName = bucketName,
@@ -145,7 +136,6 @@ namespace FileHub.OracleObjectStorage
                 RegionId = regionId,
                 Namespace = @namespace,
                 RootPath = rootPath,
-                PathMode = pathMode,
             };
     }
 }

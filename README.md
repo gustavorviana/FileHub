@@ -28,7 +28,7 @@
 - **Sync + async on the same types** — async is the source of truth; sync delegates. Every call has a `CancellationToken` sibling.
 - **Sandboxed by default** — every hub has a root. `..`, absolute paths, and symlink escapes are rejected at the boundary.
 - **Read-only on demand** — `dir.AsReadOnly()` / `file.AsReadOnly()` wraps anything and blocks writes at runtime.
-- **Nested paths everywhere** — `"a/b/c.txt"` works on every driver. `/` and `\` interchangeable. Trailing separators tolerated. Cloud drivers collapse to a single API call via `DirectoryPathMode.Direct`.
+- **Nested paths everywhere** — `"a/b/c.txt"` works on every driver. `/` and `\` interchangeable. Trailing separators tolerated. Cloud drivers resolve the whole path in a single API call.
 - **DI-ready** — `AddFileHub` / `AddNamedFileHubs` with lifetime + `IServiceProvider` support for tenant scoping.
 - **Zero external deps in core** — multi-targets `netstandard2.0;net8.0`.
 
@@ -90,7 +90,7 @@ Full walkthrough: **[Quick Start wiki](FileHub.wiki/Quick-Start.md)**.
 | **Local** | `FileHub` (core) | `System.IO.File` | Sandboxed to a root path. |
 | **Memory** | `FileHub` (core) | In-process | Zero-disk, zero-setup. Great for tests. |
 | **Amazon S3** | `FileHub.AmazonS3` | AWS S3 General Purpose buckets | Lazy stubs, single-PUT writes. Directory buckets not supported. |
-| **Oracle OCI** | `FileHub.OracleObjectStorage` | OCI Object Storage | Cost-optimised; tunable `DirectoryPathMode`. |
+| **Oracle OCI** | `FileHub.OracleObjectStorage` | OCI Object Storage | Cost-optimised: single-request directory ops. |
 | **FTP** | `FileHub.Ftp` | FTP via FluentFTP | Plain FTP server. |
 | **Custom** | your assembly | anything | Implement two abstract classes — see [Custom drivers](FileHub.wiki/Custom-Drivers.md). |
 
