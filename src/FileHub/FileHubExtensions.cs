@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub
 {
@@ -44,7 +46,7 @@ namespace FileHub
         public override Stream GetWriteStream(FileWriteOptions options = null) { ThrowIfReadOnly(); return null; }
         public override void Delete() => ThrowIfReadOnly();
         public override FileEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null) { ThrowIfReadOnly(); return null; }
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true) { ThrowIfReadOnly(); return null; }
     }
 
     internal class ReadOnlyDirectoryWrapper : FileDirectory
@@ -67,6 +69,11 @@ namespace FileHub
         public override bool Exists() => _inner.Exists();
         public override bool FileExists(string name) => _inner.FileExists(name);
         public override bool DirectoryExists(string name) => _inner.DirectoryExists(name);
+        // Forward to inner so the driver's single-request Exists is preserved
+        // instead of the base two-probe fallback.
+        public override bool Exists(string name) => _inner.Exists(name);
+        public override Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
+            => _inner.ExistsAsync(name, cancellationToken);
 
         public override bool TryOpenFile(string name, out FileEntry file)
         {

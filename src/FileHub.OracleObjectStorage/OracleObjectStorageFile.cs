@@ -197,6 +197,12 @@ namespace FileHub.OracleObjectStorage
         {
             ThrowIfReadOnly();
             PathUtil.ValidateName(newName);
+
+            // Rename never overwrites — the server-side rename would replace an
+            // existing object silently, so guard with a HEAD. Best-effort.
+            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             var destinationObject = PathUtil.CombineKey(_parent.PrefixInternal, newName);
 
             await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
@@ -205,10 +211,10 @@ namespace FileHub.OracleObjectStorage
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -218,6 +224,10 @@ namespace FileHub.OracleObjectStorage
                 && string.Equals(ociDir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal))
             {
                 PathUtil.ValidateName(name);
+                // overwrite: false must not clobber an existing object — the
+                // server-side rename would replace it silently. Best-effort HEAD.
+                if (!overwrite && await ociDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
                 // Same rationale as CopyToAsync — load the source so the new
                 // file doesn't carry _length = -1.
                 if (!_isLoaded)
@@ -228,7 +238,7 @@ namespace FileHub.OracleObjectStorage
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -249,15 +259,18 @@ namespace FileHub.OracleObjectStorage
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
+                // overwrite: false must not clobber — CopyObject overwrites. HEAD first.
+                if (!overwrite && await ociDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look
                 // missing to any consumer that reads Length.
@@ -276,7 +289,7 @@ namespace FileHub.OracleObjectStorage
                 progress?.Report(new TransferStatus(_length, _length));
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
-            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
         // === FileWriteOptions / metadata-via-options surface ===

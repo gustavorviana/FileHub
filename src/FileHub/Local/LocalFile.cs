@@ -72,16 +72,34 @@ namespace FileHub.Local
             ThrowIfReadOnly();
             PathUtil.ValidateLocalName(newName);
             var newPath = ((LocalDirectory)Parent).ResolveSafeChildPath(newName);
-            File.Move(Path, newPath);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (File.Exists(newPath) || Directory.Exists(newPath))
+                throw new FileAlreadyExistsException(newPath);
+
+            try
+            {
+                File.Move(Path, newPath);
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions. A target that appeared
+                // between the check and the move surfaces as the library's
+                // conflict exception; anything else as a generic FileHubException.
+                if (File.Exists(newPath) || Directory.Exists(newPath))
+                    throw new FileAlreadyExistsException(newPath);
+                throw new FileHubException($"Failed to rename \"{Path}\" to \"{newName}\".", ex);
+            }
+
             Name = newName;
             _info = null;
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
         {
             ThrowIfReadOnly();
-            var newFile = CopyTo(directory, name, progress);
+            var newFile = CopyTo(directory, name, progress, overwrite);
             Delete();
             return newFile;
         }

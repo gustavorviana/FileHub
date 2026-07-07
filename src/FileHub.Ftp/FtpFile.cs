@@ -222,6 +222,11 @@ namespace FileHub.Ftp
             PathUtil.ValidateName(newName);
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
+            // Rename never overwrites — behaviour on an existing target is
+            // server-dependent, so check first and fail with a clear exception.
+            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             var destination = FtpPathUtil.ResolveSafeChildPath(_parent.RootPathInternal, _parent.PathInternal, newName);
             await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
 
@@ -229,10 +234,10 @@ namespace FileHub.Ftp
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -241,13 +246,18 @@ namespace FileHub.Ftp
             {
                 PathUtil.ValidateName(name);
                 await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+                // overwrite: false must not clobber an existing entry — many FTP
+                // servers reject RNTO onto an existing path anyway, but check
+                // explicitly so the failure is a clear FileAlreadyExistsException.
+                if (!overwrite && await ftpDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
                 progress?.Report(new TransferStatus(_length, _length));
                 return new FtpFile(ftpDir, name, _length, _lastWriteTimeUtc, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -268,8 +278,8 @@ namespace FileHub.Ftp
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
         /// <summary>
         /// FTP has no server-side copy command. When source and destination
@@ -281,12 +291,16 @@ namespace FileHub.Ftp
         /// Both legs stream in chunks; memory usage is constant regardless of
         /// file size. Cross-connection copies still stream directly.
         /// </summary>
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
+                // overwrite: false must not clobber the destination — the upload
+                // below (STOR) would replace it. Check before spilling to temp.
+                if (!overwrite && await ftpDir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
                 var tempPath = System.IO.Path.GetTempFileName();
                 try
                 {
@@ -310,7 +324,7 @@ namespace FileHub.Ftp
                 }
             }
 
-            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
         public override void Dispose()

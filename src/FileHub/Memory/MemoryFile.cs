@@ -70,6 +70,11 @@ namespace FileHub.Memory
         {
             ThrowIfReadOnly();
             ValidateName(newName);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (_parent != null && _parent.Exists(newName))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             _parent?.RemoveFile(Name);
             Name = newName;
             Data.Name = newName;
@@ -77,10 +82,10 @@ namespace FileHub.Memory
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
         {
             ThrowIfReadOnly();
-            var newFile = CopyTo(directory, name, progress);
+            var newFile = CopyTo(directory, name, progress, overwrite);
             Delete();
             return newFile;
         }

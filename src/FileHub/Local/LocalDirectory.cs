@@ -271,7 +271,22 @@ namespace FileHub.Local
 
             EnsureWithinRoot(newPath);
 
-            Directory.Move(Path, newPath);
+            // Rename never overwrites — a name already taken is an error.
+            if (Directory.Exists(newPath) || File.Exists(newPath))
+                throw new FileAlreadyExistsException(newPath);
+
+            try
+            {
+                Directory.Move(Path, newPath);
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions to callers.
+                if (Directory.Exists(newPath) || File.Exists(newPath))
+                    throw new FileAlreadyExistsException(newPath);
+                throw new FileHubException($"Failed to rename \"{Path}\" to \"{newName}\".", ex);
+            }
+
             return new LocalDirectory(newPath, RootPath, Parent, _pathMode);
         }
 
@@ -309,6 +324,15 @@ namespace FileHub.Local
         /// without duplicating the root-containment logic.
         /// </summary>
         internal string ResolveSafeChildPath(string childName) => ResolveSafePath(childName);
+
+        /// <summary>
+        /// Local paths use the OS-native separator, so combine with
+        /// <see cref="System.IO.Path"/> rather than the base <c>/</c> join.
+        /// (<c>Path.Combine</c> — <c>Path.Join</c> isn't available on
+        /// netstandard2.0 — is equivalent for a leaf name.)
+        /// </summary>
+        protected internal override string CombineChildPath(string name)
+            => System.IO.Path.Combine(Path, name);
 
         private DirectoryInfo RefreshInfo()
         {

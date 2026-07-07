@@ -195,6 +195,11 @@ namespace FileHub.Memory
         {
             ThrowIfReadOnly();
             ValidateName(newName);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (_parent != null && _parent.Exists(newName))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             _parent?.RemoveDirectory(Name);
             var renamed = new MemoryDirectory(newName, _parent, _pathMode);
             CopyContentsTo(this, renamed);

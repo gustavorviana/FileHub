@@ -54,6 +54,35 @@ namespace FileHub
         public abstract void Delete();
         public abstract void Delete(string name);
 
+        /// <summary>
+        /// Returns whether <em>anything</em> — a file or a directory — already
+        /// occupies <paramref name="name"/> in this directory. Prefer this over
+        /// calling <see cref="FileExists"/> and <see cref="DirectoryExists"/>
+        /// back to back: the base implementation does exactly that, but the
+        /// object-storage drivers (S3, OCI) override it to answer with a single
+        /// LIST request instead of two round-trips — the difference matters on a
+        /// billed, latency-bound backend.
+        /// </summary>
+        public virtual bool Exists(string name) => FileExists(name) || DirectoryExists(name);
+
+        /// <summary>Async sibling of <see cref="Exists(string)"/>.</summary>
+        public virtual async Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
+            => await FileExistsAsync(name, cancellationToken).ConfigureAwait(false)
+               || await DirectoryExistsAsync(name, cancellationToken).ConfigureAwait(false);
+
+        /// <summary>
+        /// Joins this directory's <see cref="FileSystemEntry.Path"/> with a child
+        /// <paramref name="name"/> into the full path a child entry would live at.
+        /// Base implementation uses the driver-neutral <c>/</c> separator, which
+        /// suits every store whose paths are logical keys (S3, OCI, FTP, memory).
+        /// The local filesystem driver overrides this to combine with the OS-native
+        /// separator via <see cref="System.IO.Path"/>. It's <c>protected internal</c>
+        /// so drivers can override the joining rule while sibling types in this
+        /// assembly (e.g. <see cref="FileEntry"/>) can build destination paths for
+        /// diagnostics.
+        /// </summary>
+        protected internal virtual string CombineChildPath(string name) => $"{Path}/{name}";
+
         // === Default implementations (drivers override for native paths) ===
 
         /// <summary>

@@ -217,6 +217,12 @@ namespace FileHub.AmazonS3
             // Always default COPY — source metadata is preserved on the new key.
             ThrowIfReadOnly();
             PathUtil.ValidateName(newName);
+
+            // Rename never overwrites — CopyObject would clobber an existing
+            // key, so guard with a HEAD. Best-effort, not atomic.
+            if (await _parent.FileExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+
             var sourceKey = ObjectKey;
             var destinationKey = PathUtil.CombineKey(_parent.PrefixInternal, newName);
             var client = SessionInternal.Client;
@@ -231,14 +237,14 @@ namespace FileHub.AmazonS3
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, ct));
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
-            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -308,15 +314,20 @@ namespace FileHub.AmazonS3
             };
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, ct));
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
+                // overwrite: false must not clobber an existing object. S3 PutObject
+                // (and CopyObject) always overwrite, so guard with an explicit HEAD.
+                // Best-effort — not atomic against a concurrent writer.
+                if (!overwrite && await s3Dir.FileExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException($"{s3Dir.Path}/{name}");
                 // Ensure we know the source size — without this, a stub created
                 // via OpenFile(name, createIfNotExists: true) that was never
                 // refreshed would propagate _length = -1 into the new file,
@@ -344,7 +355,7 @@ namespace FileHub.AmazonS3
                 progress?.Report(new TransferStatus(_length, _length));
                 return new AmazonS3File(s3Dir, name, _length, _lastWriteTimeUtc);
             }
-            return await base.CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
         // === IUrlAccessible ===

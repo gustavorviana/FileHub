@@ -20,7 +20,7 @@ namespace FileHub
         public abstract Stream GetWriteStream(FileWriteOptions options = null);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
-        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null);
+        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true);
 
         // === Sync convenience (implemented using streams) ===
 
@@ -105,11 +105,14 @@ namespace FileHub
             }
         }
 
-        public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null)
-            => CopyTo(Parent, newName, progress);
+        public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null, bool overwrite = true)
+            => CopyTo(Parent, newName, progress, overwrite);
 
-        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null)
+        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
         {
+            if (!overwrite && directory.Exists(name))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newFile = directory.CreateFile(name);
             using (var writeStream = newFile.GetWriteStream())
                 CopyToStream(writeStream, progress);
@@ -261,14 +264,18 @@ namespace FileHub
             return Task.CompletedTask;
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(string newName, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(string newName, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
-            return await CopyToAsync(Parent, newName, progress, cancellationToken).ConfigureAwait(false);
+            return await CopyToAsync(Parent, newName, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
             using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken).ConfigureAwait(false);
@@ -277,9 +284,9 @@ namespace FileHub
             return newFile;
         }
 
-        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
         {
-            var newFile = await CopyToAsync(directory, name, progress, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(cancellationToken).ConfigureAwait(false);
             return newFile;
         }
