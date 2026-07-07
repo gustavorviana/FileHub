@@ -229,9 +229,7 @@ namespace FileHub.Ftp
                 .OrderBy(i => i.Name, StringComparer.Ordinal);
 
             if (offset.IsNamed)
-                // Inclusive, matching FileDirectory/Local/Memory semantics:
-                // FromName("b.txt") starts AT "b.txt", not after it.
-                filtered = filtered.Where(i => string.CompareOrdinal(i.Name, offset.Name) >= 0);
+                filtered = filtered.Where(i => string.CompareOrdinal(i.Name, offset.Name) > 0);
 
             int skipped = 0;
             int yielded = 0;

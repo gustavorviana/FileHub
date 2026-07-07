@@ -44,7 +44,7 @@ namespace FileHub
             return ms.ToArray();
         }
 
-        public void SetText(string content, Encoding encoding = null, FileWriteOptions options = null)
+        public virtual void SetText(string content, Encoding encoding = null, FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
@@ -52,7 +52,7 @@ namespace FileHub
             stream.Write(bytes, 0, bytes.Length);
         }
 
-        public void SetBytes(byte[] buffer, FileWriteOptions options = null)
+        public virtual void SetBytes(byte[] buffer, FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
             if (buffer == null) throw new ArgumentNullException(nameof(buffer));

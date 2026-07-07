@@ -130,11 +130,13 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
         var firstTwoTxt = scope.GetFiles("*.txt", limit: 2).Select(f => f.Name).ToArray();
         Assert.Equal(new[] { "a.txt", "b.txt" }, firstTwoTxt);
 
+        // Named offset is an EXCLUSIVE cursor (matches S3 StartAfter / OCI):
+        // "b.txt" is the cursor, so results start strictly after it.
         var afterNamed = scope.GetFiles(offset: FileListOffset.FromName("b.txt"), limit: 10)
             .Select(f => f.Name).ToArray();
-        Assert.Contains("b.txt", afterNamed);
-        Assert.Contains("d.txt", afterNamed);
+        Assert.DoesNotContain("b.txt", afterNamed);
         Assert.DoesNotContain("a.txt", afterNamed);
+        Assert.Contains("d.txt", afterNamed);
     }
 
     [RequiresDockerFact]
@@ -287,13 +289,8 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
             a.SetBytesAsync(payloadA),
             b.SetBytesAsync(payloadB));
 
-        var freshA = scope.OpenFile("a.bin");
-        await ((IRefreshable)freshA).RefreshAsync();
-        var freshB = scope.OpenFile("b.bin");
-        await ((IRefreshable)freshB).RefreshAsync();
-        var readA = (await scope.OpenFile("a.bin").ReadAllBytesAsync()).Length;
-        var readB = (await scope.OpenFile("b.bin").ReadAllBytesAsync()).Length;
-        Assert.Fail($"DIAG serverA={freshA.Length} serverB={freshB.Length} readA={readA} readB={readB} expected={payloadA.Length}");
+        Assert.Equal(payloadA, scope.OpenFile("a.bin").ReadAllBytes());
+        Assert.Equal(payloadB, scope.OpenFile("b.bin").ReadAllBytes());
     }
 
     [RequiresDockerFact]

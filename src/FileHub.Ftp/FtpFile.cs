@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using FileHub.Ftp.Internal;
@@ -139,6 +140,66 @@ namespace FileHub.Ftp
             _lastWriteTimeUtc = DateTime.UtcNow;
             if (_creationTimeUtc == default)
                 _creationTimeUtc = _lastWriteTimeUtc;
+        }
+
+        // === Buffered writes: verify-and-retry ===
+
+        // A single FTP data transfer can silently drop its tail when the
+        // passive data channel lands on stale port state (observed as a 256 KiB
+        // upload landing as 192 KiB — exactly one 64 KiB socket block short).
+        // The truncation is non-deterministic and hits any transfer regardless
+        // of the write API (raw STOR or FluentFTP's high-level upload). Because
+        // SetBytes/SetText hold the whole payload in memory, the driver can read
+        // the stored size back and replay the STOR until it matches; the
+        // streaming GetWriteStream path cannot, since its source is consumed
+        // once. Constant memory: the caller's buffer is reused, never copied.
+        private const int MaxUploadAttempts = 4;
+
+        public override void SetBytes(byte[] buffer, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => SetBytesAsync(buffer, options, ct));
+
+        public override void SetText(string content, Encoding encoding = null, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => SetTextAsync(content, encoding, options, ct));
+
+        public override async Task SetTextAsync(string content, Encoding encoding = null, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (content == null) throw new ArgumentNullException(nameof(content));
+            var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
+            await SetBytesAsync(bytes, options, cancellationToken).ConfigureAwait(false);
+        }
+
+        public override async Task SetBytesAsync(byte[] buffer, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            cancellationToken.ThrowIfCancellationRequested();
+            await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            // The stream verifies the stored size on close and throws
+            // FtpTransferTruncatedException on a silent tail-truncation. Since
+            // the whole payload is in hand, replay the STOR when that happens.
+            // A retry that succeeds is a met guarantee, so it stays quiet — but
+            // if every attempt still loses the tail the exception is rethrown to
+            // the caller. Truncation is never swallowed: the caller either gets
+            // a fully-committed file or an exception, never a short file.
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    using (var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false))
+                    {
+                        await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+                    }
+                    return;
+                }
+                catch (FtpTransferTruncatedException)
+                {
+                    // Transient data-channel tail loss. Replay while attempts
+                    // remain; once they are exhausted, surface the failure.
+                    if (attempt >= MaxUploadAttempts) throw;
+                }
+            }
         }
 
         // === Mutations ===
