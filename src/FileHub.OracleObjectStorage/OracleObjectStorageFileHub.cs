@@ -56,6 +56,9 @@ namespace FileHub.OracleObjectStorage
 
             if (strategies > 1)
                 throw new ArgumentException("OciHubOptions accepts exactly one of Client, Provider, or (ConfigFilePath/Profile).", nameof(options));
+           
+            if (options.Client != null && options.RetryConfiguration != null)
+                throw new ArgumentException("RetryConfiguration only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));
 
             if (options.Client != null)
             {
@@ -97,7 +100,14 @@ namespace FileHub.OracleObjectStorage
                     : configProvider.Region.RegionId;
             }
 
-            var sdkClient = new ObjectStorageClient(provider, new ClientConfiguration());
+            // Retry comes from the consumer via options — the hub pins nothing.
+            // Null means the OCI SDK default: no automatic retries, every
+            // 429/5xx surfaces immediately. Per-call retryConfiguration stays
+            // null in RealOciClient, which falls back to this client-level one.
+            var sdkClient = new ObjectStorageClient(provider, new ClientConfiguration
+            {
+                RetryConfiguration = options.RetryConfiguration
+            });
             string @namespace;
             try
             {

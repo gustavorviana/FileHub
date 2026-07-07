@@ -49,15 +49,25 @@ namespace FileHub.Local
             File.Delete(Path);
         }
 
+        // 80 KB matches the copy-loop buffer in FileEntry, so each ReadAsync
+        // maps to a single overlapped I/O request.
+        private const int StreamBufferSize = 81920;
+
         public override Stream GetReadStream()
         {
-            return new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            // FileOptions.Asynchronous binds the handle to overlapped I/O so
+            // ReadAsync is truly asynchronous instead of a sync read queued on
+            // a thread-pool thread — without it, concurrent copies pin one
+            // pool thread each and starve the pool under load.
+            return new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
         }
 
         public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
-            return new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.None);
+            return new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.None,
+                StreamBufferSize, FileOptions.Asynchronous);
         }
 
         public override FileEntry Rename(string newName)

@@ -43,6 +43,18 @@ namespace FileHub.AmazonS3
         /// <summary>Externally-owned SDK client. Mutually exclusive with <see cref="Profile"/> and <see cref="Credentials"/>. Caller keeps ownership; hub disposal is a no-op on it.</summary>
         public IAmazonS3 Client { get; init; }
 
+        /// <summary>
+        /// SDK configuration (retry mode, timeouts, proxy, ...) for the client
+        /// the hub creates — i.e. with <see cref="Credentials"/> or
+        /// <see cref="Profile"/>. When null, plain SDK defaults apply; the hub
+        /// pins nothing. The resolved <see cref="Region"/> takes precedence
+        /// over any <c>RegionEndpoint</c> set here; leave <see cref="Region"/>
+        /// null to use this config's <c>RegionEndpoint</c>. Mutually exclusive
+        /// with <see cref="Client"/> — an external client already carries its
+        /// own configuration.
+        /// </summary>
+        public AmazonS3Config SdkConfig { get; init; }
+
         // === Typed factories: one per valid auth strategy ===
 
         /// <summary>

@@ -49,11 +49,11 @@ namespace FileHub.AmazonS3
             if (string.IsNullOrEmpty(options.BucketName))
                 throw new ArgumentException("BucketName cannot be null or empty.", nameof(options));
 
-            var strategies = (options.Client != null ? 1 : 0)
-                           + (options.Credentials != null ? 1 : 0)
-                           + (options.Profile != null ? 1 : 0);
-            if (strategies > 1)
+            if (options.Client != null && options.Credentials != null && options.Profile != null)
                 throw new ArgumentException("S3HubOptions accepts exactly one of Client, Credentials, or Profile.", nameof(options));
+            
+            if (options.Client != null && options.SdkConfig != null)
+                throw new ArgumentException("SdkConfig only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));
 
             if (options.Client != null)
             {
@@ -73,11 +73,14 @@ namespace FileHub.AmazonS3
 
             if (options.Credentials != null)
             {
-                if (string.IsNullOrEmpty(options.Region))
-                    throw new ArgumentException("Region is required when Credentials is provided.", nameof(options));
-                var sdkClient = new AmazonS3Client(options.Credentials, RegionEndpoint.GetBySystemName(options.Region));
+                var region = !string.IsNullOrEmpty(options.Region)
+                    ? options.Region
+                    : options.SdkConfig?.RegionEndpoint?.SystemName;
+                if (string.IsNullOrEmpty(region))
+                    throw new ArgumentException("Region is required when Credentials is provided (set Region or SdkConfig.RegionEndpoint).", nameof(options));
+                var sdkClient = new AmazonS3Client(options.Credentials, PrepareSdkConfig(options.SdkConfig, region));
                 return BuildAsync(
-                    new RealS3Client(sdkClient, options.BucketName, options.Region, ownsClient: true),
+                    new RealS3Client(sdkClient, options.BucketName, region, ownsClient: true),
                     options.RootPath, options.PathMode, cancellationToken);
             }
 
@@ -88,19 +91,41 @@ namespace FileHub.AmazonS3
                 throw new ArgumentException($"AWS profile \"{profile}\" not found in the local credential store.", nameof(options));
 
             string resolvedRegion = options.Region;
+            if (string.IsNullOrEmpty(resolvedRegion))
+                resolvedRegion = options.SdkConfig?.RegionEndpoint?.SystemName;
+
             if (string.IsNullOrEmpty(resolvedRegion)
                 && chain.TryGetProfile(profile, out var cp)
                 && cp.Region != null)
             {
                 resolvedRegion = cp.Region.SystemName;
             }
+
             if (string.IsNullOrEmpty(resolvedRegion))
                 throw new ArgumentException("Region is required when the profile does not carry one.", nameof(options));
 
-            var sdk = new AmazonS3Client(credsFromProfile, RegionEndpoint.GetBySystemName(resolvedRegion));
+            var sdk = new AmazonS3Client(credsFromProfile, PrepareSdkConfig(options.SdkConfig, resolvedRegion));
             return BuildAsync(
                 new RealS3Client(sdk, options.BucketName, resolvedRegion, ownsClient: true),
                 options.RootPath, options.PathMode, cancellationToken);
+        }
+
+        /// <summary>
+        /// Config for hub-owned SDK clients: the consumer-supplied
+        /// <see cref="S3HubOptions.SdkConfig"/> taken as-is (the hub pins
+        /// nothing — retry, timeouts, proxy all stay whatever the consumer or
+        /// the SDK defaults say), or a plain default config when none was
+        /// supplied. The resolved region is always assigned on top: the
+        /// <c>RegionEndpoint</c> getter falls back to the host environment
+        /// (<c>AWS_REGION</c>, profiles) when unset, so "fill only when
+        /// missing" cannot be detected reliably and an env region could
+        /// silently win over the resolved one.
+        /// </summary>
+        private static AmazonS3Config PrepareSdkConfig(AmazonS3Config supplied, string region)
+        {
+            var config = supplied ?? new AmazonS3Config();
+            config.RegionEndpoint = RegionEndpoint.GetBySystemName(region);
+            return config;
         }
 
         // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===

@@ -1,4 +1,5 @@
 using Oci.Common.Auth;
+using Oci.Common.Retry;
 using Oci.ObjectstorageService;
 
 namespace FileHub.OracleObjectStorage
@@ -48,6 +49,17 @@ namespace FileHub.OracleObjectStorage
 
         /// <summary>Externally-owned SDK client. Mutually exclusive with <see cref="Provider"/> and the config-file pair. Caller keeps ownership; hub disposal is a no-op on it.</summary>
         public ObjectStorageClient Client { get; init; }
+
+        /// <summary>
+        /// Retry strategy for the SDK client the hub creates — i.e. with the
+        /// config-file pair or <see cref="Provider"/>. When null, the OCI SDK
+        /// default applies: no automatic retries. Pass
+        /// <c>RetryConfiguration.DefaultRetryConfiguration</c> to enable the
+        /// SDK's standard backoff on 429/5xx. Mutually exclusive with
+        /// <see cref="Client"/> — an external client already carries its own
+        /// configuration.
+        /// </summary>
+        public RetryConfiguration RetryConfiguration { get; init; }
 
         // === Typed factories: one per valid auth strategy ===
 

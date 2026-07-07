@@ -29,6 +29,31 @@ public class OracleObjectStorageFileHubTests
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task CreateAsync_ClientWithRetryConfiguration_Throws()
+    {
+        var provider = new Oci.Common.Auth.SimpleAuthenticationDetailsProvider
+        {
+            TenantId = "ocid1.tenancy.oc1..fake",
+            UserId = "ocid1.user.oc1..fake",
+            Fingerprint = "aa:bb",
+            Region = Oci.Common.Region.SA_SAOPAULO_1,
+        };
+        using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
+        var options = new OciHubOptions
+        {
+            BucketName = "bucket",
+            Client = sdkClient,
+            RegionId = "sa-saopaulo-1",
+            Namespace = "ns",
+            RetryConfiguration = new Oci.Common.Retry.RetryConfiguration(),
+        };
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => OracleObjectStorageFileHub.CreateAsync(options));
+        Assert.Contains("RetryConfiguration", ex.Message);
+    }
+
+    [Fact]
     public void Dispose_OwnsClient_DisposesIt()
     {
         var fake = new InMemoryOciClient();
