@@ -175,8 +175,19 @@ namespace FileHub
             cancellationToken.ThrowIfCancellationRequested();
             var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
 
-            using var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+            var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+#if NET8_0_OR_GREATER
+                await stream.DisposeAsync().ConfigureAwait(false);
+#else
+                stream.Dispose();
+#endif
+            }
         }
 
         public virtual async Task SetBytesAsync(byte[] buffer, FileWriteOptions options = null, CancellationToken cancellationToken = default)
@@ -185,8 +196,19 @@ namespace FileHub
             if (buffer == null) throw new ArgumentNullException(nameof(buffer));
             cancellationToken.ThrowIfCancellationRequested();
 
-            using var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
-            await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+#if NET8_0_OR_GREATER
+                await stream.DisposeAsync().ConfigureAwait(false);
+#else
+                stream.Dispose();
+#endif
+            }
         }
 
         // === Metadata access (new API) ===
@@ -227,16 +249,26 @@ namespace FileHub
             int bytesRead;
             long transferred = 0;
 
-            using var destination = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+            var destination = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
+            try
             {
-                await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
-                if (progress != null)
+                while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
                 {
-                    transferred += bytesRead;
-                    progress.Report(new TransferStatus(transferred, total));
+                    await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
+                    if (progress != null)
+                    {
+                        transferred += bytesRead;
+                        progress.Report(new TransferStatus(transferred, total));
+                    }
                 }
+            }
+            finally
+            {
+#if NET8_0_OR_GREATER
+                await destination.DisposeAsync().ConfigureAwait(false);
+#else
+                destination.Dispose();
+#endif
             }
         }
 
@@ -288,8 +320,19 @@ namespace FileHub
 
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
-            using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken: cancellationToken).ConfigureAwait(false);
-            await CopyToStreamAsync(writeStream, progress, cancellationToken).ConfigureAwait(false);
+            var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken: cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await CopyToStreamAsync(writeStream, progress, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+#if NET8_0_OR_GREATER
+                await writeStream.DisposeAsync().ConfigureAwait(false);
+#else
+                writeStream.Dispose();
+#endif
+            }
 
             return newFile;
         }
