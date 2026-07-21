@@ -1,5 +1,5 @@
-using System.Text;
 using FileHub.AmazonS3.Tests.Fakes;
+using System.Text;
 
 namespace FileHub.AmazonS3.Tests;
 

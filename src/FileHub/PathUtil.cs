@@ -65,7 +65,7 @@ namespace FileHub
         {
             if (string.IsNullOrEmpty(nestedName))
                 throw new ArgumentException("Name cannot be null or empty.", nameof(nestedName));
-                
+
             if (nestedName[0] == '/' || nestedName[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed; \"{nestedName}\" must be relative.");
 

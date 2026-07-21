@@ -1,9 +1,9 @@
+using FileHub.AmazonS3.Internal;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
@@ -180,7 +180,7 @@ namespace FileHub.AmazonS3
         {
             if (_nextPartNumber > MaximumPartCount)
                 throw new FileHubException($"S3 multipart upload exceeded the {MaximumPartCount:N0}-part limit. Increase MultipartStreamOptions.PartSize.");
-                
+
             _buffer.Position = 0;
             var len = _buffer.Length;
             var client = _file.SessionInternal.Client;

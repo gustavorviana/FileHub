@@ -29,20 +29,20 @@ public class NamedFileHubTests
         services.AddNamedFileHubs(builder =>
         {
             builder.Register("uploads", new MemoryFileHub("uploads-root"));
-            builder.Register("logs",    new MemoryFileHub("logs-root"));
+            builder.Register("logs", new MemoryFileHub("logs-root"));
         });
 
         using var provider = services.BuildServiceProvider();
         var registry = provider.GetRequiredService<INamedFileHubs>();
 
         var uploads = registry.GetByName("uploads");
-        var logs    = registry.GetByName("logs");
+        var logs = registry.GetByName("logs");
 
         Assert.NotNull(uploads);
         Assert.NotNull(logs);
         Assert.NotSame(uploads, logs);
         Assert.Equal("uploads-root", uploads.Root.Name);
-        Assert.Equal("logs-root",    logs.Root.Name);
+        Assert.Equal("logs-root", logs.Root.Name);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class NamedFileHubTests
     [Fact]
     public void Builder_Register_SameNameTwice_OverwritesEarlier()
     {
-        var first  = new MemoryFileHub("first");
+        var first = new MemoryFileHub("first");
         var second = new MemoryFileHub("second");
 
         var services = new ServiceCollection();
@@ -164,9 +164,9 @@ public class NamedFileHubTests
         services.AddNamedFileHubs(b => b.Register("scratch", new MemoryFileHub("scratch-root")));
 
         using var provider = services.BuildServiceProvider();
-        var def      = provider.GetRequiredService<IMemoryFileHub>();
+        var def = provider.GetRequiredService<IMemoryFileHub>();
         var registry = provider.GetRequiredService<INamedFileHubs>();
-        var scratch  = registry.GetByName("scratch");
+        var scratch = registry.GetByName("scratch");
 
         Assert.NotNull(scratch);
         Assert.NotSame(def, scratch);
@@ -190,11 +190,11 @@ public class NamedFileHubTests
         // Core NamedFileHubsBuilder remains available for non-DI usage.
         var hubs = new NamedFileHubsBuilder()
             .Register("reports", new MemoryFileHub("reports-root"))
-            .Register("logs",    new MemoryFileHub("logs-root"))
+            .Register("logs", new MemoryFileHub("logs-root"))
             .Build();
 
         Assert.Equal("reports-root", hubs.GetRootByName("reports").Name);
-        Assert.Equal("logs-root",    hubs.GetRootByName("logs").Name);
+        Assert.Equal("logs-root", hubs.GetRootByName("logs").Name);
         Assert.Null(hubs.GetByName("nope"));
     }
 

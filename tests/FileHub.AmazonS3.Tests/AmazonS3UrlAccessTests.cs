@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using FileHub.AmazonS3.Tests.Fakes;
 
 namespace FileHub.AmazonS3.Tests;

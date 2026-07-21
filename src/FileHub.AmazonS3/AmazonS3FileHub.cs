@@ -1,11 +1,11 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Amazon;
 using Amazon.Runtime;
 using Amazon.Runtime.CredentialManagement;
 using Amazon.S3;
 using FileHub.AmazonS3.Internal;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.AmazonS3
 {
@@ -297,7 +297,7 @@ namespace FileHub.AmazonS3
 
             if (multipart.PartSize < AmazonS3File.S3MinimumPartSize || multipart.PartSize > int.MaxValue)
                 throw new ArgumentOutOfRangeException(parameterName, $"MultipartPartSize must be between {AmazonS3File.S3MinimumPartSize} and {int.MaxValue} bytes for the in-memory stream implementation.");
-                
+
             if (multipart.Threshold > multipart.PartSize)
                 throw new ArgumentException("MultipartThreshold cannot exceed MultipartPartSize.", parameterName);
         }

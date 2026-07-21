@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3.Tests.Fakes;

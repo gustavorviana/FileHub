@@ -1,10 +1,10 @@
+using FileHub.AmazonS3.Internal;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
@@ -577,7 +577,7 @@ namespace FileHub.AmazonS3
                 cancellationToken).ConfigureAwait(false);
             return new Uri(url);
         }
-        
+
         private string ResolveLeafKey(string name)
         {
             // Walk the path through SplitPath to validate each segment (rejects

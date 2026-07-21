@@ -1,5 +1,5 @@
-using System.Text;
 using FileHub.Ftp.Tests.Fakes;
+using System.Text;
 
 namespace FileHub.Ftp.Tests;
 

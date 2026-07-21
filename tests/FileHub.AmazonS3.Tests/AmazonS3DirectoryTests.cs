@@ -1,4 +1,3 @@
-using System.Linq;
 using FileHub.AmazonS3.Tests.Fakes;
 
 namespace FileHub.AmazonS3.Tests;

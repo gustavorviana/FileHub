@@ -1,6 +1,5 @@
 using FileHub.OracleObjectStorage.Internal;
 using Oci.ObjectstorageService.Models;
-using System.Net.NetworkInformation;
 
 namespace FileHub.OracleObjectStorage.Tests.Fakes;
 

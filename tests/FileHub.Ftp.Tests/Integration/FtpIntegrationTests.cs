@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace FileHub.Ftp.Tests.Integration;
 
@@ -19,9 +18,9 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
 
     private Task<FtpFileHub> NewHubAsync() =>
         FtpFileHub.ConnectAsync(
-            host:     _ftp.Host,
-            port:     _ftp.Port,
-            user:     FtpServerFixture.User,
+            host: _ftp.Host,
+            port: _ftp.Port,
+            user: FtpServerFixture.User,
             password: FtpServerFixture.Password,
             rootPath: "/");
 

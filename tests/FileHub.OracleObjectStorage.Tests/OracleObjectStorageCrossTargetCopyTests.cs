@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using FileHub;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 
 namespace FileHub.OracleObjectStorage.Tests;
@@ -11,7 +7,7 @@ public class OracleObjectStorageCrossTargetCopyTests
     private static (OracleObjectStorageFileHub hubA, InMemoryOciClient clientA,
                     OracleObjectStorageFileHub hubB, InMemoryOciClient clientB)
         SharedWorldHubs(string nsA = "acct-ns", string bucketA = "alpha", string regionA = "us-test-1",
-                        string nsB = "acct-ns", string bucketB = "beta",  string regionB = "us-test-1")
+                        string nsB = "acct-ns", string bucketB = "beta", string regionB = "us-test-1")
     {
         var world = new InMemoryOciWorld();
         var clientA = world.CreateClient(nsA, bucketA, regionA);
@@ -41,7 +37,7 @@ public class OracleObjectStorageCrossTargetCopyTests
     {
         var (hubA, clientA, hubB, clientB) = SharedWorldHubs(
             regionA: "us-ashburn-1", regionB: "eu-frankfurt-1",
-            bucketA: "src-bucket",   bucketB: "dst-bucket");
+            bucketA: "src-bucket", bucketB: "dst-bucket");
 
         hubA.Root.CreateFile("r.txt").SetText("cross-region");
 

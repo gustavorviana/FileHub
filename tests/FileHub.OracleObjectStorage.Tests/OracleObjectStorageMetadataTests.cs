@@ -1,7 +1,3 @@
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using FileHub.OracleObjectStorage.Tests.Fakes;
-
 namespace FileHub.OracleObjectStorage.Tests;
 
 public class OracleObjectStorageMetadataTests : IClassFixture<InMemoryOciFixture>

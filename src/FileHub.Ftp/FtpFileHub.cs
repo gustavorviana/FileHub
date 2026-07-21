@@ -1,9 +1,9 @@
+using FileHub.Ftp.Internal;
+using FluentFTP;
 using System;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.Ftp.Internal;
-using FluentFTP;
 
 namespace FileHub.Ftp
 {

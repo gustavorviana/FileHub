@@ -1,11 +1,11 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
 using Oci.Common;
 using Oci.Common.Auth;
 using Oci.ObjectstorageService;
 using Oci.ObjectstorageService.Requests;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.OracleObjectStorage
 {

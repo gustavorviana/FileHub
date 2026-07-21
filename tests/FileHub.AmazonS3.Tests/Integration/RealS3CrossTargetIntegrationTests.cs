@@ -1,4 +1,3 @@
-using System;
 using System.Text;
 
 namespace FileHub.AmazonS3.Tests.Integration;

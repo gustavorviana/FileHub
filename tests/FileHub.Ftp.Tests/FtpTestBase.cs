@@ -1,4 +1,3 @@
-using System;
 using FileHub.Ftp.Tests.Fakes;
 
 namespace FileHub.Ftp.Tests;
