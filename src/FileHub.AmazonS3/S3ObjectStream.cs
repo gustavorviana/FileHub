@@ -7,14 +7,16 @@ using FileHub.AmazonS3.Internal;
 namespace FileHub.AmazonS3
 {
     /// <summary>
-    /// Stream backed by an S3 object. Supports chunked reads (10 MB per
-    /// range request). Writes are buffered locally up to the S3 minimum
-    /// part size (5 MiB); beyond that the stream transparently spills into
-    /// a multipart upload and keeps memory usage constant, so any payload
-    /// size is safe through every write path. Small payloads commit as a
-    /// single <c>PutObject</c> on <see cref="Flush"/> / <see cref="FlushAsync"/>
-    /// or dispose; spilled payloads commit on dispose (S3 cannot append,
-    /// so a mid-stream flush cannot materialize a partial object).
+    /// Write stream over an S3 object. Bytes are buffered locally up to the
+    /// S3 minimum part size (5 MiB); beyond that the stream transparently
+    /// spills into a multipart upload and keeps memory usage constant, so
+    /// any payload size is safe through every write path. Small payloads
+    /// commit as a single <c>PutObject</c> on <see cref="Flush"/> /
+    /// <see cref="FlushAsync"/> or dispose; spilled payloads commit on
+    /// dispose (S3 cannot append, so a mid-stream flush cannot materialize
+    /// a partial object). <see cref="WriteStreamPreference"/> overrides the
+    /// strategy: <c>Multipart</c> spills on the first written byte,
+    /// <c>Single</c> never spills.
     /// <para>
     /// Dispose contract: like <see cref="FileStream"/>, disposing a dirty
     /// stream commits the write, and a failed commit propagates out of
@@ -24,15 +26,12 @@ namespace FileHub.AmazonS3
     /// should call <see cref="Flush"/> / <see cref="FlushAsync"/> first.
     /// </para>
     /// </summary>
-    internal sealed class S3ObjectStream : Stream
+    internal sealed class S3ObjectStream : S3FileStreamBase
     {
-        internal const int BufferSize = 10 * 1024 * 1024;
-
         private readonly AmazonS3File _file;
         private readonly S3WriteOptions _options;
-        private readonly MemoryStream _writeBuffer;
-        private readonly bool _isWrite;
-        private long _position;
+        private readonly WriteStreamPreference _preference;
+        private readonly MemoryStream _writeBuffer = new();
         private bool _hasUnflushedWrites;
         private bool _disposed;
         // Non-null once writes crossed the 5 MiB spill threshold: from then
@@ -42,42 +41,27 @@ namespace FileHub.AmazonS3
         private Stream _multipart;
         private long _spilledTotal;
 
-        public event EventHandler Disposed;
-
-        public S3ObjectStream(AmazonS3File file, bool isWrite, S3WriteOptions options = null)
+        public S3ObjectStream(AmazonS3File file, S3WriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
-            _isWrite = isWrite;
             _options = options;
-            _writeBuffer = isWrite ? new MemoryStream() : null;
-            CanRead = !isWrite;
-            CanWrite = isWrite;
+            _preference = preference;
         }
 
-        public override bool CanRead { get; }
-        public override bool CanSeek => CanRead;
-        public override bool CanWrite { get; }
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
 
-        public override long Length =>
-            _isWrite
-                ? (_multipart != null ? _spilledTotal : _writeBuffer.Length)
-                : _file.LengthInternal;
+        public override long Length => _multipart != null ? _spilledTotal : _writeBuffer.Length;
 
         public override long Position
         {
-            get => _isWrite
-                ? (_multipart != null ? _spilledTotal : _writeBuffer.Position)
-                : _position;
+            get => _multipart != null ? _spilledTotal : _writeBuffer.Position;
             set
             {
-                if (_isWrite)
-                {
-                    if (_multipart != null)
-                        throw new NotSupportedException("Seeking is not supported after the stream spilled to multipart.");
-                    _writeBuffer.Position = value;
-                    return;
-                }
-                Seek(value, SeekOrigin.Begin);
+                if (_multipart != null)
+                    throw new NotSupportedException("Seeking is not supported after the stream spilled to multipart.");
+                _writeBuffer.Position = value;
             }
         }
 
@@ -85,7 +69,7 @@ namespace FileHub.AmazonS3
 
         public override async Task FlushAsync(CancellationToken cancellationToken)
         {
-            if (!CanWrite || !_hasUnflushedWrites) return;
+            if (!_hasUnflushedWrites) return;
             // Spilled: parts upload as their buffers roll over; the object can
             // only materialize at CompleteMultipartUpload (dispose) — S3 has
             // no append, so a mid-stream flush has nothing more to commit.
@@ -94,63 +78,11 @@ namespace FileHub.AmazonS3
             _hasUnflushedWrites = false;
         }
 
-        public override int Read(byte[] buffer, int offset, int count)
-            => SyncBridge.Run(ct => ReadAsync(buffer, offset, count, ct));
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
-        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            ThrowIfDisposed();
-            if (!CanRead) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
-            if (count == 0 || _position >= Length) return 0;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new NotSupportedException();
 
-            int bytesRead = 0;
-            var client = _file.SessionInternal.Client;
-
-            while (bytesRead < count && _position < Length && !_disposed)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int chunkLen = (int)Math.Min(
-                    Math.Min(BufferSize, Length - _position),
-                    count - bytesRead);
-                long endByte = _position + chunkLen - 1;
-
-                var getResult = await client.GetObjectAsync(_file.ObjectKey, _position, endByte, cancellationToken).ConfigureAwait(false);
-
-                using (var source = getResult.InputStream)
-                {
-                    int inChunk = await FillFromSourceAsync(source, buffer, offset + bytesRead, chunkLen, cancellationToken).ConfigureAwait(false);
-                    if (inChunk == 0) break;
-                    _position += inChunk;
-                    bytesRead += inChunk;
-                }
-            }
-
-            return bytesRead;
-        }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            ThrowIfDisposed();
-            if (!CanSeek) throw new NotSupportedException();
-
-            long newPosition = origin switch
-            {
-                SeekOrigin.Begin => offset,
-                SeekOrigin.Current => _position + offset,
-                SeekOrigin.End => Length + offset,
-                _ => throw new ArgumentException("Invalid seek origin.", nameof(origin)),
-            };
-
-            if (newPosition < 0)
-                throw new IOException("Seek resulted in a negative position.");
-            if (newPosition > Length)
-                throw new IOException("Seek past end of stream.");
-
-            _position = newPosition;
-            return _position;
-        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
         public override void SetLength(long value) => throw new NotSupportedException();
 
@@ -160,11 +92,17 @@ namespace FileHub.AmazonS3
         public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            if (!CanWrite) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
+            ValidateWriteArgs(buffer, offset, count);
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (_multipart == null && _writeBuffer.Length + count > AmazonS3File.S3MinimumPartSize)
+            // Multipart preference: spill on the first written byte, skipping
+            // the buffering phase entirely. Single: never spill — the caller
+            // opted into buffering the whole payload for one PutObject. Auto:
+            // spill once the payload outgrows the part-size threshold.
+            if (_multipart == null
+                && _preference != WriteStreamPreference.Single
+                && (_preference == WriteStreamPreference.Multipart
+                    || _writeBuffer.Length + count > AmazonS3File.S3MinimumPartSize))
                 await SpillToMultipartAsync(cancellationToken).ConfigureAwait(false);
 
             if (_multipart != null)
@@ -232,8 +170,8 @@ namespace FileHub.AmazonS3
                     // — otherwise the file is permanently locked from
                     // opening another stream.
                     _disposed = true;
-                    Disposed?.Invoke(this, EventArgs.Empty);
-                    try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                    RaiseDisposed();
+                    try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
                 }
             }
             else
@@ -243,7 +181,7 @@ namespace FileHub.AmazonS3
                 // latch clears. Any unflushed writes in _writeBuffer are lost
                 // (documented: callers must Dispose explicitly to flush).
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
+                RaiseDisposed();
             }
 
             base.Dispose(disposing);
@@ -266,8 +204,8 @@ namespace FileHub.AmazonS3
             finally
             {
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
-                try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                RaiseDisposed();
+                try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
             }
 
             await base.DisposeAsync().ConfigureAwait(false);
@@ -289,19 +227,7 @@ namespace FileHub.AmazonS3
             _file.OnWriteCommitted(_writeBuffer.Length, _options);
         }
 
-        private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            int total = 0;
-            while (total < count)
-            {
-                int got = await source.ReadAsync(buffer, offset + total, count - total, cancellationToken).ConfigureAwait(false);
-                if (got == 0) break;
-                total += got;
-            }
-            return total;
-        }
-
-        private static void ValidateReadWriteArgs(byte[] buffer, int offset, int count)
+        private static void ValidateWriteArgs(byte[] buffer, int offset, int count)
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
             if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));

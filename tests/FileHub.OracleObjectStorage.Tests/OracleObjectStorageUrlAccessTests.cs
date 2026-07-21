@@ -57,7 +57,7 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         var url = await file.GetSignedUrlAsync(TimeSpan.FromMinutes(5));
 
         // The fake produces /p/{parName}/n/{ns}/b/{bucket}/o/{encoded}
-        Assert.Contains("/p/filehub-", url.ToString());
+        Assert.Contains("/p/signed.txt", url.ToString());
         Assert.Contains("/n/test-ns/", url.ToString());
         Assert.Contains("/b/test-bucket/", url.ToString());
         Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "signed.txt"));

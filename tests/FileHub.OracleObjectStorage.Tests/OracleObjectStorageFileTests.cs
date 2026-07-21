@@ -42,7 +42,7 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
     {
         var scope = Scope(nameof(LargeUpload_ReadChunked_Exercises10MbBoundary));
 
-        // 25 MB crosses both 10 MB chunk boundaries in OciObjectStream.
+        // 25 MB crosses both 10 MB chunk boundaries in OciReadStream.
         var payload = new byte[25 * 1024 * 1024];
         RandomNumberGenerator.Fill(payload);
         var expectedHash = SHA256.HashData(payload);

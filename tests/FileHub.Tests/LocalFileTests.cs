@@ -346,7 +346,7 @@ public class LocalFileTests
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.bin");
-        var payload = Payload(200_000);
+        var payload = Payload(FileEntry.ReadBufferSize * 2 + 1);
         file.SetBytes(payload);
         var progress = new ProgressCollector();
 
@@ -364,7 +364,7 @@ public class LocalFileTests
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.bin");
-        var payload = Payload(200_000);
+        var payload = Payload(FileEntry.ReadBufferSize * 2 + 1);
         file.SetBytes(payload);
         var dst = root.CreateDirectory("dst");
         var progress = new ProgressCollector();

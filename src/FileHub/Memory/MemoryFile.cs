@@ -48,7 +48,9 @@ namespace FileHub.Memory
             }
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null)
+        // preference is ignored: the payload lives in process memory either
+        // way, so there is no single-request vs multipart distinction.
+        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             ThrowIfReadOnly();
             Data.ApplyOptions(options);

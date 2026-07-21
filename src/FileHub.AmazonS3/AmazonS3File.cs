@@ -34,7 +34,7 @@ namespace FileHub.AmazonS3
         private DateTime _lastWriteTimeUtc;
         private bool _isLoaded;
         private AmazonS3FileMetadata _metadata = new AmazonS3FileMetadata();
-        private S3ObjectStream _lastOpenStream;
+        private S3FileStreamBase _lastOpenStream;
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from the
@@ -143,25 +143,42 @@ namespace FileHub.AmazonS3
 
         // === Streams ===
 
-        public override Stream GetReadStream() => OpenStream(isWrite: false);
+        public override Stream GetReadStream()
+        {
+            ThrowIfStreamOpen();
+            return Track(new S3ReadStream(this));
+        }
 
         public override Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: false));
+            ThrowIfStreamOpen();
+            return Task.FromResult<Stream>(Track(new S3ReadStream(this)));
         }
 
-        private S3ObjectStream OpenStream(bool isWrite, S3WriteOptions options = null)
+        private S3ObjectStream OpenWriteStream(S3WriteOptions options, WriteStreamPreference preference)
+        {
+            ThrowIfStreamOpen();
+            return Track(new S3ObjectStream(this, options, preference));
+        }
+
+        /// <summary>
+        /// Registers a freshly created stream in the "one stream open per
+        /// file" latch. The latch clears when the stream raises Disposed.
+        /// </summary>
+        private T Track<T>(T stream) where T : S3FileStreamBase
+        {
+            _lastOpenStream = stream;
+            stream.Disposed += OnStreamDisposed;
+            return stream;
+        }
+
+        private void ThrowIfStreamOpen()
         {
             if (Disposed)
                 throw new ObjectDisposedException(nameof(AmazonS3File));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
-
-            var stream = new S3ObjectStream(this, isWrite, options);
-            _lastOpenStream = stream;
-            stream.Disposed += OnStreamDisposed;
-            return stream;
         }
 
         private void OnStreamDisposed(object sender, EventArgs e)
@@ -283,19 +300,24 @@ namespace FileHub.AmazonS3
         /// <summary>
         /// Open a write stream whose commit applies <paramref name="options"/>
         /// on <c>PutObject</c>. Options live with the stream — no cross-call
-        /// staging on the file.
+        /// staging on the file. <paramref name="preference"/> selects the
+        /// commit strategy: <see cref="WriteStreamPreference.Multipart"/>
+        /// skips the buffering phase and opens the multipart upload on the
+        /// first written byte; <see cref="WriteStreamPreference.Single"/>
+        /// never spills — the whole payload buffers in memory and commits as
+        /// one <c>PutObject</c>.
         /// </summary>
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: true, NormalizeOptions(options)));
+            return Task.FromResult<Stream>(OpenWriteStream(NormalizeOptions(options), preference));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null)
+        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             ThrowIfReadOnly();
-            return OpenStream(isWrite: true, NormalizeOptions(options));
+            return OpenWriteStream(NormalizeOptions(options), preference);
         }
 
         /// <summary>

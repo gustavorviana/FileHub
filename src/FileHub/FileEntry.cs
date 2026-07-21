@@ -8,6 +8,9 @@ namespace FileHub
 {
     public abstract class FileEntry : FileSystemEntry
     {
+        /// <summary>Read buffer size.</summary>
+        internal const int ReadBufferSize = 1024 * 1024; // 1 MiB
+
         public virtual string Extension => System.IO.Path.GetExtension(Name);
         public abstract long Length { get; }
         public abstract FileDirectory Parent { get; }
@@ -17,7 +20,13 @@ namespace FileHub
         // === Sync abstract (drivers implement) ===
 
         public abstract Stream GetReadStream();
-        public abstract Stream GetWriteStream(FileWriteOptions options = null);
+
+        /// <summary>
+        /// Opens a write stream. <paramref name="preference"/> hints how the
+        /// stream should commit — see <see cref="WriteStreamPreference"/>;
+        /// drivers without multipart support ignore it silently.
+        /// </summary>
+        public abstract Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true);
@@ -65,7 +74,7 @@ namespace FileHub
             if (destination == null) throw new ArgumentNullException(nameof(destination));
             if (!destination.CanWrite) throw new NotSupportedException("The destination stream does not support writing.");
 
-            var buffer = new byte[81920];
+            var buffer = new byte[ReadBufferSize];
             var total = progress != null ? Length : 0;
             long transferred = 0;
             int bytesRead;
@@ -87,7 +96,7 @@ namespace FileHub
             if (!source.CanRead) throw new NotSupportedException("The source stream does not support reading.");
 
             ThrowIfReadOnly();
-            var buffer = new byte[81920];
+            var buffer = new byte[ReadBufferSize];
             var total = progress != null ? source.Length : 0;
             long transferred = 0;
             int bytesRead;
@@ -127,10 +136,11 @@ namespace FileHub
             return Task.FromResult(GetReadStream());
         }
 
-        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        /// <summary>Async version of <see cref="GetWriteStream(FileWriteOptions, WriteStreamPreference)"/>.</summary>
+        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(GetWriteStream(options));
+            return Task.FromResult(GetWriteStream(options, preference));
         }
 
         public virtual async Task<string> ReadAllTextAsync(CancellationToken cancellationToken = default)
@@ -155,7 +165,7 @@ namespace FileHub
             using var stream = await GetReadStreamAsync(cancellationToken).ConfigureAwait(false);
             using var ms = new MemoryStream();
 
-            await stream.CopyToAsync(ms, 81920, cancellationToken).ConfigureAwait(false);
+            await stream.CopyToAsync(ms, ReadBufferSize, cancellationToken).ConfigureAwait(false);
             return ms.ToArray();
         }
 
@@ -165,7 +175,7 @@ namespace FileHub
             cancellationToken.ThrowIfCancellationRequested();
             var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
 
-            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            using var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
             await stream.WriteAsync(bytes, 0, bytes.Length, cancellationToken).ConfigureAwait(false);
         }
 
@@ -175,7 +185,7 @@ namespace FileHub
             if (buffer == null) throw new ArgumentNullException(nameof(buffer));
             cancellationToken.ThrowIfCancellationRequested();
 
-            using var stream = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            using var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
             await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
         }
 
@@ -213,11 +223,11 @@ namespace FileHub
 
             ThrowIfReadOnly();
             var total = progress != null ? source.Length : 0;
-            var buffer = new byte[81920];
+            var buffer = new byte[ReadBufferSize];
             int bytesRead;
             long transferred = 0;
 
-            using var destination = await GetWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
+            using var destination = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             while ((bytesRead = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
             {
@@ -241,13 +251,13 @@ namespace FileHub
             using var source = await GetReadStreamAsync(cancellationToken).ConfigureAwait(false);
             if (progress == null)
             {
-                await source.CopyToAsync(destination, 81920, cancellationToken).ConfigureAwait(false);
+                await source.CopyToAsync(destination, ReadBufferSize, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             var total = Length;
             long transferred = 0;
-            var buffer = new byte[81920];
+            var buffer = new byte[ReadBufferSize];
             int read;
             while ((read = await source.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
             {
@@ -278,7 +288,7 @@ namespace FileHub
 
             var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
 
-            using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken).ConfigureAwait(false);
+            using var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken: cancellationToken).ConfigureAwait(false);
             await CopyToStreamAsync(writeStream, progress, cancellationToken).ConfigureAwait(false);
 
             return newFile;

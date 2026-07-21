@@ -7,9 +7,17 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable, ILazyLoad
+    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, ILazyLoad
     {
         internal const string ChangedAtTag = "_changedAt";
+
+        /// <summary>
+        /// Part size used for multipart parts (except the last). OCI does not
+        /// publish an enforced minimum (only that the restriction is waived
+        /// for the last part); 5 MiB matches the S3 driver and keeps the
+        /// per-part buffer small.
+        /// </summary>
+        internal const long OciMinimumPartSize = 5L * 1024 * 1024;
 
         private readonly OracleObjectStorageDirectory _parent;
         private long _length;
@@ -17,10 +25,7 @@ namespace FileHub.OracleObjectStorage
         private DateTime _lastWriteTimeUtc;
         private FileMetadata _metadata = new FileMetadata();
         private bool _isLoaded;
-        private OciObjectStream _lastOpenStream;
-
-        /// <summary>Driver-internal: the current immutable user-facing snapshot.</summary>
-        internal FileMetadata MetadataInternal => _metadata;
+        private OciFileStreamBase _lastOpenStream;
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from OCI.
@@ -136,25 +141,43 @@ namespace FileHub.OracleObjectStorage
 
         // === Streams ===
 
-        public override Stream GetReadStream() => OpenStream(isWrite: false);
+        public override Stream GetReadStream() => OpenReadStream();
 
         public override Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: false));
+            return Task.FromResult<Stream>(OpenReadStream());
         }
 
-        private OciObjectStream OpenStream(bool isWrite, FileWriteOptions options = null)
+        private OciReadStream OpenReadStream()
+        {
+            ThrowIfStreamOpen();
+            return Track(new OciReadStream(this));
+        }
+
+        private OciObjectStream OpenWriteStream(FileWriteOptions options, WriteStreamPreference preference)
+        {
+            ThrowIfStreamOpen();
+            return Track(new OciObjectStream(this, options, preference));
+        }
+
+        /// <summary>
+        /// Registers a freshly created stream in the "one stream open per
+        /// file" latch. The latch clears when the stream raises Disposed.
+        /// </summary>
+        private T Track<T>(T stream) where T : OciFileStreamBase
+        {
+            _lastOpenStream = stream;
+            stream.Disposed += OnStreamDisposed;
+            return stream;
+        }
+
+        private void ThrowIfStreamOpen()
         {
             if (Disposed)
                 throw new ObjectDisposedException(nameof(OracleObjectStorageFile));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
-
-            var stream = new OciObjectStream(this, isWrite, options);
-            _lastOpenStream = stream;
-            stream.Disposed += OnStreamDisposed;
-            return stream;
         }
 
         private void OnStreamDisposed(object sender, EventArgs e)
@@ -305,25 +328,33 @@ namespace FileHub.OracleObjectStorage
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
-                // overwrite: false must not clobber — CopyObject overwrites. HEAD first.
+
                 if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
+
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look
                 // missing to any consumer that reads Length.
-                if (!_isLoaded)
+                if (!_isLoaded && progress != null)
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
+
                 var destinationObject = PathUtil.CombineKey(ociDir.PrefixInternal, name);
                 var destClient = ociDir.SessionInternal.Client;
-                await SessionInternal.Client.CopyObjectAsync(
+                var operationHandle = await SessionInternal.Client.CopyObjectAsync(
                     ObjectName,
                     destClient.Namespace,
                     destClient.Bucket,
                     destClient.Region,
                     destinationObject,
                     cancellationToken).ConfigureAwait(false);
-                // Propagate what we know — content is identical, so length matches.
-                progress?.Report(new TransferStatus(_length, _length));
+
+
+                var progressReporter = TransferStatusProgress.FromCallback(_length, progress);
+
+                await operationHandle.WaitAndRequestCancellationAsync(progressReporter, cancellationToken);
+
+                progressReporter?.Report(100);
+
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
             return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
@@ -331,17 +362,83 @@ namespace FileHub.OracleObjectStorage
 
         // === FileWriteOptions / metadata-via-options surface ===
 
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Open a write stream whose commit applies <paramref name="options"/>
+        /// on <c>PutObject</c>. Options live with the stream — no cross-call
+        /// staging on the file. <paramref name="preference"/> selects the
+        /// commit strategy: <see cref="WriteStreamPreference.Multipart"/>
+        /// skips the buffering phase and opens the multipart upload on the
+        /// first written byte; <see cref="WriteStreamPreference.Single"/>
+        /// never spills — the whole payload buffers in memory and commits as
+        /// one <c>PutObject</c>.
+        /// </summary>
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: true, options));
+            return Task.FromResult<Stream>(OpenWriteStream(options, preference));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null)
+        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             ThrowIfReadOnly();
-            return OpenStream(isWrite: true, options);
+            return OpenWriteStream(options, preference);
+        }
+
+        /// <summary>
+        /// Driver-internal: resolve the caller's <see cref="FileWriteOptions"/>
+        /// against the current metadata snapshot into everything a committed
+        /// write needs. See <see cref="OciWritePayload"/>.
+        /// </summary>
+        internal OciWritePayload BuildWritePayload(FileWriteOptions options)
+        {
+            var now = DateTime.UtcNow;
+
+            // User-facing tags after this write: start from the current snapshot
+            // and overlay any metadata from the write options.
+            var userTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in _metadata.Tags)
+                userTags[kv.Key] = kv.Value;
+            var optionMeta = options?.Metadata;
+            if (optionMeta != null)
+            {
+                foreach (var kv in optionMeta)
+                    userTags[kv.Key] = kv.Value;
+            }
+
+            var contentType = options?.ContentType;
+            var cacheControl = options?.CacheControl;
+
+            // Server payload = the user tags plus the driver-internal last-write
+            // bookkeeping tag.
+            var meta = new Dictionary<string, string>(userTags, StringComparer.OrdinalIgnoreCase)
+            {
+                [ChangedAtTag] = now.ToString("O")
+            };
+
+            return new OciWritePayload(
+                new OciWriteOptions { ContentType = contentType, CacheControl = cacheControl, Metadata = meta },
+                new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags),
+                now);
+        }
+
+        // === IMultipartUploadable ===
+
+        public long MinimumPartSize => OciMinimumPartSize;
+
+        public Stream GetMultipartWriteStream(FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(options, ct));
+
+        public async Task<Stream> GetMultipartWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+            // Options are bound to the object at CreateMultipartUpload; the
+            // stream installs the matching snapshot when the upload commits.
+            var payload = BuildWritePayload(options);
+            var uploadId = await SessionInternal.Client.CreateMultipartUploadAsync(
+                ObjectName, payload.ServerOptions, cancellationToken).ConfigureAwait(false);
+            return new OciMultipartWriteStream(this, uploadId, payload);
         }
 
         /// <summary>
@@ -390,7 +487,7 @@ namespace FileHub.OracleObjectStorage
                 throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
 
             var client = SessionInternal.Client;
-            var parName = $"filehub-{Guid.NewGuid():N}";
+            var parName = $"{ObjectName}-{DateTime.UtcNow:yyyyMMdd_HHmmss}";
             var timeExpires = DateTime.UtcNow.Add(expiresIn);
 
             var accessUri = await client.CreatePreauthenticatedReadRequestAsync(ObjectName, parName, timeExpires, cancellationToken).ConfigureAwait(false);

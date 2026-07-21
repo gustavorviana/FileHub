@@ -22,7 +22,7 @@ namespace FileHub.Local
         /// Create a <see cref="LocalFile"/> reference pointing at <paramref name="fileName"/>
         /// inside <paramref name="directory"/>. The file itself is not created on
         /// disk — call <see cref="FileEntry.SetText(string, System.Text.Encoding, FileWriteOptions)"/>, <see cref="FileEntry.SetBytes(byte[], FileWriteOptions)"/> or
-        /// <see cref="FileEntry.GetWriteStream(FileWriteOptions)"/> to materialise it, or <see cref="Exists"/>
+        /// <see cref="FileEntry.GetWriteStream(FileWriteOptions, WriteStreamPreference)"/> to materialise it, or <see cref="Exists"/>
         /// to test whether it already exists.
         /// </summary>
         /// <remarks>
@@ -60,7 +60,9 @@ namespace FileHub.Local
                 StreamBufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null)
+        // preference is ignored: disk writes stream straight to the file, so
+        // there is no single-request vs multipart distinction to honor.
+        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             ThrowIfReadOnly();
             return new FileStream(Path, FileMode.Create, FileAccess.Write, FileShare.None,

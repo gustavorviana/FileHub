@@ -2,15 +2,20 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
     /// <summary>
-    /// Stream backed by an OCI Object Storage object. Supports chunked reads
-    /// (10 MB per range request). Writes are buffered locally and committed
-    /// to the backing object on <see cref="Flush"/> / <see cref="FlushAsync"/>;
-    /// disposing a dirty stream also triggers a flush.
+    /// Write stream over an OCI Object Storage object. Bytes are buffered
+    /// locally up to the driver's part size (5 MiB); beyond that the stream
+    /// transparently spills into a multipart upload and keeps memory usage
+    /// constant, so any payload size is safe through every write path. Small
+    /// payloads commit as a single <c>PutObject</c> on <see cref="Flush"/> /
+    /// <see cref="FlushAsync"/> or dispose; spilled payloads commit on
+    /// dispose (OCI cannot append, so a mid-stream flush cannot materialize
+    /// a partial object). <see cref="WriteStreamPreference"/> overrides the
+    /// strategy: <c>Multipart</c> spills on the first written byte,
+    /// <c>Single</c> never spills.
     /// Sync methods delegate to their async counterparts via
     /// <c>SyncBridge.Run</c>, which queues the work to the thread pool —
     /// deadlock-free on any host.
@@ -23,43 +28,42 @@ namespace FileHub.OracleObjectStorage
     /// should call <see cref="Flush"/> / <see cref="FlushAsync"/> first.
     /// </para>
     /// </summary>
-    internal sealed class OciObjectStream : Stream
+    internal sealed class OciObjectStream : OciFileStreamBase
     {
-        internal const int BufferSize = 10 * 1024 * 1024;
-
         private readonly OracleObjectStorageFile _file;
         private readonly FileWriteOptions _options;
-        private readonly MemoryStream _writeBuffer;
-        private readonly bool _isWrite;
-        private long _position;
+        private readonly WriteStreamPreference _preference;
+        private readonly MemoryStream _writeBuffer = new();
         private bool _hasUnflushedWrites;
         private bool _disposed;
+        // Non-null once writes crossed the 5 MiB spill threshold: from then
+        // on bytes stream through a multipart upload instead of accumulating
+        // in memory. _spilledTotal tracks the running total (the multipart
+        // stream owns the actual part buffers).
+        private Stream _multipart;
+        private long _spilledTotal;
 
-        public event EventHandler Disposed;
-
-        public OciObjectStream(OracleObjectStorageFile file, bool isWrite, FileWriteOptions options = null)
+        public OciObjectStream(OracleObjectStorageFile file, FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
-            _isWrite = isWrite;
             _options = options;
-            _writeBuffer = isWrite ? new MemoryStream() : null;
-            CanRead = !isWrite;
-            CanWrite = isWrite;
+            _preference = preference;
         }
 
-        public override bool CanRead { get; }
-        public override bool CanSeek => CanRead;
-        public override bool CanWrite { get; }
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
 
-        public override long Length => _isWrite ? _writeBuffer.Length : _file.LengthInternal;
+        public override long Length => _multipart != null ? _spilledTotal : _writeBuffer.Length;
 
         public override long Position
         {
-            get => _isWrite ? _writeBuffer.Position : _position;
+            get => _multipart != null ? _spilledTotal : _writeBuffer.Position;
             set
             {
-                if (_isWrite) { _writeBuffer.Position = value; return; }
-                Seek(value, SeekOrigin.Begin);
+                if (_multipart != null)
+                    throw new NotSupportedException("Seeking is not supported after the stream spilled to multipart.");
+                _writeBuffer.Position = value;
             }
         }
 
@@ -67,93 +71,80 @@ namespace FileHub.OracleObjectStorage
 
         public override async Task FlushAsync(CancellationToken cancellationToken)
         {
-            if (!CanWrite || !_hasUnflushedWrites) return;
+            if (!_hasUnflushedWrites) return;
+            // Spilled: parts upload as their buffers roll over; the object can
+            // only materialize at CommitMultipartUpload (dispose) — OCI has
+            // no append, so a mid-stream flush has nothing more to commit.
+            if (_multipart != null) return;
             await UploadBufferAsync(cancellationToken).ConfigureAwait(false);
             _hasUnflushedWrites = false;
         }
 
-        public override int Read(byte[] buffer, int offset, int count)
-            => SyncBridge.Run(ct => ReadAsync(buffer, offset, count, ct));
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
-        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            ThrowIfDisposed();
-            if (!CanRead) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
-            if (count == 0 || _position >= Length) return 0;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new NotSupportedException();
 
-            int bytesRead = 0;
-            var client = _file.SessionInternal.Client;
-
-            while (bytesRead < count && _position < Length && !_disposed)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int chunkLen = (int)Math.Min(
-                    Math.Min(BufferSize, Length - _position),
-                    count - bytesRead);
-                long endByte = _position + chunkLen - 1;
-
-                var getResult = await client.GetObjectAsync(_file.ObjectName, _position, endByte, cancellationToken).ConfigureAwait(false);
-
-                using (var source = getResult.InputStream)
-                {
-                    int inChunk = await FillFromSourceAsync(source, buffer, offset + bytesRead, chunkLen, cancellationToken).ConfigureAwait(false);
-                    if (inChunk == 0) break;
-                    _position += inChunk;
-                    bytesRead += inChunk;
-                }
-            }
-
-            return bytesRead;
-        }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            ThrowIfDisposed();
-            if (!CanSeek) throw new NotSupportedException();
-
-            long newPosition = origin switch
-            {
-                SeekOrigin.Begin => offset,
-                SeekOrigin.Current => _position + offset,
-                SeekOrigin.End => Length + offset,
-                _ => throw new ArgumentException("Invalid seek origin.", nameof(origin)),
-            };
-
-            if (newPosition < 0)
-                throw new IOException("Seek resulted in a negative position.");
-            if (newPosition > Length)
-                throw new IOException("Seek past end of stream.");
-
-            _position = newPosition;
-            return _position;
-        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
         public override void SetLength(long value) => throw new NotSupportedException();
 
         public override void Write(byte[] buffer, int offset, int count)
+            => SyncBridge.Run(ct => WriteAsync(buffer, offset, count, ct));
+
+        public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            if (!CanWrite) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
+            ValidateWriteArgs(buffer, offset, count);
+            cancellationToken.ThrowIfCancellationRequested();
 
-            _writeBuffer.Write(buffer, offset, count);
-            _file.LengthInternal = _writeBuffer.Length;
+            // Multipart preference: spill on the first written byte, skipping
+            // the buffering phase entirely. Single: never spill — the caller
+            // opted into buffering the whole payload for one PutObject. Auto:
+            // spill once the payload outgrows the part-size threshold.
+            if (_multipart == null
+                && _preference != WriteStreamPreference.Single
+                && (_preference == WriteStreamPreference.Multipart
+                    || _writeBuffer.Length + count > OracleObjectStorageFile.OciMinimumPartSize))
+                await SpillToMultipartAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_multipart != null)
+            {
+                await _multipart.WriteAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+                _spilledTotal += count;
+                _file.LengthInternal = _spilledTotal;
+            }
+            else
+            {
+                _writeBuffer.Write(buffer, offset, count);
+                _file.LengthInternal = _writeBuffer.Length;
+            }
             _hasUnflushedWrites = true;
         }
 
-        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        /// <summary>
+        /// Switches from the in-memory buffer to a multipart upload: replays
+        /// the bytes buffered so far into the multipart stream and truncates
+        /// the local buffer. A failure inside the multipart stream aborts the
+        /// upload server-side (its own write path guarantees that).
+        /// </summary>
+        private async Task SpillToMultipartAsync(CancellationToken cancellationToken)
         {
-            ThrowIfDisposed();
-            if (!CanWrite) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            _writeBuffer.Write(buffer, offset, count);
-            _file.LengthInternal = _writeBuffer.Length;
-            _hasUnflushedWrites = true;
-            return Task.CompletedTask;
+            var multipart = await _file.GetMultipartWriteStreamAsync(_options, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                _writeBuffer.Seek(0, SeekOrigin.Begin);
+                await _writeBuffer.CopyToAsync(multipart, 81920, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The multipart stream aborted itself on the failed write;
+                // disposing it after an abort is a safe no-op.
+                multipart.Dispose();
+                throw;
+            }
+            _spilledTotal = _writeBuffer.Length;
+            _multipart = multipart;
+            _writeBuffer.SetLength(0);
         }
 
         protected override void Dispose(bool disposing)
@@ -168,7 +159,10 @@ namespace FileHub.OracleObjectStorage
             {
                 try
                 {
-                    Flush();
+                    // Spilled: disposing the multipart stream uploads the
+                    // trailing part and commits (or aborts on failure).
+                    if (_multipart != null) _multipart.Dispose();
+                    else Flush();
                 }
                 finally
                 {
@@ -176,8 +170,8 @@ namespace FileHub.OracleObjectStorage
                     // _writeBuffer — if the buffer's Dispose ever throws, the
                     // parent's _lastOpenStream still gets cleared.
                     _disposed = true;
-                    Disposed?.Invoke(this, EventArgs.Empty);
-                    try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                    RaiseDisposed();
+                    try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
                 }
             }
             else
@@ -186,7 +180,7 @@ namespace FileHub.OracleObjectStorage
                 // file so its "a stream is already open" latch clears. Unflushed
                 // writes are lost — callers must Dispose explicitly to flush.
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
+                RaiseDisposed();
             }
 
             base.Dispose(disposing);
@@ -203,13 +197,14 @@ namespace FileHub.OracleObjectStorage
 
             try
             {
-                await FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                if (_multipart != null) await _multipart.DisposeAsync().ConfigureAwait(false);
+                else await FlushAsync(CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
-                try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                RaiseDisposed();
+                try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
             }
 
             await base.DisposeAsync().ConfigureAwait(false);
@@ -220,61 +215,24 @@ namespace FileHub.OracleObjectStorage
         {
             _writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
-            var now = DateTime.UtcNow;
-            var timestamp = now.ToString("O");
 
-            // User-facing tags after this write: start from the current snapshot
-            // and overlay any metadata from the write options. Options live with
-            // the stream — never staged on the file — so an abandoned write can't
-            // leak forward. The parent file is only mutated after the upload is
-            // durable (OnWriteCommitted below).
-            var userTags = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in _file.MetadataInternal.Tags)
-                userTags[kv.Key] = kv.Value;
-            var optionMeta = _options?.Metadata;
-            if (optionMeta != null)
-            {
-                foreach (var kv in optionMeta)
-                    userTags[kv.Key] = kv.Value;
-            }
-
-            var contentType = _options?.ContentType;
-            var cacheControl = _options?.CacheControl;
-
-            // Server payload = the user tags plus the driver-internal last-write
-            // bookkeeping tag.
-            var meta = new System.Collections.Generic.Dictionary<string, string>(userTags, System.StringComparer.OrdinalIgnoreCase)
-            {
-                [OracleObjectStorageFile.ChangedAtTag] = timestamp
-            };
+            // Options live with the stream — never staged on the file — so an
+            // abandoned write can't leak forward. The parent file is only
+            // mutated after the upload is durable (OnWriteCommitted below).
+            var payload = _file.BuildWritePayload(_options);
 
             await client.PutObjectAsync(
                 _file.ObjectName,
                 _writeBuffer,
                 _writeBuffer.Length,
-                new OciWriteOptions { ContentType = contentType, CacheControl = cacheControl, Metadata = meta },
+                payload.ServerOptions,
                 cancellationToken).ConfigureAwait(false);
 
             // Replace the file's snapshot now that the object is durable.
-            _file.OnWriteCommitted(
-                _writeBuffer.Length,
-                now,
-                new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags));
+            _file.OnWriteCommitted(_writeBuffer.Length, payload.TimestampUtc, payload.Snapshot);
         }
 
-        private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            int total = 0;
-            while (total < count)
-            {
-                int got = await source.ReadAsync(buffer, offset + total, count - total, cancellationToken).ConfigureAwait(false);
-                if (got == 0) break;
-                total += got;
-            }
-            return total;
-        }
-
-        private static void ValidateReadWriteArgs(byte[] buffer, int offset, int count)
+        private static void ValidateWriteArgs(byte[] buffer, int offset, int count)
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
             if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));

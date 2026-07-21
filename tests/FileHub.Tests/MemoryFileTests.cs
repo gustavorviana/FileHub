@@ -46,6 +46,20 @@ public class MemoryFileTests
     }
 
     [Fact]
+    public void GetWriteStream_MultipartPreference_IsIgnoredSilently()
+    {
+        // Memory has no multipart surface — the preference must be a no-op,
+        // never a throw (same contract as unsupported FileWriteOptions fields).
+        var file = NewRoot().CreateFile("a.bin");
+        var payload = new byte[] { 1, 2, 3 };
+
+        using (var stream = file.GetWriteStream(null, WriteStreamPreference.Multipart))
+            stream.Write(payload, 0, payload.Length);
+
+        Assert.Equal(payload, file.ReadAllBytes());
+    }
+
+    [Fact]
     public void GetWriteStream_Truncates_PreviousContent()
     {
         var file = NewRoot().CreateFile("a.txt");

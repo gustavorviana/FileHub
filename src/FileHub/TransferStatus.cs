@@ -1,3 +1,5 @@
+using System;
+
 namespace FileHub
 {
     /// <summary>
@@ -23,10 +25,27 @@ namespace FileHub
         /// </summary>
         public long TotalBytes { get; }
 
+        /// <summary>
+        /// Percentage of the transfer completed, in the range [0, 100],
+        /// rounded to two decimal places. Returns <c>0</c> when
+        /// <see cref="TotalBytes"/> is unknown (<c>&lt;= 0</c>).
+        /// </summary>
+        public double PercentComplete => TotalBytes <= 0 ? 0 : Math.Round((double)BytesTransferred / TotalBytes * 100, 2);
+
         public TransferStatus(long bytesTransferred, long totalBytes)
         {
             BytesTransferred = bytesTransferred;
             TotalBytes = totalBytes;
+        }
+
+        /// <summary>
+        /// Builds a snapshot from a completion percentage in the range
+        /// [0, 100] (as reported by backends that track progress as a
+        /// percentage, e.g. OCI work requests) and the known total length.
+        /// </summary>
+        public static TransferStatus FromPercent(long totalBytes, double percent)
+        {
+            return new TransferStatus((long)(totalBytes * percent / 100), totalBytes);
         }
     }
 }

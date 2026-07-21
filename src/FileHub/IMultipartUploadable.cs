@@ -10,9 +10,10 @@ namespace FileHub
     /// writing the file also holds the bytes (server-side generation,
     /// long-running import, uploading a local stream to an object store).
     ///
-    /// Contrast with the regular <see cref="FileEntry.GetWriteStream(FileWriteOptions)"/>,
-    /// which buffers the full payload in memory before issuing a single
-    /// request — fine for small files but unsuitable for large ones.
+    /// Contrast with the regular <see cref="FileEntry.GetWriteStream(FileWriteOptions, WriteStreamPreference)"/>,
+    /// which buffers the payload in memory up to the part-size threshold
+    /// before spilling into a multipart upload of its own — equivalent for
+    /// large payloads, but this interface skips the buffering phase.
     /// </summary>
     public interface IMultipartUploadable : IMultipartCapable
     {

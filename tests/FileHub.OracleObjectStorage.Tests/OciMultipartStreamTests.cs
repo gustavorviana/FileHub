@@ -2,25 +2,25 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using FileHub.AmazonS3.Tests.Fakes;
+using FileHub.OracleObjectStorage.Tests.Fakes;
 
-namespace FileHub.AmazonS3.Tests;
+namespace FileHub.OracleObjectStorage.Tests;
 
-public class AmazonS3MultipartStreamTests
+public class OciMultipartStreamTests
 {
     private const int PartSize = 5 * 1024 * 1024;
 
-    private static AmazonS3FileHub NewHub(out InMemoryS3Client client)
+    private static OracleObjectStorageFileHub NewHub(out InMemoryOciClient client)
     {
-        client = new InMemoryS3Client();
-        return AmazonS3FileHub.FromS3Client(client);
+        client = new InMemoryOciClient();
+        return OracleObjectStorageFileHub.FromOciClient(client);
     }
 
     [Fact]
     public async Task SmallPayload_CompletesWithSinglePart()
     {
         using var hub = NewHub(out var client);
-        var file = (AmazonS3File)hub.Root.CreateFile("small.bin");
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("small.bin");
 
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
@@ -39,7 +39,7 @@ public class AmazonS3MultipartStreamTests
     public async Task LargePayload_UploadsMultipleParts()
     {
         using var hub = NewHub(out var client);
-        var file = (AmazonS3File)hub.Root.CreateFile("big.bin");
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("big.bin");
 
         // 12 MiB → 2 full parts + 1 tail part.
         var payload = new byte[PartSize * 2 + 1024];
@@ -104,7 +104,7 @@ public class AmazonS3MultipartStreamTests
     public async Task ExceptionDuringWrite_AbortsUpload()
     {
         using var hub = NewHub(out var client);
-        var file = (AmazonS3File)hub.Root.CreateFile("will-fail.bin");
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("will-fail.bin");
         // CreateFile materializes an empty object; remove it so this test isolates
         // the multipart-only path.
         file.Delete();
@@ -131,7 +131,7 @@ public class AmazonS3MultipartStreamTests
     public async Task MinimumPartSize_Is5Mib()
     {
         using var hub = NewHub(out _);
-        var file = (AmazonS3File)hub.Root.CreateFile("x.bin");
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("x.bin");
         IMultipartUploadable up = file;
         Assert.Equal(PartSize, up.MinimumPartSize);
         await Task.CompletedTask;
@@ -141,14 +141,12 @@ public class AmazonS3MultipartStreamTests
     public async Task Multipart_AppliesWriteOptions()
     {
         using var hub = NewHub(out _);
-        var file = (AmazonS3File)hub.Root.CreateFile("img.bin");
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("img.bin");
 
-        var options = new S3WriteOptions
+        var options = new FileWriteOptions
         {
             ContentType = "image/png",
             CacheControl = "public,max-age=3600",
-            StorageClass = "GLACIER",
-            ServerSideEncryption = "AES256",
             Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
         };
 
@@ -156,11 +154,9 @@ public class AmazonS3MultipartStreamTests
         using (var stream = await file.GetMultipartWriteStreamAsync(options))
             await stream.WriteAsync(payload, 0, payload.Length);
 
-        var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("img.bin").GetMetadataAsync();
+        var meta = await hub.Root.OpenFile("img.bin").GetMetadataAsync();
         Assert.Equal("image/png", meta.ContentType);
         Assert.Equal("public,max-age=3600", meta.CacheControl);
-        Assert.Equal("GLACIER", meta.StorageClass);
-        Assert.Equal("AES256", meta.ServerSideEncryption);
         Assert.Equal("team-x", meta.Tags["owner"]);
     }
 
@@ -233,17 +229,19 @@ public class AmazonS3MultipartStreamTests
     [Fact]
     public async Task Multipart_EmptyPayload_StillAppliesWriteOptions()
     {
-        using var hub = NewHub(out _);
-        var file = (AmazonS3File)hub.Root.CreateFile("empty.bin");
+        using var hub = NewHub(out var client);
+        var file = (OracleObjectStorageFile)hub.Root.CreateFile("empty.bin");
 
-        var options = new S3WriteOptions { ContentType = "text/plain", StorageClass = "STANDARD_IA" };
+        var options = new FileWriteOptions { ContentType = "text/plain" };
         using (await file.GetMultipartWriteStreamAsync(options))
         {
             // no write → zero-byte completion path
         }
 
-        var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("empty.bin").GetMetadataAsync();
+        var meta = await hub.Root.OpenFile("empty.bin").GetMetadataAsync();
         Assert.Equal("text/plain", meta.ContentType);
-        Assert.Equal("STANDARD_IA", meta.StorageClass);
+        Assert.True(client.TryGetBody("empty.bin", out var body));
+        Assert.Empty(body);
+        Assert.Equal(0, client.ActiveMultipartUploadCount);
     }
 }
