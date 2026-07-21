@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
@@ -38,6 +39,19 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         Assert.Contains("/n/my-ns/", url.ToString());
         Assert.Contains("/b/my-bucket/", url.ToString());
         Assert.Contains("pub.txt", url.ToString());
+    }
+
+    [Fact]
+    public void GetPublicUrl_ObjectNameWithPercent_EncodesLiteralPercent()
+    {
+        using var fake = new InMemoryOciClient(bucket: "my-bucket", @namespace: "my-ns", region: "us-phoenix-1");
+        fake.SetBucketAccess(OciBucketAccessType.ObjectRead);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake);
+        hub.Root.CreateFile("docs/report%2Fdate.csv").SetText("x");
+
+        var url = ((IUrlAccessible)hub.Root.OpenFile("docs/report%2Fdate.csv")).GetPublicUrl();
+
+        Assert.Contains("docs%2Freport%252Fdate.csv", url.OriginalString);
     }
 
     [Fact]
@@ -106,5 +120,30 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         var dir = (ISignedUploadable)Root;
         Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.Zero));
         Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.FromMinutes(-1)));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_NullName_Throws()
+    {
+        var dir = (ISignedUploadable)Root;
+
+        Assert.Throws<ArgumentException>(() => dir.GetSignedUploadUrl("", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_WithOptions_CreatesWritePar()
+    {
+        var dir = (ISignedUploadable)Root;
+        var options = new FileWriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "max-age=3600",
+            Metadata = new Dictionary<string, string> { ["owner"] = "alice" },
+        };
+
+        var url = dir.GetSignedUploadUrl("uploads/img.png", TimeSpan.FromMinutes(15), options);
+
+        Assert.Contains("/p/filehub-upload-", url.ToString());
+        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "uploads/img.png"));
     }
 }

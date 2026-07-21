@@ -1,9 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
-
 namespace FileHub.OracleObjectStorage.Tests.Integration;
 
 /// <summary>
@@ -12,66 +6,50 @@ namespace FileHub.OracleObjectStorage.Tests.Integration;
 /// happy path + key error translations (404 → FileNotFoundException).
 /// Skipped when OCI env vars are missing.
 /// </summary>
-public class RealOciClientIntegrationTests
+public class RealOciClientIntegrationTests : RealIntegrationTestBase
 {
-    private static OracleObjectStorageFileHub NewHub(string subfolder)
-    {
-        var bucket = Environment.GetEnvironmentVariable("FILEHUB_OCI_BUCKET")!;
-        var configFile = Environment.GetEnvironmentVariable("FILEHUB_OCI_CONFIG_FILE");
-        var profile = Environment.GetEnvironmentVariable("FILEHUB_OCI_PROFILE") ?? "DEFAULT";
-        var basePrefix = Environment.GetEnvironmentVariable("FILEHUB_OCI_TEST_PREFIX") ?? "filehub-tests/";
-        if (!basePrefix.EndsWith("/")) basePrefix += "/";
-
-        return OracleObjectStorageFileHub.Create(
-            OciHubOptions.FromConfigFile(
-                bucketName: bucket,
-                profile: profile,
-                configFilePath: configFile,
-                rootPath: basePrefix + "integration/" + subfolder + "/" + Guid.NewGuid().ToString("N").Substring(0, 8) + "/"));
-    }
-
     [RequiresOci]
-    public void UploadDownloadDelete_RoundTrip()
+    public async Task UploadDownloadDelete_RoundTripAsync()
     {
-        using var hub = NewHub("roundtrip");
+        var rootDir = await GetRootDirAsync(BucketName.A, "roundtrip");
         try
         {
-            var file = hub.Root.CreateFile("integration.txt");
+            var file = rootDir.CreateFile("integration.txt");
             file.SetText("round-trip");
 
-            var reopened = hub.Root.OpenFile("integration.txt");
+            var reopened = rootDir.OpenFile("integration.txt");
             Assert.Equal("round-trip", reopened.ReadAllText());
             reopened.Delete();
-            Assert.False(hub.Root.FileExists("integration.txt"));
+            Assert.False(rootDir.FileExists("integration.txt"));
         }
         finally
         {
-            try { hub.Root.Delete(); } catch (NotSupportedException) { }
+            rootDir.Delete();
         }
     }
 
     [RequiresOci]
-    public void MissingObject_ThrowsFileNotFoundException()
+    public async Task MissingObject_ThrowsFileNotFoundExceptionAsync()
     {
-        using var hub = NewHub("notfound");
+        var rootDir = await GetRootDirAsync(BucketName.A, "notfound");
         try
         {
-            Assert.False(hub.Root.TryOpenFile("does-not-exist.txt", out var _));
-            Assert.Throws<FileNotFoundException>(() => hub.Root.OpenFile("does-not-exist.txt"));
+            Assert.False(rootDir.TryOpenFile("does-not-exist.txt", out var _));
+            Assert.Throws<FileNotFoundException>(() => rootDir.OpenFile("does-not-exist.txt"));
         }
         finally
         {
-            try { hub.Root.Delete(); } catch (NotSupportedException) { }
+            rootDir.Delete();
         }
     }
 
     [RequiresOci]
-    public async Task GetSignedUrl_ReturnsDownloadableUrl()
+    public async Task GetSignedUrl_ReturnsDownloadableUrlAsync()
     {
-        using var hub = NewHub("par");
+        var rootDir = await GetRootDirAsync(BucketName.A, "par");
         try
         {
-            var file = (OracleObjectStorageFile)hub.Root.CreateFile("signed.txt");
+            var file = (OracleObjectStorageFile)rootDir.CreateFile("signed.txt");
             file.SetText("signed-content");
 
             var url = await file.GetSignedUrlAsync(TimeSpan.FromMinutes(2));
@@ -84,7 +62,29 @@ public class RealOciClientIntegrationTests
         }
         finally
         {
-            try { hub.Root.Delete(); } catch (NotSupportedException) { }
+            rootDir.Delete();
+        }
+    }
+
+    [RequiresOci]
+    public async Task GetSignedUploadUrl_PutsObjectIntoBucketAsync()
+    {
+        var rootDir = await GetRootDirAsync(BucketName.A, "upload-par");
+        try
+        {
+            var url = await ((ISignedUploadable)rootDir).GetSignedUploadUrlAsync(
+                "uploaded.txt", TimeSpan.FromMinutes(2));
+
+            using var http = new HttpClient();
+            using var content = new StringContent("uploaded-through-par");
+            using var response = await http.PutAsync(url, content);
+            response.EnsureSuccessStatusCode();
+
+            Assert.Equal("uploaded-through-par", rootDir.OpenFile("uploaded.txt").ReadAllText());
+        }
+        finally
+        {
+            rootDir.Delete();
         }
     }
 }

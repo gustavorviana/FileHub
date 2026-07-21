@@ -17,16 +17,13 @@ namespace FileHub.OracleObjectStorage.Tests.Integration;
 /// </summary>
 public class RealOciCrossTargetIntegrationTests : RealIntegrationTestBase
 {
-    public RealOciCrossTargetIntegrationTests() : base("cross-target", false)
-    {
-
-    }
+    private const string SubFolder = "cross-target";
 
     [RequiresOciSecondBucket]
     public async Task CrossBucket_CopyTo_ServerSideAsync()
     {
-        var rootDirA = await GetRootDir(BucketName.A);
-        var rootDirB = await GetRootDir(BucketName.B);
+        var rootDirA = await GetRootDirAsync(BucketName.A, SubFolder);
+        var rootDirB = await GetRootDirAsync(BucketName.B, SubFolder);
 
         var name = $"cross-bucket-{Guid.NewGuid():N}.txt";
         var payload = Encoding.UTF8.GetBytes("cross-bucket server-side");
@@ -52,8 +49,8 @@ public class RealOciCrossTargetIntegrationTests : RealIntegrationTestBase
     [RequiresOciSecondBucket]
     public async Task CrossBucket_MoveTo_DeletesSourceAsync()
     {
-        var rootDirA = await GetRootDir(BucketName.A);
-        var rootDirB = await GetRootDir(BucketName.B);
+        var rootDirA = await GetRootDirAsync(BucketName.A, SubFolder);
+        var rootDirB = await GetRootDirAsync(BucketName.B, SubFolder);
 
         var name = $"cross-bucket-move-{Guid.NewGuid():N}.txt";
         var payload = Encoding.UTF8.GetBytes("moving across buckets");

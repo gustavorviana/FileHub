@@ -72,6 +72,65 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void ItemExists_File_ReturnsTrue()
+    {
+        var scope = Scope(nameof(ItemExists_File_ReturnsTrue));
+        scope.CreateFile("f.txt").SetText(".");
+
+        Assert.True(scope.FileExists("f.txt"));
+        Assert.False(scope.FileExists("g.txt"));
+    }
+
+    [Fact]
+    public void Exists_DetectsFileAndDirectory()
+    {
+        var scope = Scope(nameof(Exists_DetectsFileAndDirectory));
+        scope.CreateFile("report.txt").SetText("x");
+        scope.CreateDirectory("logs").CreateFile("app.log").SetText("y");
+
+        Assert.True(scope.Exists("report.txt"));
+        Assert.True(scope.Exists("logs"));
+        Assert.False(scope.Exists("missing"));
+        Assert.False(scope.Exists("rep"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_ExistingFile_RemovesIt()
+    {
+        var scope = Scope(nameof(DeleteIfExists_ExistingFile_RemovesIt));
+        scope.CreateFile("a.txt").SetBytes(new byte[] { 1 });
+
+        scope.DeleteIfExists("a.txt");
+
+        Assert.False(scope.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_MissingFile_DoesNotThrow()
+    {
+        var scope = Scope(nameof(DeleteIfExists_MissingFile_DoesNotThrow));
+
+        scope.DeleteIfExists("missing.txt");
+
+        Assert.False(scope.FileExists("missing.txt"));
+    }
+
+    [Fact]
+    public void Delete_DirectoryName_DeletesAllChildren()
+    {
+        var scope = Scope(nameof(Delete_DirectoryName_DeletesAllChildren));
+        scope.CreateFile("sub/a.txt").SetBytes(new byte[] { 1 });
+        scope.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
+        scope.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
+
+        scope.Delete("sub");
+
+        Assert.False(scope.FileExists("sub/a.txt"));
+        Assert.False(scope.FileExists("sub/b.txt"));
+        Assert.True(scope.FileExists("sibling.txt"));
+    }
+
+    [Fact]
     public void Delete_Recursive_DeletesAllObjects()
     {
         var scope = Scope(nameof(Delete_Recursive_DeletesAllObjects));

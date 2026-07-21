@@ -8,19 +8,14 @@ public abstract class RealIntegrationTestBase : IAsyncLifetime
     private const string Prefix = "filehub-tests/";
 
     private readonly string _runId;
-    private readonly string _rootDir;
-    private readonly bool _autoCleanupDirs;
-
     protected string RegionId { get; }
 
     private readonly List<OracleObjectStorageFileHub> _hubs = [];
     private readonly ObjectStorageClient _client;
 
-    public RealIntegrationTestBase(string? suffix = null, bool autoCleanupDirs = false)
+    public RealIntegrationTestBase()
     {
-        _autoCleanupDirs = autoCleanupDirs;
         _runId = Guid.NewGuid().ToString("N")[..8];
-        _rootDir = Prefix + (string.IsNullOrEmpty(suffix) ? "" : suffix + "/");
 
         var configFile = Environment.GetEnvironmentVariable("FILEHUB_OCI_CONFIG_FILE");
         var profile = Environment.GetEnvironmentVariable("FILEHUB_OCI_PROFILE") ?? "DEFAULT";
@@ -33,19 +28,20 @@ public abstract class RealIntegrationTestBase : IAsyncLifetime
         _client = new ObjectStorageClient(provider);
     }
 
-    protected async Task<OracleObjectStorageDirectory> GetRootDir(BucketName bucket)
+    protected async Task<OracleObjectStorageDirectory> GetRootDirAsync(BucketName bucket, string? subfolder = null)
     {
-        var hub = await OracleObjectStorageFileHub.CreateAsync(CreateOptions(bucket));
+        var hub = await OracleObjectStorageFileHub.CreateAsync(CreateOptions(bucket, subfolder));
         _hubs.Add(hub);
         return (OracleObjectStorageDirectory)await hub.Root.OpenDirectoryAsync(_runId, true);
     }
 
-    private OciHubOptions CreateOptions(BucketName bucket)
+    private OciHubOptions CreateOptions(BucketName bucket, string? subfolder)
     {
         var bucketName = GetBucketName(bucket);
         var ns = Environment.GetEnvironmentVariable("FILEHUB_OCI_NAMESPACE")!;
+        var rootDir = Prefix + (string.IsNullOrEmpty(subfolder) ? "" : subfolder + "/");
 
-        return OciHubOptions.FromClient(bucketName, _client, RegionId, ns, _rootDir);
+        return OciHubOptions.FromClient(bucketName, _client, RegionId, ns, rootDir);
     }
 
     protected static string GetBucketName(BucketName bucket)
@@ -69,9 +65,6 @@ public abstract class RealIntegrationTestBase : IAsyncLifetime
         {
             try
             {
-                if (_autoCleanupDirs)
-                    await hub.Root.DeleteAsync();
-
                 hub.Dispose();
             }
             catch

@@ -56,6 +56,33 @@ public class OracleObjectStorageMetadataTests : IClassFixture<InMemoryOciFixture
         Assert.DoesNotContain(OracleObjectStorageFile.ChangedAtTag, meta.Tags.Keys);
     }
 
+    [Fact]
+    public async Task GetMetadata_ReturnsIndependentSnapshot()
+    {
+        var scope = Scope(nameof(GetMetadata_ReturnsIndependentSnapshot));
+        var file = scope.CreateFile("x.bin");
+
+        await file.SetBytesAsync(
+            new byte[] { 1 },
+            new FileWriteOptions
+            {
+                ContentType = "image/png",
+                Metadata = new Dictionary<string, string> { ["k"] = "v1" },
+            });
+        var snapshot = await file.GetMetadataAsync();
+
+        await file.SetBytesAsync(
+            new byte[] { 2 },
+            new FileWriteOptions
+            {
+                ContentType = "text/plain",
+                Metadata = new Dictionary<string, string> { ["k"] = "v2" },
+            });
+
+        Assert.Equal("image/png", snapshot.ContentType);
+        Assert.Equal("v1", snapshot.Tags["k"]);
+    }
+
     // N3 — options live with the write stream, not staged on the file. Opening
     // a write stream with options and abandoning it (no bytes written, no
     // commit) must not leak those options into a subsequent plain write.

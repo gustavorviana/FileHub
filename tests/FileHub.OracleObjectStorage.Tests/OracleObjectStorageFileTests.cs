@@ -79,6 +79,45 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
     }
 
     [Fact]
+    public void Rename_ToExistingName_ThrowsAndKeepsBoth()
+    {
+        var scope = Scope(nameof(Rename_ToExistingName_ThrowsAndKeepsBoth));
+        scope.CreateFile("a.txt").SetText("a");
+        scope.CreateFile("b.txt").SetText("b");
+
+        var file = scope.OpenFile("a.txt");
+        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("b.txt"));
+        Assert.Equal("a", scope.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("b", scope.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void Rename_NestedName_MovesToSubPathKey()
+    {
+        var scope = Scope(nameof(Rename_NestedName_MovesToSubPathKey));
+        scope.CreateFile("a.txt").SetText("data");
+
+        var moved = scope.OpenFile("a.txt").Rename("sub/deep/b.txt");
+
+        Assert.Equal("b.txt", moved.Name);
+        Assert.False(scope.FileExists("a.txt"));
+        Assert.Equal("data", scope.OpenFile("sub/deep/b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyTo_NestedName_WritesSubPathKey()
+    {
+        var scope = Scope(nameof(CopyTo_NestedName_WritesSubPathKey));
+        scope.CreateFile("a.txt").SetText("data");
+
+        var copy = scope.OpenFile("a.txt").CopyTo(scope, "x/y/z.txt");
+
+        Assert.Equal("z.txt", copy.Name);
+        Assert.Equal("data", scope.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("data", scope.OpenFile("x/y/z.txt").ReadAllText());
+    }
+
+    [Fact]
     public void MoveTo_DifferentDirectory_CopiesAndDeletes()
     {
         var scope = Scope(nameof(MoveTo_DifferentDirectory_CopiesAndDeletes));

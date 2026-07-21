@@ -187,6 +187,20 @@ public class OracleObjectStorageOpenFileTests
     }
 
     [Fact]
+    public void OpenDirectory_CreateIfNotExists_ZeroCalls()
+    {
+        using var hub = NewHub(out var client);
+        var headsBefore = client.HeadInvocationCount;
+        var putsBefore = client.PutInvocationCount;
+
+        var dir = hub.Root.OpenDirectory("a/b/c", createIfNotExists: true);
+
+        Assert.Equal(headsBefore, client.HeadInvocationCount);
+        Assert.Equal(putsBefore, client.PutInvocationCount);
+        Assert.NotNull(dir);
+    }
+
+    [Fact]
     public async Task OpenDirectory_CreateIfNotExists_ZeroCallsAsync()
     {
         using var hub = NewHub(out var client);
