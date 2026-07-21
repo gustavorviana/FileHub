@@ -31,10 +31,12 @@ namespace FileHub.OracleObjectStorage.Internal
         private bool _disposed;
 
         public IOciClient Client { get; }
+        public MultipartStreamOptions Multipart { get; }
 
-        public OciSession(IOciClient client)
+        public OciSession(IOciClient client, MultipartStreamOptions multipart)
         {
             Client = client ?? throw new ArgumentNullException(nameof(client));
+            Multipart = multipart ?? throw new ArgumentNullException(nameof(multipart));
         }
 
         public bool GetIsPublic() => SyncBridge.Run(ct => GetIsPublicAsync(ct));

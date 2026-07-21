@@ -8,8 +8,7 @@ using FileHub.AmazonS3.Internal;
 namespace FileHub.AmazonS3
 {
     /// <summary>
-    /// Write stream backing <see cref="IMultipartUploadable.GetMultipartWriteStream"/>.
-    /// Accumulates incoming bytes into a local 5 MiB buffer; every time
+    /// Accumulates incoming bytes into a configurable local part buffer; every time
     /// the buffer fills it fires <c>UploadPart</c> and resets. On close,
     /// the trailing buffer is uploaded and <c>CompleteMultipartUpload</c>
     /// finalizes the object. Any exception during a write (or during
@@ -18,24 +17,29 @@ namespace FileHub.AmazonS3
     /// </summary>
     internal sealed class S3MultipartWriteStream : Stream
     {
-        internal const int PartBufferSize = 5 * 1024 * 1024; // S3 minimum
+        private const int MaximumPartCount = 10_000;
 
+        private readonly List<S3CompletedPart> _completedParts = [];
         private readonly AmazonS3File _file;
-        private readonly string _uploadId;
         private readonly S3WriteOptions _options;
-        private readonly List<S3CompletedPart> _completedParts = new();
-        private readonly MemoryStream _buffer = new();
+        private readonly MemoryStream _buffer;
+        private readonly string _uploadId;
 
+        private readonly int _partBufferSize;
         private int _nextPartNumber = 1;
+        private long _totalWritten;
         private bool _completed;
         private bool _aborted;
         private bool _disposed;
-        private long _totalWritten;
 
-        public S3MultipartWriteStream(AmazonS3File file, string uploadId, S3WriteOptions options = null)
+        public S3MultipartWriteStream(AmazonS3File file, string uploadId, S3WriteOptions options, MemoryStream buffer, int partBufferSize)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _uploadId = uploadId ?? throw new ArgumentNullException(nameof(uploadId));
+            _partBufferSize = partBufferSize;
+
+            _buffer = buffer ?? new MemoryStream();
+            _totalWritten = _buffer.Length;
             _options = options;
         }
 
@@ -77,13 +81,13 @@ namespace FileHub.AmazonS3
                 int written = 0;
                 while (written < count)
                 {
-                    var space = PartBufferSize - (int)_buffer.Length;
+                    var space = _partBufferSize - (int)_buffer.Length;
                     var chunk = Math.Min(space, count - written);
                     _buffer.Write(buffer, offset + written, chunk);
                     _totalWritten += chunk;
                     written += chunk;
 
-                    if (_buffer.Length >= PartBufferSize)
+                    if (_buffer.Length >= _partBufferSize)
                         await UploadCurrentBufferAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -174,6 +178,9 @@ namespace FileHub.AmazonS3
 
         private async Task UploadCurrentBufferAsync(CancellationToken cancellationToken)
         {
+            if (_nextPartNumber > MaximumPartCount)
+                throw new FileHubException($"S3 multipart upload exceeded the {MaximumPartCount:N0}-part limit. Increase MultipartStreamOptions.PartSize.");
+                
             _buffer.Position = 0;
             var len = _buffer.Length;
             var client = _file.SessionInternal.Client;

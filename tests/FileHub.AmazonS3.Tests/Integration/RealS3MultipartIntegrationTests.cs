@@ -43,7 +43,7 @@ public class RealS3MultipartIntegrationTests
         var file = (AmazonS3File)hub.Root.CreateFile(name);
         try
         {
-            using (var stream = await file.GetMultipartWriteStreamAsync())
+            using (var stream = await file.GetWriteStreamAsync(preference: WriteStreamPreference.Multipart))
             {
                 await stream.WriteAsync(payload, 0, payload.Length);
             }

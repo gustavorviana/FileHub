@@ -7,15 +7,14 @@ using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, ILazyLoad
+    public class OracleObjectStorageFile : FileEntry, IUrlAccessible, IRefreshable, ILazyLoad
     {
         internal const string ChangedAtTag = "_changedAt";
 
         /// <summary>
-        /// Part size used for multipart parts (except the last). OCI does not
-        /// publish an enforced minimum (only that the restriction is waived
-        /// for the last part); 5 MiB matches the S3 driver and keeps the
-        /// per-part buffer small.
+        /// Portable minimum multipart capability reported by FileHub. OCI does
+        /// not publish an enforced minimum; actual buffering uses the configured
+        /// <see cref="MultipartStreamOptions.PartSize"/>.
         /// </summary>
         internal const long OciMinimumPartSize = 5L * 1024 * 1024;
 
@@ -26,6 +25,8 @@ namespace FileHub.OracleObjectStorage
         private FileMetadata _metadata = new FileMetadata();
         private bool _isLoaded;
         private OciFileStreamBase _lastOpenStream;
+
+        internal FileMetadata CachedMetadata => _metadata;
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from OCI.
@@ -158,7 +159,25 @@ namespace FileHub.OracleObjectStorage
         private OciObjectStream OpenWriteStream(FileWriteOptions options, WriteStreamPreference preference)
         {
             ThrowIfStreamOpen();
-            return Track(new OciObjectStream(this, options, preference));
+
+            var ociWriteOptions = NormalizeOptions(options);
+            var multipart = ociWriteOptions?.Multipart ?? SessionInternal.Multipart;
+            OracleObjectStorageFileHub.ValidateMultipartOptions(multipart, nameof(options));
+
+            return Track(new OciObjectStream(this, ociWriteOptions, preference, multipart));
+        }
+
+        internal static OciWriteOptions NormalizeOptions(FileWriteOptions options)
+        {
+            if (options == null) return null;
+            if (options is OciWriteOptions s3) return s3;
+
+            return new OciWriteOptions
+            {
+                ContentType = options.ContentType,
+                CacheControl = options.CacheControl,
+                Metadata = options.Metadata,
+            };
         }
 
         /// <summary>
@@ -386,62 +405,6 @@ namespace FileHub.OracleObjectStorage
         }
 
         /// <summary>
-        /// Driver-internal: resolve the caller's <see cref="FileWriteOptions"/>
-        /// against the current metadata snapshot into everything a committed
-        /// write needs. See <see cref="OciWritePayload"/>.
-        /// </summary>
-        internal OciWritePayload BuildWritePayload(FileWriteOptions options)
-        {
-            var now = DateTime.UtcNow;
-
-            // User-facing tags after this write: start from the current snapshot
-            // and overlay any metadata from the write options.
-            var userTags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in _metadata.Tags)
-                userTags[kv.Key] = kv.Value;
-            var optionMeta = options?.Metadata;
-            if (optionMeta != null)
-            {
-                foreach (var kv in optionMeta)
-                    userTags[kv.Key] = kv.Value;
-            }
-
-            var contentType = options?.ContentType;
-            var cacheControl = options?.CacheControl;
-
-            // Server payload = the user tags plus the driver-internal last-write
-            // bookkeeping tag.
-            var meta = new Dictionary<string, string>(userTags, StringComparer.OrdinalIgnoreCase)
-            {
-                [ChangedAtTag] = now.ToString("O")
-            };
-
-            return new OciWritePayload(
-                new OciWriteOptions { ContentType = contentType, CacheControl = cacheControl, Metadata = meta },
-                new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags),
-                now);
-        }
-
-        // === IMultipartUploadable ===
-
-        public long MinimumPartSize => OciMinimumPartSize;
-
-        public Stream GetMultipartWriteStream(FileWriteOptions options = null)
-            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(options, ct));
-
-        public async Task<Stream> GetMultipartWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            // Options are bound to the object at CreateMultipartUpload; the
-            // stream installs the matching snapshot when the upload commits.
-            var payload = BuildWritePayload(options);
-            var uploadId = await SessionInternal.Client.CreateMultipartUploadAsync(
-                ObjectName, payload.ServerOptions, cancellationToken).ConfigureAwait(false);
-            return new OciMultipartWriteStream(this, uploadId, payload);
-        }
-
-        /// <summary>
         /// Returns the cached metadata snapshot when the driver already loaded
         /// it (strict <c>OpenFile</c> / <c>TryOpenFile</c> paid the HEAD); fires
         /// a single HEAD to populate it otherwise.
@@ -459,7 +422,7 @@ namespace FileHub.OracleObjectStorage
 
         public bool IsPublic => SessionInternal.GetIsPublic();
 
-        public Uri GetPublicUrl() => SyncBridge.Run(ct => GetPublicUrlAsync(ct));
+        public Uri GetPublicUrl() => SyncBridge.Run(GetPublicUrlAsync);
 
         public async Task<Uri> GetPublicUrlAsync(CancellationToken cancellationToken = default)
         {

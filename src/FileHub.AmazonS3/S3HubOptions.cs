@@ -53,6 +53,13 @@ namespace FileHub.AmazonS3
         /// </summary>
         public AmazonS3Config SdkConfig { get; init; }
 
+        /// <summary>
+        /// Multipart stream policy for every write made through this hub.
+        /// Defaults to a 32 MiB automatic threshold and 64 MiB parts.
+        /// Individual writes may override it through <see cref="S3WriteOptions.Multipart"/>.
+        /// </summary>
+        public MultipartStreamOptions Multipart { get; init; } = MultipartStreamOptions.Default;
+
         // === Typed factories: one per valid auth strategy ===
 
         /// <summary>

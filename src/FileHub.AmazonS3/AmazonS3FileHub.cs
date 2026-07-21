@@ -48,10 +48,11 @@ namespace FileHub.AmazonS3
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (string.IsNullOrEmpty(options.BucketName))
                 throw new ArgumentException("BucketName cannot be null or empty.", nameof(options));
+            ValidateMultipartOptions(options.Multipart, nameof(options));
 
             if (options.Client != null && options.Credentials != null && options.Profile != null)
                 throw new ArgumentException("S3HubOptions accepts exactly one of Client, Credentials, or Profile.", nameof(options));
-            
+
             if (options.Client != null && options.SdkConfig != null)
                 throw new ArgumentException("SdkConfig only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));
 
@@ -64,11 +65,11 @@ namespace FileHub.AmazonS3
                         throw new ArgumentException("Region is required when Client is provided (unless the client is an AmazonS3Client with a RegionEndpoint).", nameof(options));
                     return BuildAsync(
                         new RealS3Client(options.Client, options.BucketName, fromClient, ownsClient: false),
-                        options.RootPath, cancellationToken);
+                        options.RootPath, cancellationToken, options.Multipart);
                 }
                 return BuildAsync(
                     new RealS3Client(options.Client, options.BucketName, options.Region, ownsClient: false),
-                    options.RootPath, cancellationToken);
+                    options.RootPath, cancellationToken, options.Multipart);
             }
 
             if (options.Credentials != null)
@@ -81,7 +82,7 @@ namespace FileHub.AmazonS3
                 var sdkClient = new AmazonS3Client(options.Credentials, PrepareSdkConfig(options.SdkConfig, region));
                 return BuildAsync(
                     new RealS3Client(sdkClient, options.BucketName, region, ownsClient: true),
-                    options.RootPath, cancellationToken);
+                    options.RootPath, cancellationToken, options.Multipart);
             }
 
             // Profile path (also the default if everything is null)
@@ -107,7 +108,7 @@ namespace FileHub.AmazonS3
             var sdk = new AmazonS3Client(credsFromProfile, PrepareSdkConfig(options.SdkConfig, resolvedRegion));
             return BuildAsync(
                 new RealS3Client(sdk, options.BucketName, resolvedRegion, ownsClient: true),
-                options.RootPath, cancellationToken);
+                options.RootPath, cancellationToken, options.Multipart);
         }
 
         /// <summary>
@@ -274,13 +275,31 @@ namespace FileHub.AmazonS3
         private static async Task<AmazonS3FileHub> BuildAsync(
             IS3Client client,
             string rootPath,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            MultipartStreamOptions multipart = null)
         {
-            var hub = new AmazonS3FileHub(new S3Session(client), rootPath);
+            multipart ??= MultipartStreamOptions.Default;
+            ValidateMultipartOptions(multipart, nameof(multipart));
+            var hub = new AmazonS3FileHub(new S3Session(client, multipart), rootPath);
             var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);
             return hub;
+        }
+
+        internal static void ValidateMultipartOptions(MultipartStreamOptions multipart, string parameterName)
+        {
+            if (multipart == null)
+                return;
+
+            if (multipart.Threshold <= 0)
+                throw new ArgumentOutOfRangeException(parameterName, "MultipartThreshold must be positive.");
+
+            if (multipart.PartSize < AmazonS3File.S3MinimumPartSize || multipart.PartSize > int.MaxValue)
+                throw new ArgumentOutOfRangeException(parameterName, $"MultipartPartSize must be between {AmazonS3File.S3MinimumPartSize} and {int.MaxValue} bytes for the in-memory stream implementation.");
+                
+            if (multipart.Threshold > multipart.PartSize)
+                throw new ArgumentException("MultipartThreshold cannot exceed MultipartPartSize.", parameterName);
         }
 
         public void Dispose()

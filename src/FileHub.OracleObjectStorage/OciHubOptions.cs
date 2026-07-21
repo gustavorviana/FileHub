@@ -49,6 +49,13 @@ namespace FileHub.OracleObjectStorage
         public ObjectStorageClient Client { get; init; }
 
         /// <summary>
+        /// Multipart stream policy for every write made through this hub.
+        /// Defaults to a 32 MiB automatic threshold and 64 MiB parts.
+        /// Individual writes may override it through <see cref="OciWriteOptions.Multipart"/>.
+        /// </summary>
+        public MultipartStreamOptions Multipart { get; init; } = MultipartStreamOptions.Default;
+
+        /// <summary>
         /// Retry strategy for the SDK client the hub creates — i.e. with the
         /// config-file pair or <see cref="Provider"/>. When null, the OCI SDK
         /// default applies: no automatic retries. Pass

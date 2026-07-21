@@ -29,10 +29,12 @@ namespace FileHub.AmazonS3.Internal
         private bool _disposed;
 
         public IS3Client Client { get; }
+        public MultipartStreamOptions Multipart { get; }
 
-        public S3Session(IS3Client client)
+        public S3Session(IS3Client client, MultipartStreamOptions multipart)
         {
             Client = client ?? throw new ArgumentNullException(nameof(client));
+            Multipart = multipart ?? throw new ArgumentNullException(nameof(multipart));
         }
 
         public bool GetIsPublic() => SyncBridge.Run(ct => GetIsPublicAsync(ct));

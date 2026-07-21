@@ -1,14 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+#if NET8_0_OR_GREATER
 using System.Runtime.CompilerServices;
+#endif
 using System.Threading;
 using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
-    public class OracleObjectStorageDirectory : FileDirectory, IRefreshable, ISignedUploadable, IMultipartUploadableDirectory
+    public class OracleObjectStorageDirectory : FileDirectory, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -425,21 +427,6 @@ namespace FileHub.OracleObjectStorage
             return new Uri($"https://objectstorage.{client.Region}.oraclecloud.com{accessUri}");
         }
 
-        // === IMultipartUploadableDirectory ===
-
-        public long MinimumPartSize => OracleObjectStorageFile.OciMinimumPartSize;
-
-        public Stream GetMultipartWriteStream(string name, FileWriteOptions options = null)
-            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(name, options, ct));
-
-        public async Task<Stream> GetMultipartWriteStreamAsync(string name, FileWriteOptions options = null, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            // Zero-call stub — nested paths validated by OpenFile; the object
-            // only materializes when the returned stream commits.
-            var file = (OracleObjectStorageFile)await OpenFileAsync(name, createIfNotExists: true, cancellationToken).ConfigureAwait(false);
-            return await file.GetMultipartWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
-        }
 
         private string BuildNestedPrefix(string[] segments)
         {

@@ -8,8 +8,7 @@ using FileHub.OracleObjectStorage.Internal;
 namespace FileHub.OracleObjectStorage
 {
     /// <summary>
-    /// Write stream backing <see cref="IMultipartUploadable.GetMultipartWriteStream"/>.
-    /// Accumulates incoming bytes into a local 5 MiB buffer; every time
+    /// Accumulates incoming bytes into a configurable local part buffer; every time
     /// the buffer fills it fires <c>UploadPart</c> and resets. On close,
     /// the trailing buffer is uploaded and <c>CommitMultipartUpload</c>
     /// finalizes the object. Any exception during a write (or during
@@ -18,13 +17,14 @@ namespace FileHub.OracleObjectStorage
     /// </summary>
     internal sealed class OciMultipartWriteStream : Stream
     {
-        internal const int PartBufferSize = 5 * 1024 * 1024;
+        private const int MaximumPartCount = 10_000;
 
+        private readonly List<OciCompletedPart> _completedParts = [];
         private readonly OracleObjectStorageFile _file;
-        private readonly string _uploadId;
         private readonly OciWritePayload _payload;
-        private readonly List<OciCompletedPart> _completedParts = new();
-        private readonly MemoryStream _buffer = new();
+        private readonly MemoryStream _buffer;
+        private readonly string _uploadId;
+        private readonly int _partBufferSize;
 
         private int _nextPartNumber = 1;
         private bool _completed;
@@ -32,10 +32,14 @@ namespace FileHub.OracleObjectStorage
         private bool _disposed;
         private long _totalWritten;
 
-        public OciMultipartWriteStream(OracleObjectStorageFile file, string uploadId, OciWritePayload payload)
+        public OciMultipartWriteStream(OracleObjectStorageFile file, string uploadId, OciWritePayload payload, MemoryStream buffer, int partBufferSize)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _uploadId = uploadId ?? throw new ArgumentNullException(nameof(uploadId));
+            _partBufferSize = partBufferSize;
+
+            _buffer = buffer ?? new MemoryStream();
+            _totalWritten = _buffer.Length;
             _payload = payload;
         }
 
@@ -77,13 +81,13 @@ namespace FileHub.OracleObjectStorage
                 int written = 0;
                 while (written < count)
                 {
-                    var space = PartBufferSize - (int)_buffer.Length;
+                    var space = _partBufferSize - (int)_buffer.Length;
                     var chunk = Math.Min(space, count - written);
                     _buffer.Write(buffer, offset + written, chunk);
                     _totalWritten += chunk;
                     written += chunk;
 
-                    if (_buffer.Length >= PartBufferSize)
+                    if (_buffer.Length >= _partBufferSize)
                         await UploadCurrentBufferAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -174,6 +178,9 @@ namespace FileHub.OracleObjectStorage
 
         private async Task UploadCurrentBufferAsync(CancellationToken cancellationToken)
         {
+            if (_nextPartNumber > MaximumPartCount)
+                throw new FileHubException($"OCI multipart upload exceeded the {MaximumPartCount:N0}-part limit. Increase MultipartStreamOptions.PartSize.");
+
             _buffer.Position = 0;
             var len = _buffer.Length;
             var client = _file.SessionInternal.Client;

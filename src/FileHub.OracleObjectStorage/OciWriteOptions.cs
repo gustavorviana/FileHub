@@ -8,5 +8,10 @@ namespace FileHub.OracleObjectStorage
     /// </summary>
     public class OciWriteOptions : FileWriteOptions
     {
+        /// <summary>
+        /// Per-write multipart policy. <c>null</c> inherits
+        /// <see cref="OciHubOptions.Multipart"/> from the hub.
+        /// </summary>
+        public MultipartStreamOptions Multipart { get; set; }
     }
 }

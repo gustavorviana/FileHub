@@ -48,6 +48,7 @@ namespace FileHub.OracleObjectStorage
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (string.IsNullOrEmpty(options.BucketName))
                 throw new ArgumentException("BucketName cannot be null or empty.", nameof(options));
+            ValidateMultipartOptions(options.Multipart, nameof(options));
 
             var strategies = (options.Client != null ? 1 : 0)
                            + (options.Provider != null ? 1 : 0)
@@ -56,7 +57,7 @@ namespace FileHub.OracleObjectStorage
 
             if (strategies > 1)
                 throw new ArgumentException("OciHubOptions accepts exactly one of Client, Provider, or (ConfigFilePath/Profile).", nameof(options));
-           
+
             if (options.Client != null && options.RetryConfiguration != null)
                 throw new ArgumentException("RetryConfiguration only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));
 
@@ -67,7 +68,7 @@ namespace FileHub.OracleObjectStorage
                 if (string.IsNullOrEmpty(options.Namespace))
                     throw new ArgumentException("Namespace is required when Client is provided.", nameof(options));
                 var real = new RealOciClient(options.Client, options.Namespace, options.BucketName, options.RegionId, ownsClient: false);
-                return await BuildAsync(real, options.RootPath, cancellationToken).ConfigureAwait(false);
+                return await BuildAsync(real, options.RootPath, cancellationToken, options.Multipart).ConfigureAwait(false);
             }
 
             IAuthenticationDetailsProvider provider;
@@ -122,7 +123,7 @@ namespace FileHub.OracleObjectStorage
             }
 
             var realClient = new RealOciClient(sdkClient, @namespace, options.BucketName, regionId, ownsClient: true);
-            return await BuildAsync(realClient, options.RootPath, cancellationToken).ConfigureAwait(false);
+            return await BuildAsync(realClient, options.RootPath, cancellationToken, options.Multipart).ConfigureAwait(false);
         }
 
         // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===
@@ -280,13 +281,31 @@ namespace FileHub.OracleObjectStorage
         private static async Task<OracleObjectStorageFileHub> BuildAsync(
             IOciClient client,
             string rootPath,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            MultipartStreamOptions multipart = null)
         {
-            var hub = new OracleObjectStorageFileHub(new OciSession(client), rootPath);
+            multipart ??= MultipartStreamOptions.Default;
+            ValidateMultipartOptions(multipart, nameof(multipart));
+            var hub = new OracleObjectStorageFileHub(new OciSession(client, multipart), rootPath);
             var normalized = PathUtil.NormalizePrefix(rootPath);
             if (!string.IsNullOrEmpty(normalized) && hub.Root is IRefreshable refreshable)
                 await refreshable.RefreshAsync(cancellationToken).ConfigureAwait(false);
             return hub;
+        }
+
+        internal static void ValidateMultipartOptions(MultipartStreamOptions multipart, string parameterName)
+        {
+            if (multipart == null)
+                return;
+
+            if (multipart.Threshold <= 0)
+                throw new ArgumentOutOfRangeException(parameterName, "MultipartThreshold must be positive.");
+
+            if (multipart.PartSize <= 0 || multipart.PartSize > int.MaxValue)
+                throw new ArgumentOutOfRangeException(parameterName, $"MultipartPartSize must be between 1 and {int.MaxValue} bytes for the in-memory stream implementation.");
+
+            if (multipart.Threshold > multipart.PartSize)
+                throw new ArgumentException("MultipartThreshold cannot exceed MultipartPartSize.", parameterName);
         }
 
         public void Dispose()

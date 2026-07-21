@@ -12,6 +12,7 @@ namespace FileHub.OracleObjectStorage.Internal
     internal interface IOciSession : IDisposable
     {
         IOciClient Client { get; }
+        MultipartStreamOptions Multipart { get; }
 
         bool GetIsPublic();
 

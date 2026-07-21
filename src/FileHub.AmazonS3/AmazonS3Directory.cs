@@ -8,7 +8,7 @@ using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
-    public class AmazonS3Directory : FileDirectory, IRefreshable, ISignedUploadable, IMultipartUploadableDirectory
+    public class AmazonS3Directory : FileDirectory, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -577,23 +577,7 @@ namespace FileHub.AmazonS3
                 cancellationToken).ConfigureAwait(false);
             return new Uri(url);
         }
-
-        // === IMultipartUploadableDirectory ===
-
-        public long MinimumPartSize => AmazonS3File.S3MinimumPartSize;
-
-        public Stream GetMultipartWriteStream(string name, FileWriteOptions options = null)
-            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(name, options, ct));
-
-        public async Task<Stream> GetMultipartWriteStreamAsync(string name, FileWriteOptions options = null, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            // Zero-call stub — nested paths validated by OpenFile; the object
-            // only materializes when the returned stream commits.
-            var file = (AmazonS3File)await OpenFileAsync(name, createIfNotExists: true, cancellationToken).ConfigureAwait(false);
-            return await file.GetMultipartWriteStreamAsync(options, cancellationToken).ConfigureAwait(false);
-        }
-
+        
         private string ResolveLeafKey(string name)
         {
             // Walk the path through SplitPath to validate each segment (rejects

@@ -25,7 +25,8 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        using (var stream = await file.GetMultipartWriteStreamAsync())
+        var options = new S3WriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
+        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -45,7 +46,8 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[PartSize * 2 + 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 31) & 0xFF);
 
-        using (var stream = await file.GetMultipartWriteStreamAsync())
+        var options = new S3WriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
+        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -61,13 +63,13 @@ public class AmazonS3MultipartStreamTests
         using var hub = NewHub(out var client);
         var file = hub.Root.CreateFile("spill.bin");
 
-        // 12 MiB through the REGULAR write stream (not the multipart API):
-        // the stream must spill to multipart past 5 MiB instead of buffering
-        // the whole payload in memory.
+        // Per-write policy keeps this test small while proving threshold and
+        // part size are resolved together from MultipartStreamOptions.
         var payload = new byte[PartSize * 2 + 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 17) & 0xFF);
 
-        using (var stream = await file.GetWriteStreamAsync())
+        var options = new S3WriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             // 80 KiB chunks, like FileEntry's copy helpers.
             var chunk = 81920;
@@ -110,7 +112,7 @@ public class AmazonS3MultipartStreamTests
         file.Delete();
 
         var firstPart = new byte[PartSize]; // exactly one part
-        var stream = await file.GetMultipartWriteStreamAsync();
+        var stream = await file.GetWriteStreamAsync(preference: WriteStreamPreference.Multipart);
         try
         {
             await stream.WriteAsync(firstPart, 0, firstPart.Length); // triggers UploadPart
@@ -128,13 +130,11 @@ public class AmazonS3MultipartStreamTests
     }
 
     [Fact]
-    public async Task MinimumPartSize_Is5Mib()
+    public void HubMultipartDefaults_Are32MibThresholdAnd64MibParts()
     {
-        using var hub = NewHub(out _);
-        var file = (AmazonS3File)hub.Root.CreateFile("x.bin");
-        IMultipartUploadable up = file;
-        Assert.Equal(PartSize, up.MinimumPartSize);
-        await Task.CompletedTask;
+        var multipart = new S3HubOptions().Multipart;
+        Assert.Equal(32L * 1024 * 1024, multipart.Threshold);
+        Assert.Equal(64L * 1024 * 1024, multipart.PartSize);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class AmazonS3MultipartStreamTests
         };
 
         var payload = new byte[1024];
-        using (var stream = await file.GetMultipartWriteStreamAsync(options))
+        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
             await stream.WriteAsync(payload, 0, payload.Length);
 
         var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("img.bin").GetMetadataAsync();
@@ -171,7 +171,7 @@ public class AmazonS3MultipartStreamTests
         var file = hub.Root.CreateFile("prefer-mp.bin");
         var putsBefore = client.PutInvocationCount;
 
-        // 1 KiB — way under the 5 MiB auto threshold, but the caller asked
+        // 1 KiB — way under the 32 MiB default threshold, but the caller asked
         // for multipart up-front, so no PutObject fires for the content.
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
@@ -194,7 +194,7 @@ public class AmazonS3MultipartStreamTests
         var file = hub.Root.CreateFile("prefer-single.bin");
         var putsBefore = client.PutInvocationCount;
 
-        // 6 MiB — past the auto threshold, but Single forbids the spill:
+        // Single forbids the spill regardless of the configured threshold:
         // whole payload buffers and commits as one PutObject.
         var payload = new byte[PartSize + 1024 * 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 13) & 0xFF);
@@ -211,33 +211,13 @@ public class AmazonS3MultipartStreamTests
     }
 
     [Fact]
-    public async Task DirectoryMultipartWriteStream_NestedName_RoundTrips()
-    {
-        using var hub = NewHub(out var client);
-        var dir = (IMultipartUploadableDirectory)hub.Root;
-        Assert.Equal(PartSize, dir.MinimumPartSize);
-
-        var payload = new byte[PartSize + 1024]; // forces at least 2 parts
-        for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 7) & 0xFF);
-
-        using (var stream = await dir.GetMultipartWriteStreamAsync("reports/2026/big.bin"))
-        {
-            await stream.WriteAsync(payload, 0, payload.Length);
-        }
-
-        Assert.True(client.TryGetBody("reports/2026/big.bin", out var body));
-        Assert.Equal(payload, body);
-        Assert.Equal(0, client.ActiveMultipartUploadCount);
-    }
-
-    [Fact]
     public async Task Multipart_EmptyPayload_StillAppliesWriteOptions()
     {
         using var hub = NewHub(out _);
         var file = (AmazonS3File)hub.Root.CreateFile("empty.bin");
 
         var options = new S3WriteOptions { ContentType = "text/plain", StorageClass = "STANDARD_IA" };
-        using (await file.GetMultipartWriteStreamAsync(options))
+        using (await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
         {
             // no write → zero-byte completion path
         }

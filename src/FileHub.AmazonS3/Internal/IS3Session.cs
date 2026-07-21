@@ -13,6 +13,7 @@ namespace FileHub.AmazonS3.Internal
     internal interface IS3Session : IDisposable
     {
         IS3Client Client { get; }
+        MultipartStreamOptions Multipart { get; }
 
         bool GetIsPublic();
 

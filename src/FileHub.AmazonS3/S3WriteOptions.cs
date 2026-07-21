@@ -31,5 +31,11 @@ namespace FileHub.AmazonS3
         /// (SSE-KMS). <c>null</c> = bucket default / omit header.
         /// </summary>
         public string ServerSideEncryption { get; set; }
+
+        /// <summary>
+        /// Per-write multipart policy. <c>null</c> inherits
+        /// <see cref="S3HubOptions.Multipart"/> from the hub.
+        /// </summary>
+        public MultipartStreamOptions Multipart { get; set; }
     }
 }

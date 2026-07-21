@@ -20,7 +20,7 @@ namespace FileHub.AmazonS3
     /// is fine.
     /// </para>
     /// </summary>
-    public class AmazonS3File : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadable, IMultipartUploadSignable, ILazyLoad
+    public class AmazonS3File : FileEntry, IUrlAccessible, IRefreshable, IMultipartUploadSignable, ILazyLoad
     {
         /// <summary>S3 minimum for multipart parts (except the last). 5 MiB.</summary>
         internal const long S3MinimumPartSize = 5L * 1024 * 1024;
@@ -159,7 +159,8 @@ namespace FileHub.AmazonS3
         private S3ObjectStream OpenWriteStream(S3WriteOptions options, WriteStreamPreference preference)
         {
             ThrowIfStreamOpen();
-            return Track(new S3ObjectStream(this, options, preference));
+            AmazonS3FileHub.ValidateMultipartOptions(options?.Multipart, nameof(options));
+            return Track(new S3ObjectStream(this, options, preference, options?.Multipart ?? SessionInternal.Multipart));
         }
 
         /// <summary>
@@ -440,21 +441,6 @@ namespace FileHub.AmazonS3
         // === IMultipartUploadable ===
 
         public long MinimumPartSize => S3MinimumPartSize;
-
-        public Stream GetMultipartWriteStream(FileWriteOptions options = null)
-            => SyncBridge.Run(ct => GetMultipartWriteStreamAsync(options, ct));
-
-        public async Task<Stream> GetMultipartWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
-        {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            var s3Options = NormalizeOptions(options);
-            // Options are bound to the object at CreateMultipartUpload; the stream
-            // re-applies them to the cached snapshot when the upload completes.
-            var uploadId = await SessionInternal.Client.BeginMultipartUploadAsync(
-                ObjectKey, s3Options, cancellationToken).ConfigureAwait(false);
-            return new S3MultipartWriteStream(this, uploadId, s3Options);
-        }
 
         // === IMultipartUploadSignable ===
 
