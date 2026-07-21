@@ -142,6 +142,19 @@ namespace FileHub.Local
         }
 
         // Local filesystem ops are synchronous; the async surface wraps them.
+        public override Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CreateFile(name));
+        }
+
+        public override Task<(FileEntry File, bool Exists)> TryOpenFileAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var exists = TryOpenFile(name, out var file);
+            return Task.FromResult((file, exists));
+        }
+
         public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -153,6 +166,50 @@ namespace FileHub.Local
             cancellationToken.ThrowIfCancellationRequested();
             var exists = TryOpenDirectory(name, out var directory);
             return Task.FromResult((directory, exists));
+        }
+
+        public override Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(FileExists(name));
+        }
+
+        public override Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(DirectoryExists(name));
+        }
+
+        public override Task DeleteAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Delete();
+            return Task.CompletedTask;
+        }
+
+        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Delete(name);
+            return Task.CompletedTask;
+        }
+
+        public override Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Rename(newName));
+        }
+
+        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(MoveTo(directory, name));
+        }
+
+        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CopyTo(directory, name));
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")

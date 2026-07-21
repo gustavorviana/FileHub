@@ -190,6 +190,18 @@ namespace FileHub.AmazonS3
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
         }
 
+        protected override Task<FileDirectory> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
+        {
+            // Zero-call branch is pure in-process construction — delegate to
+            // the sync hook; strict (false) keeps the base async probe.
+            if (createIfNotExists)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(OpenOrCreateChildDirectory(segment, createIfNotExists: true));
+            }
+            return base.OpenOrCreateChildDirectoryAsync(segment, createIfNotExists, cancellationToken);
+        }
+
         private async Task<FileEntry> TryOpenFileCoreAsync(string name, CancellationToken cancellationToken = default)
         {
             try

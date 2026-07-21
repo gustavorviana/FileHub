@@ -75,6 +75,11 @@ namespace FileHub
         public override Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
             => _inner.ExistsAsync(name, cancellationToken);
 
+        public override Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
+            => _inner.FileExistsAsync(name, cancellationToken);
+        public override Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
+            => _inner.DirectoryExistsAsync(name, cancellationToken);
+
         public override bool TryOpenFile(string name, out FileEntry file)
         {
             if (_inner.TryOpenFile(name, out var f))
@@ -84,6 +89,12 @@ namespace FileHub
             }
             file = null;
             return false;
+        }
+
+        public override async Task<(FileEntry File, bool Exists)> TryOpenFileAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var (f, exists) = await _inner.TryOpenFileAsync(name, cancellationToken).ConfigureAwait(false);
+            return (exists ? f.AsReadOnly() : null, exists);
         }
 
         public override IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null)
@@ -115,10 +126,13 @@ namespace FileHub
 
         // Write operations - all throw
         public override FileEntry CreateFile(string name) { ThrowIfReadOnly(); return null; }
+        public override Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileEntry>(null); }
         public override FileDirectory CreateDirectory(string name) { ThrowIfReadOnly(); return null; }
         public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileDirectory>(null); }
         public override void Delete() => ThrowIfReadOnly();
         public override void Delete(string name) => ThrowIfReadOnly();
+        public override Task DeleteAsync(CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
+        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
         public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }
         public override FileDirectory MoveTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
         public override FileDirectory CopyTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }

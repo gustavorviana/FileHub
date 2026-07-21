@@ -218,6 +218,16 @@ namespace FileHub.OracleObjectStorage
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
         }
 
+        protected override Task<FileDirectory> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
+        {
+            if (createIfNotExists)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(OpenOrCreateChildDirectory(segment, createIfNotExists: true));
+            }
+            return base.OpenOrCreateChildDirectoryAsync(segment, createIfNotExists, cancellationToken);
+        }
+
         private async Task<FileEntry> TryOpenFileCoreAsync(string name, CancellationToken cancellationToken = default)
         {
             try

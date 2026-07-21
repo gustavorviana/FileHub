@@ -35,8 +35,8 @@ internal sealed class InMemoryOciWorkRequestHandle
         string bucket,
         string region,
         WorkRequest.StatusEnum initialStatus =
-            WorkRequest.StatusEnum.Accepted,
-        float? initialPercentComplete = 0)
+            WorkRequest.StatusEnum.Completed,
+        float? initialPercentComplete = 100)
     {
         if (string.IsNullOrWhiteSpace(id))
         {

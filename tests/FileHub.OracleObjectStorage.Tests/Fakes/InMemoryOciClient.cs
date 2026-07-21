@@ -263,7 +263,7 @@ internal sealed class InMemoryOciClient : IOciClient
         return _workRequestHandle ??= NewWorkRequestHandle();
     }
 
-    public InMemoryOciWorkRequestHandle NewWorkRequestHandle(WorkRequest.StatusEnum initialStatus = WorkRequest.StatusEnum.Accepted, float? initialPercentComplete = 0)
+    public InMemoryOciWorkRequestHandle NewWorkRequestHandle(WorkRequest.StatusEnum initialStatus = WorkRequest.StatusEnum.Completed, float? initialPercentComplete = 100)
     {
         return _workRequestHandle = new InMemoryOciWorkRequestHandle(id: "work-request",
             @namespace: Namespace,
