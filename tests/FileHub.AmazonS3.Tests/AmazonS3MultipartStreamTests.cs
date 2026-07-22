@@ -21,8 +21,12 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        var options = new S3WriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new S3WriteOptions
+        {
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -42,8 +46,12 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[PartSize * 2 + 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 31) & 0xFF);
 
-        var options = new S3WriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new S3WriteOptions
+        {
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -108,7 +116,8 @@ public class AmazonS3MultipartStreamTests
         file.Delete();
 
         var firstPart = new byte[PartSize]; // exactly one part
-        var stream = await file.GetWriteStreamAsync(preference: WriteStreamPreference.Multipart);
+        var stream = await file.GetWriteStreamAsync(
+            new S3WriteOptions { StreamPreference = WriteStreamPreference.Multipart });
         try
         {
             await stream.WriteAsync(firstPart, 0, firstPart.Length); // triggers UploadPart
@@ -146,10 +155,11 @@ public class AmazonS3MultipartStreamTests
             StorageClass = "GLACIER",
             ServerSideEncryption = "AES256",
             Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
+            StreamPreference = WriteStreamPreference.Multipart,
         };
 
         var payload = new byte[1024];
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        using (var stream = await file.GetWriteStreamAsync(options))
             await stream.WriteAsync(payload, 0, payload.Length);
 
         var meta = (AmazonS3FileMetadata)await hub.Root.OpenFile("img.bin").GetMetadataAsync();
@@ -172,12 +182,34 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        using (var stream = await file.GetWriteStreamAsync(null, WriteStreamPreference.Multipart))
+        using (var stream = await file.GetWriteStreamAsync(
+            new S3WriteOptions { StreamPreference = WriteStreamPreference.Multipart }))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
 
         Assert.True(client.TryGetBody("prefer-mp.bin", out var body));
+        Assert.Equal(payload, body);
+        Assert.Equal(putsBefore, client.PutInvocationCount);
+        Assert.Equal(0, client.ActiveMultipartUploadCount);
+    }
+
+    [Fact]
+    public async Task SetBytesAsync_UsesPreferenceFromWriteOptions()
+    {
+        using var hub = NewHub(out var client);
+        var file = hub.Root.CreateFile("set-bytes-multipart.bin");
+        var putsBefore = client.PutInvocationCount;
+        var payload = new byte[1024];
+        var options = new S3WriteOptions
+        {
+            StreamPreference = WriteStreamPreference.Multipart,
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+        };
+
+        await file.SetBytesAsync(payload, options);
+
+        Assert.True(client.TryGetBody("set-bytes-multipart.bin", out var body));
         Assert.Equal(payload, body);
         Assert.Equal(putsBefore, client.PutInvocationCount);
         Assert.Equal(0, client.ActiveMultipartUploadCount);
@@ -195,7 +227,8 @@ public class AmazonS3MultipartStreamTests
         var payload = new byte[PartSize + 1024 * 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 13) & 0xFF);
 
-        using (var stream = await file.GetWriteStreamAsync(null, WriteStreamPreference.Single))
+        using (var stream = await file.GetWriteStreamAsync(
+            new S3WriteOptions { StreamPreference = WriteStreamPreference.Single }))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -212,8 +245,13 @@ public class AmazonS3MultipartStreamTests
         using var hub = NewHub(out _);
         var file = (AmazonS3File)hub.Root.CreateFile("empty.bin");
 
-        var options = new S3WriteOptions { ContentType = "text/plain", StorageClass = "STANDARD_IA" };
-        using (await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new S3WriteOptions
+        {
+            ContentType = "text/plain",
+            StorageClass = "STANDARD_IA",
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (await file.GetWriteStreamAsync(options))
         {
             // no write → zero-byte completion path
         }

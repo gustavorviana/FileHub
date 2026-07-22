@@ -156,11 +156,14 @@ namespace FileHub.AmazonS3
             return Task.FromResult<Stream>(Track(new S3ReadStream(this)));
         }
 
-        private S3ObjectStream OpenWriteStream(S3WriteOptions options, WriteStreamPreference preference)
+        private S3ObjectStream OpenWriteStream(S3WriteOptions options)
         {
             ThrowIfStreamOpen();
             AmazonS3FileHub.ValidateMultipartOptions(options?.Multipart, nameof(options));
-            return Track(new S3ObjectStream(this, options, preference, options?.Multipart ?? SessionInternal.Multipart));
+            return Track(new S3ObjectStream(
+                this,
+                options,
+                options?.Multipart ?? SessionInternal.Multipart));
         }
 
         /// <summary>
@@ -301,24 +304,24 @@ namespace FileHub.AmazonS3
         /// <summary>
         /// Open a write stream whose commit applies <paramref name="options"/>
         /// on <c>PutObject</c>. Options live with the stream — no cross-call
-        /// staging on the file. <paramref name="preference"/> selects the
-        /// commit strategy: <see cref="WriteStreamPreference.Multipart"/>
+        /// staging on the file. <see cref="FileWriteOptions.StreamPreference"/>
+        /// selects the commit strategy: <see cref="WriteStreamPreference.Multipart"/>
         /// skips the buffering phase and opens the multipart upload on the
         /// first written byte; <see cref="WriteStreamPreference.Single"/>
         /// never spills — the whole payload buffers in memory and commits as
         /// one <c>PutObject</c>.
         /// </summary>
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenWriteStream(NormalizeOptions(options), preference));
+            return Task.FromResult<Stream>(OpenWriteStream(NormalizeOptions(options)));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
-            return OpenWriteStream(NormalizeOptions(options), preference);
+            return OpenWriteStream(NormalizeOptions(options));
         }
 
         /// <summary>
@@ -347,6 +350,7 @@ namespace FileHub.AmazonS3
                 ContentType = options.ContentType,
                 CacheControl = options.CacheControl,
                 Metadata = options.Metadata,
+                StreamPreference = options.StreamPreference,
             };
         }
 

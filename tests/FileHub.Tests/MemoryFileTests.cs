@@ -53,7 +53,8 @@ public class MemoryFileTests
         var file = NewRoot().CreateFile("a.bin");
         var payload = new byte[] { 1, 2, 3 };
 
-        using (var stream = file.GetWriteStream(null, WriteStreamPreference.Multipart))
+        using (var stream = file.GetWriteStream(
+            new FileWriteOptions { StreamPreference = WriteStreamPreference.Multipart }))
             stream.Write(payload, 0, payload.Length);
 
         Assert.Equal(payload, file.ReadAllBytes());

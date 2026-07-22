@@ -156,7 +156,7 @@ namespace FileHub.OracleObjectStorage
             return Track(new OciReadStream(this));
         }
 
-        private OciObjectStream OpenWriteStream(FileWriteOptions options, WriteStreamPreference preference)
+        private OciObjectStream OpenWriteStream(FileWriteOptions options)
         {
             ThrowIfStreamOpen();
 
@@ -164,7 +164,10 @@ namespace FileHub.OracleObjectStorage
             var multipart = ociWriteOptions?.Multipart ?? SessionInternal.Multipart;
             OracleObjectStorageFileHub.ValidateMultipartOptions(multipart, nameof(options));
 
-            return Track(new OciObjectStream(this, ociWriteOptions, preference, multipart));
+            return Track(new OciObjectStream(
+                this,
+                ociWriteOptions,
+                multipart));
         }
 
         internal static OciWriteOptions NormalizeOptions(FileWriteOptions options)
@@ -177,6 +180,7 @@ namespace FileHub.OracleObjectStorage
                 ContentType = options.ContentType,
                 CacheControl = options.CacheControl,
                 Metadata = options.Metadata,
+                StreamPreference = options.StreamPreference,
             };
         }
 
@@ -384,24 +388,24 @@ namespace FileHub.OracleObjectStorage
         /// <summary>
         /// Open a write stream whose commit applies <paramref name="options"/>
         /// on <c>PutObject</c>. Options live with the stream — no cross-call
-        /// staging on the file. <paramref name="preference"/> selects the
-        /// commit strategy: <see cref="WriteStreamPreference.Multipart"/>
+        /// staging on the file. <see cref="FileWriteOptions.StreamPreference"/>
+        /// selects the commit strategy: <see cref="WriteStreamPreference.Multipart"/>
         /// skips the buffering phase and opens the multipart upload on the
         /// first written byte; <see cref="WriteStreamPreference.Single"/>
         /// never spills — the whole payload buffers in memory and commits as
         /// one <c>PutObject</c>.
         /// </summary>
-        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenWriteStream(options, preference));
+            return Task.FromResult<Stream>(OpenWriteStream(options));
         }
 
-        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
-            return OpenWriteStream(options, preference);
+            return OpenWriteStream(options);
         }
 
         /// <summary>

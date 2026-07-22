@@ -41,14 +41,14 @@ namespace FileHub.OracleObjectStorage
         private bool _multipart;
         private bool _disposed;
 
-        public OciObjectStream(OracleObjectStorageFile file, FileWriteOptions options, WriteStreamPreference preference, MultipartStreamOptions multipartStreamOptions)
+        public OciObjectStream(OracleObjectStorageFile file, FileWriteOptions options, MultipartStreamOptions multipartStreamOptions)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _options = options;
-            _preference = preference;
+            _preference = options?.StreamPreference ?? WriteStreamPreference.Auto;
             _multipartStreamOptions = multipartStreamOptions;
 
-            if (preference != WriteStreamPreference.Multipart)
+            if (_preference != WriteStreamPreference.Multipart)
                 _writeBuffer = new MemoryStream();
         }
 

@@ -4,7 +4,7 @@ namespace FileHub
 {
     /// <summary>
     /// Options applied at write time (<see cref="FileEntry.SetBytesAsync(byte[], FileWriteOptions, System.Threading.CancellationToken)"/>,
-    /// <see cref="FileEntry.GetWriteStreamAsync(FileWriteOptions, WriteStreamPreference, System.Threading.CancellationToken)"/>,
+    /// <see cref="FileEntry.GetWriteStreamAsync(FileWriteOptions, System.Threading.CancellationToken)"/>,
     /// <see cref="FileEntry.CopyFromStreamAsync"/>).
     /// <para>
     /// Drivers that do not support a field silently ignore it — never throw. Check
@@ -18,6 +18,12 @@ namespace FileHub
     /// </summary>
     public class FileWriteOptions
     {
+        /// <summary>
+        /// Hints how a write stream should commit. Drivers without multipart
+        /// support ignore this value silently.
+        /// </summary>
+        public WriteStreamPreference StreamPreference { get; set; } = WriteStreamPreference.Auto;
+
         /// <summary>MIME content type (e.g. <c>"image/png"</c>). <c>null</c> = driver / backend default.</summary>
         public string ContentType { get; set; }
 

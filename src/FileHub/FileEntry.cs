@@ -22,11 +22,11 @@ namespace FileHub
         public abstract Stream GetReadStream();
 
         /// <summary>
-        /// Opens a write stream. <paramref name="preference"/> hints how the
-        /// stream should commit — see <see cref="WriteStreamPreference"/>;
-        /// drivers without multipart support ignore it silently.
+        /// Opens a write stream. <see cref="FileWriteOptions.StreamPreference"/>
+        /// hints how the stream should commit; drivers without multipart
+        /// support ignore it silently.
         /// </summary>
-        public abstract Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto);
+        public abstract Stream GetWriteStream(FileWriteOptions options = null);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true);
@@ -136,11 +136,11 @@ namespace FileHub
             return Task.FromResult(GetReadStream());
         }
 
-        /// <summary>Async version of <see cref="GetWriteStream(FileWriteOptions, WriteStreamPreference)"/>.</summary>
-        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
+        /// <summary>Async version of <see cref="GetWriteStream(FileWriteOptions)"/>.</summary>
+        public virtual Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(GetWriteStream(options, preference));
+            return Task.FromResult(GetWriteStream(options));
         }
 
         public virtual async Task<string> ReadAllTextAsync(CancellationToken cancellationToken = default)

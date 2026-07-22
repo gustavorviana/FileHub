@@ -21,8 +21,12 @@ public class OciMultipartStreamTests
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        var options = new OciWriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new OciWriteOptions
+        {
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -42,8 +46,12 @@ public class OciMultipartStreamTests
         var payload = new byte[PartSize * 2 + 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 31) & 0xFF);
 
-        var options = new OciWriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new OciWriteOptions
+        {
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -65,7 +73,7 @@ public class OciMultipartStreamTests
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 17) & 0xFF);
 
         var options = new OciWriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) };
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        using (var stream = await file.GetWriteStreamAsync(options))
         {
             // 80 KiB chunks, like FileEntry's copy helpers.
             var chunk = 81920;
@@ -108,7 +116,8 @@ public class OciMultipartStreamTests
         file.Delete();
 
         var firstPart = new byte[PartSize]; // exactly one part
-        var stream = await file.GetWriteStreamAsync(preference: WriteStreamPreference.Multipart);
+        var stream = await file.GetWriteStreamAsync(
+            new OciWriteOptions { StreamPreference = WriteStreamPreference.Multipart });
         try
         {
             await stream.WriteAsync(firstPart, 0, firstPart.Length); // triggers UploadPart
@@ -144,10 +153,11 @@ public class OciMultipartStreamTests
             ContentType = "image/png",
             CacheControl = "public,max-age=3600",
             Metadata = new Dictionary<string, string> { ["owner"] = "team-x" },
+            StreamPreference = WriteStreamPreference.Multipart,
         };
 
         var payload = new byte[1024];
-        using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        using (var stream = await file.GetWriteStreamAsync(options))
             await stream.WriteAsync(payload, 0, payload.Length);
 
         var meta = await hub.Root.OpenFile("img.bin").GetMetadataAsync();
@@ -168,12 +178,34 @@ public class OciMultipartStreamTests
         var payload = new byte[1024];
         for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i & 0xFF);
 
-        using (var stream = await file.GetWriteStreamAsync(null, WriteStreamPreference.Multipart))
+        using (var stream = await file.GetWriteStreamAsync(
+            new OciWriteOptions { StreamPreference = WriteStreamPreference.Multipart }))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
 
         Assert.True(client.TryGetBody("prefer-mp.bin", out var body));
+        Assert.Equal(payload, body);
+        Assert.Equal(putsBefore, client.PutInvocationCount);
+        Assert.Equal(0, client.ActiveMultipartUploadCount);
+    }
+
+    [Fact]
+    public async Task SetBytesAsync_UsesPreferenceFromWriteOptions()
+    {
+        using var hub = NewHub(out var client);
+        var file = hub.Root.CreateFile("set-bytes-multipart.bin");
+        var putsBefore = client.PutInvocationCount;
+        var payload = new byte[1024];
+        var options = new OciWriteOptions
+        {
+            StreamPreference = WriteStreamPreference.Multipart,
+            Multipart = new MultipartStreamOptions(PartSize, PartSize),
+        };
+
+        await file.SetBytesAsync(payload, options);
+
+        Assert.True(client.TryGetBody("set-bytes-multipart.bin", out var body));
         Assert.Equal(payload, body);
         Assert.Equal(putsBefore, client.PutInvocationCount);
         Assert.Equal(0, client.ActiveMultipartUploadCount);
@@ -191,7 +223,8 @@ public class OciMultipartStreamTests
         var payload = new byte[PartSize + 1024 * 1024];
         for (long i = 0; i < payload.Length; i++) payload[i] = (byte)((i * 13) & 0xFF);
 
-        using (var stream = await file.GetWriteStreamAsync(null, WriteStreamPreference.Single))
+        using (var stream = await file.GetWriteStreamAsync(
+            new OciWriteOptions { StreamPreference = WriteStreamPreference.Single }))
         {
             await stream.WriteAsync(payload, 0, payload.Length);
         }
@@ -208,8 +241,12 @@ public class OciMultipartStreamTests
         using var hub = NewHub(out var client);
         var file = (OracleObjectStorageFile)hub.Root.CreateFile("empty.bin");
 
-        var options = new FileWriteOptions { ContentType = "text/plain" };
-        using (await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+        var options = new FileWriteOptions
+        {
+            ContentType = "text/plain",
+            StreamPreference = WriteStreamPreference.Multipart,
+        };
+        using (await file.GetWriteStreamAsync(options))
         {
             // no write → zero-byte completion path
         }

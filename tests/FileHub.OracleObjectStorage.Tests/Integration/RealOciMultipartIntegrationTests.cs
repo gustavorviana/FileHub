@@ -22,8 +22,11 @@ public class RealOciMultipartIntegrationTests : RealIntegrationTestBase
         {
             var file = rootDir.CreateFile(name);
             using (var stream = await file.GetWriteStreamAsync(
-                new OciWriteOptions { Multipart = new MultipartStreamOptions(PartSize, PartSize) },
-                WriteStreamPreference.Multipart))
+                new OciWriteOptions
+                {
+                    Multipart = new MultipartStreamOptions(PartSize, PartSize),
+                    StreamPreference = WriteStreamPreference.Multipart,
+                }))
             {
                 await stream.WriteAsync(payload, 0, payload.Length);
             }

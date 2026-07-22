@@ -25,8 +25,9 @@ public class RealS3MultipartIntegrationTests : RealS3IntegrationTestBase
             var options = new S3WriteOptions
             {
                 Multipart = new MultipartStreamOptions(PartSize, PartSize),
+                StreamPreference = WriteStreamPreference.Multipart,
             };
-            using (var stream = await file.GetWriteStreamAsync(options, WriteStreamPreference.Multipart))
+            using (var stream = await file.GetWriteStreamAsync(options))
             {
                 await stream.WriteAsync(payload, 0, payload.Length);
             }

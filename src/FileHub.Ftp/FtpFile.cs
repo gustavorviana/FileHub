@@ -95,12 +95,12 @@ namespace FileHub.Ftp
             return await OpenStreamAsync(isWrite: false, cancellationToken).ConfigureAwait(false);
         }
 
-        // preference is ignored: FTP writes stream straight over the data
+        // StreamPreference is ignored: FTP writes stream straight over the data
         // connection, so there is no single-request vs multipart distinction.
-        public override Stream GetWriteStream(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto)
-            => SyncBridge.Run(ct => GetWriteStreamAsync(options, preference, ct));
+        public override Stream GetWriteStream(FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetWriteStreamAsync(options, ct));
 
-        public override async Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, WriteStreamPreference preference = WriteStreamPreference.Auto, CancellationToken cancellationToken = default)
+        public override async Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);

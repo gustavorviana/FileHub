@@ -2,8 +2,9 @@ namespace FileHub
 {
     /// <summary>
     /// Caller preference for how a write stream commits its bytes, passed to
-    /// <see cref="FileEntry.GetWriteStream(FileWriteOptions, WriteStreamPreference)"/> /
-    /// <see cref="FileEntry.GetWriteStreamAsync(FileWriteOptions, WriteStreamPreference, System.Threading.CancellationToken)"/>.
+    /// <see cref="FileWriteOptions.StreamPreference"/> used by
+    /// <see cref="FileEntry.GetWriteStream(FileWriteOptions)"/> /
+    /// <see cref="FileEntry.GetWriteStreamAsync(FileWriteOptions, System.Threading.CancellationToken)"/>.
     /// Drivers without a multipart surface (Local, Memory, FTP) ignore the
     /// preference silently — same contract as <see cref="FileWriteOptions"/>
     /// fields: unsupported means ignored, never thrown.

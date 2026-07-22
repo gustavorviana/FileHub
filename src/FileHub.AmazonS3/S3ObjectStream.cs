@@ -37,14 +37,14 @@ namespace FileHub.AmazonS3
         private bool _multipart;
         private bool _disposed;
 
-        public S3ObjectStream(AmazonS3File file, S3WriteOptions options, WriteStreamPreference preference, MultipartStreamOptions multipartStreamOptions)
+        public S3ObjectStream(AmazonS3File file, S3WriteOptions options, MultipartStreamOptions multipartStreamOptions)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
             _options = options;
-            _preference = preference;
+            _preference = options?.StreamPreference ?? WriteStreamPreference.Auto;
             _multipartStreamOptions = multipartStreamOptions;
 
-            if (preference != WriteStreamPreference.Multipart)
+            if (_preference != WriteStreamPreference.Multipart)
                 _writeBuffer = new MemoryStream();
         }
 
