@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [development]
   pull_request:
-    branches: [main]
+    branches: [main, development]
 
 permissions:
   contents: read
@@ -13,6 +13,12 @@ jobs:
   build:
     name: Build & test
     runs-on: ubuntu-latest
+
+    # secrets can't be referenced in step-level `if:` expressions — surface the
+    # one the OCI-config step gates on as a job env var so the condition can
+    # read it via `env.`.
+    env:
+      OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -35,9 +41,7 @@ jobs:
       # secrets are absent (e.g. fork PRs) the private key is empty, the config
       # file is skipped, and the [RequiresOci*] attributes skip the tests.
       - name: Write OCI config
-        if: ${{ secrets.OCI_PRIVATE_KEY != '' }}
-        env:
-          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        if: ${{ env.OCI_PRIVATE_KEY != '' }}
         run: |
           mkdir -p "$HOME/.oci"
           printf '%s\n' "$OCI_PRIVATE_KEY" > "$HOME/.oci/key.pem"
