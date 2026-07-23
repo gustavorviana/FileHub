@@ -131,7 +131,7 @@ namespace FileHub
         /// assembly (e.g. <see cref="FileEntry"/>) can build destination paths for
         /// diagnostics.
         /// </summary>
-        protected internal virtual string CombineChildPath(string name) => $"{Path}/{name}";
+        protected internal virtual string CombineChildPath(string name) => PathUtil.JoinDisplay(Path, name);
 
         // === Composite operations (async holds the logic; sync bridges) ===
 
@@ -250,7 +250,7 @@ namespace FileHub
                 if (createIfNotExists)
                     return await CreateFileAsync(head, cancellationToken).ConfigureAwait(false);
 
-                throw new FileNotFoundException($"The file \"{System.IO.Path.Combine(Path, name)}\" was not found.");
+                throw new FileNotFoundException($"The file \"{CombineChildPath(name)}\" was not found.");
             }
 
             var dir = await OpenOrCreateChildDirectoryAsync(head, createIfNotExists, cancellationToken).ConfigureAwait(false);
@@ -293,7 +293,7 @@ namespace FileHub
             if (createIfNotExists)
                 return await CreateDirectoryAsync(segment, cancellationToken).ConfigureAwait(false);
 
-            throw new DirectoryNotFoundException($"The directory \"{System.IO.Path.Combine(Path, segment)}\" was not found.");
+            throw new DirectoryNotFoundException($"The directory \"{CombineChildPath(segment)}\" was not found.");
         }
 
         protected virtual FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)

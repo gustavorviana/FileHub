@@ -260,7 +260,7 @@ namespace FileHub.OracleObjectStorage
             // Rename never overwrites — the server-side rename would replace an
             // existing object silently, so guard with a HEAD. Best-effort.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destinationObject = PathUtil.CombineKey(_parent.PrefixInternal, newName);
 
@@ -298,7 +298,7 @@ namespace FileHub.OracleObjectStorage
                 // overwrite: false must not clobber an existing object — the
                 // server-side rename would replace it silently. Best-effort HEAD.
                 if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
                 // Same rationale as CopyToAsync — load the source so the new
                 // file doesn't carry _length = -1.
                 if (!_isLoaded)
@@ -353,7 +353,7 @@ namespace FileHub.OracleObjectStorage
                 PathUtil.ValidateName(name);
 
                 if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
 
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look

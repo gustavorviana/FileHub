@@ -10,8 +10,9 @@ namespace FileHub.Memory
         internal MemoryFileData Data { get; }
         private readonly MemoryDirectory _parent;
 
+        // Driver-neutral "/" separator — see MemoryDirectory's Path note.
         public override string Path => _parent != null
-            ? System.IO.Path.Combine(_parent.Path, Name)
+            ? PathUtil.JoinDisplay(_parent.Path, Name)
             : Name;
 
         public override FileDirectory Parent => _parent;
@@ -85,7 +86,7 @@ namespace FileHub.Memory
 
             // Rename never overwrites — a name already taken is an error.
             if (_parent != null && _parent.Exists(newName))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             _parent?.RemoveFile(Name);
             Name = newName;

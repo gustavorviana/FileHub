@@ -26,8 +26,11 @@ namespace FileHub.Memory
             : base(name, rootPath: null)
         {
             _parent = parent;
+            // Driver-neutral "/" join (see PathUtil.JoinDisplay) — Memory is a
+            // logical key store, so paths stay OS-independent and never double
+            // the separator at the root.
             Path = parent != null
-                ? System.IO.Path.Combine(parent.Path, name)
+                ? PathUtil.JoinDisplay(parent.Path, name)
                 : name;
             CreationTimeUtc = DateTime.UtcNow;
             LastWriteTimeUtc = CreationTimeUtc;
@@ -48,7 +51,7 @@ namespace FileHub.Memory
             // A file and a directory cannot share a name (mirrors the
             // local-filesystem driver).
             if (_directories.ContainsKey(head))
-                throw new FileAlreadyExistsException($"{Path}/{head}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(Path, head));
             var data = new MemoryFileData(head);
             _files[head] = data;
             return new MemoryFile(this, data);
@@ -107,7 +110,7 @@ namespace FileHub.Memory
                     // A file and a directory cannot share a name (mirrors the
                     // local-filesystem driver).
                     if (current._files.ContainsKey(seg))
-                        throw new FileAlreadyExistsException($"{current.Path}/{seg}");
+                        throw new FileAlreadyExistsException(PathUtil.JoinDisplay(current.Path, seg));
                     child = new MemoryDirectory(seg, current);
                     current._directories[seg] = child;
                 }
@@ -284,7 +287,7 @@ namespace FileHub.Memory
 
             // Rename never overwrites — a name already taken is an error.
             if (_parent != null && _parent.Exists(newName))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             _parent?.RemoveDirectory(Name);
             var renamed = new MemoryDirectory(newName, _parent);

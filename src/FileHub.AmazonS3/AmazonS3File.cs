@@ -255,7 +255,7 @@ namespace FileHub.AmazonS3
             // Rename never overwrites — CopyObject would clobber an existing
             // key, so guard with a HEAD. Best-effort, not atomic.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var sourceKey = ObjectKey;
             var destinationKey = PathUtil.CombineKey(_parent.PrefixInternal, newName);
@@ -380,7 +380,7 @@ namespace FileHub.AmazonS3
                 // (and CopyObject) always overwrite, so guard with an explicit HEAD.
                 // Best-effort — not atomic against a concurrent writer.
                 if (!overwrite && await s3Dir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{s3Dir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(s3Dir.Path, name));
                 // Ensure we know the source size — without this, a stub created
                 // via OpenFile(name, createIfNotExists: true) that was never
                 // refreshed would propagate _length = -1 into the new file,

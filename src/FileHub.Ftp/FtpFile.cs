@@ -241,7 +241,7 @@ namespace FileHub.Ftp
             // Rename never overwrites — behaviour on an existing target is
             // server-dependent, so check first and fail with a clear exception.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_parent.RootPathInternal, _parent.PathInternal, newName);
             await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
@@ -278,7 +278,7 @@ namespace FileHub.Ftp
                 // servers reject RNTO onto an existing path anyway, but check
                 // explicitly so the failure is a clear FileAlreadyExistsException.
                 if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ftpDir.Path, name));
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
                 progress?.Report(new TransferStatus(_length, _length));
@@ -340,7 +340,7 @@ namespace FileHub.Ftp
                 // overwrite: false must not clobber the destination — the upload
                 // below (STOR) would replace it. Check before spilling to temp.
                 if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ftpDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ftpDir.Path, name));
                 var tempPath = System.IO.Path.GetTempFileName();
                 try
                 {

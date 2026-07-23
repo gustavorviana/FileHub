@@ -485,7 +485,7 @@ namespace FileHub.Ftp
 
             // Rename never overwrites — a name already taken is an error.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _parent._path, newName);
             await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);

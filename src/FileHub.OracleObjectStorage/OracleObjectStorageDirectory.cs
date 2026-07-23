@@ -639,7 +639,7 @@ namespace FileHub.OracleObjectStorage
 
             // Rename never overwrites — a name already taken is an error.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
