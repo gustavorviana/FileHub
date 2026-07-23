@@ -261,6 +261,34 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash()
+    {
+        var name = nameof(CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash);
+        var scope = Scope(name);
+
+        // Input mixes both a backslash and a forward slash — OCI object names
+        // only use "/", so the marker key must be normalized before the PUT.
+        scope.CreateDirectory("x\\y/z");
+
+        Assert.True(_fixture.Client.TryGetBody($"{name}/x/y/z/", out _));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.Contains('\\'));
+        Assert.True(scope.TryOpenDirectory("x/y/z", out _));
+    }
+
+    [Fact]
+    public void CreateFile_MixedSeparators_NormalizesKeyToForwardSlash()
+    {
+        var name = nameof(CreateFile_MixedSeparators_NormalizesKeyToForwardSlash);
+        var scope = Scope(name);
+
+        scope.CreateFile("a\\b/c\\d.txt").SetText("x");
+
+        Assert.True(_fixture.Client.TryGetBody($"{name}/a/b/c/d.txt", out _));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.Contains('\\'));
+        Assert.True(scope.FileExists("a/b/c/d.txt"));
+    }
+
+    [Fact]
     public void CreateDirectory_Nested_ReusesExistingIntermediate()
     {
         var scope = Scope(nameof(CreateDirectory_Nested_ReusesExistingIntermediate));

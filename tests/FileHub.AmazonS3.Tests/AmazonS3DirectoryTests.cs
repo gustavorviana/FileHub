@@ -30,6 +30,35 @@ public class AmazonS3DirectoryTests
     }
 
     [Fact]
+    public void CreateFile_MixedSeparators_NormalizesKeyToForwardSlash()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        // Input mixes both a backslash and a forward slash — S3 keys only
+        // ever use "/", so the driver must normalize before the PUT.
+        hub.Root.CreateFile("a\\b/c\\d.txt").SetText("x");
+
+        Assert.Contains("a/b/c/d.txt", client.Keys);
+        Assert.DoesNotContain(client.Keys, k => k.Contains('\\'));
+        Assert.True(hub.Root.FileExists("a/b/c/d.txt"));
+    }
+
+    [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        var dir = hub.Root.CreateDirectory("x\\y/z");
+
+        Assert.Equal("/x/y/z", dir.Path);
+        Assert.Contains("x/y/z/", client.Keys);
+        Assert.DoesNotContain(client.Keys, k => k.Contains('\\'));
+        Assert.True(hub.Root.TryOpenDirectory("x/y/z", out _));
+    }
+
+    [Fact]
     public void GetDirectories_EnumeratesImmediateChildren()
     {
         using var hub = NewHub();
