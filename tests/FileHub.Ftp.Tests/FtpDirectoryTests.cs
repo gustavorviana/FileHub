@@ -26,6 +26,32 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
+    public void CreateFile_MixedSeparators_NormalizesPathToForwardSlash()
+    {
+        // Input mixes both a backslash and a forward slash — the FTP wire
+        // protocol only understands "/", so the driver must normalize before
+        // issuing MKD/STOR. Real nesting must appear, and no node may carry a
+        // literal backslash in its name.
+        var file = Root.CreateFile("a\\b/c\\d.txt");
+
+        Assert.Equal("/a/b/c/d.txt", file.Path);
+        Assert.NotNull(Client.Server.Find("/a/b/c/d.txt"));
+        Assert.Null(Client.Server.Find("/a\\b/c\\d.txt"));
+        Assert.False(Client.Server.Root.Children.Keys.Any(k => k.Contains('\\')));
+    }
+
+    [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesPathToForwardSlash()
+    {
+        var dir = Root.CreateDirectory("x\\y/z");
+
+        Assert.Equal("/x/y/z", dir.Path);
+        Assert.NotNull(Client.Server.Find("/x/y/z"));
+        Assert.False(Client.Server.Root.Children.Keys.Any(k => k.Contains('\\')));
+        Assert.True(Root.TryOpenDirectory("x/y/z", out _));
+    }
+
+    [Fact]
     public void TryOpenFile_ReturnsFalseWhenMissing()
     {
         Assert.False(Root.TryOpenFile("missing.txt", out _));
