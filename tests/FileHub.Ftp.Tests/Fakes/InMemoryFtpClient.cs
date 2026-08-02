@@ -33,6 +33,13 @@ internal sealed class InMemoryFtpClient : IFtpClient
 
     public object ConnectionScope => _server;
 
+    /// <summary>
+    /// Test hook: when set and it returns a non-null exception for a given path,
+    /// <see cref="DeleteFileAsync"/> throws it instead of removing the file.
+    /// Used to exercise the partial-move path (copy succeeds, delete fails).
+    /// </summary>
+    public Func<string, Exception?>? DeleteFailureInjector { get; set; }
+
     public int ConnectInvocationCount => _connectInvocationCount;
     public int StatInvocationCount => _statInvocationCount;
     public int FileExistsInvocationCount => _fileExistsInvocationCount;
@@ -127,6 +134,10 @@ internal sealed class InMemoryFtpClient : IFtpClient
         var name = LeafName(path);
         if (parent == null || !parent.Children.TryGetValue(name, out var node) || node.IsDirectory)
             throw new FileNotFoundException($"FTP file \"{path}\" was not found.");
+
+        var injected = DeleteFailureInjector?.Invoke(path);
+        if (injected is not null)
+            throw injected;
 
         parent.Children.Remove(name);
         return Task.CompletedTask;
