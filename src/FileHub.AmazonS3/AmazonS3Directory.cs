@@ -698,6 +698,16 @@ namespace FileHub.AmazonS3
                 && S3SessionTarget.SameCredentials(s3Dir._session.Client, _session.Client))
             {
                 var destinationPrefix = PathUtil.ResolveSafeChildPrefix(s3Dir._rootPrefix, s3Dir._prefix, name);
+                if (IsSameBucket(s3Dir))
+                {
+                    // Same prefix = onto itself; a prefix under the source = into a
+                    // descendant, which would recurse (copied objects reappear
+                    // under the source prefix).
+                    if (string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal))
+                        throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+                    if (IsDescendantPath(destinationPrefix))
+                        throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
+                }
                 await CopyAllObjectsAsync(_prefix, s3Dir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new AmazonS3Directory(s3Dir, name);
             }
@@ -708,6 +718,19 @@ namespace FileHub.AmazonS3
         }
 
         // === Helpers ===
+
+        // True when the other directory resolves to the same physical bucket —
+        // the precondition for a server-side copy and for the self/descendant
+        // guards (a matching prefix in a different bucket is a different object).
+        private bool IsSameBucket(AmazonS3Directory other)
+            => string.Equals(other._session.Client.Bucket, _session.Client.Bucket, StringComparison.Ordinal);
+
+        // True when destinationPrefix lives strictly beneath this directory's own
+        // prefix — used to reject move/copy of a directory into its own subtree.
+        private bool IsDescendantPath(string destinationPrefix)
+            => !string.IsNullOrEmpty(_prefix)
+               && !string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal)
+               && destinationPrefix.StartsWith(_prefix, StringComparison.Ordinal);
 
         private bool IsChildFile(string key, out string leaf)
         {

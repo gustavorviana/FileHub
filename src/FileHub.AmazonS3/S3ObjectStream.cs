@@ -125,10 +125,23 @@ namespace FileHub.AmazonS3
         private async Task SpillToMultipartAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var uploadId = await _file.SessionInternal.Client.BeginMultipartUploadAsync(_file.ObjectKey, _options, cancellationToken).ConfigureAwait(false);
+            var client = _file.SessionInternal.Client;
+            var uploadId = await client.BeginMultipartUploadAsync(_file.ObjectKey, _options, cancellationToken).ConfigureAwait(false);
 
-            _writeBuffer = new S3MultipartWriteStream(_file, uploadId, _options, (MemoryStream)_writeBuffer, _multipartStreamOptions.PartSize);
-            _multipart = true;
+            try
+            {
+                _writeBuffer = new S3MultipartWriteStream(_file, uploadId, _options, (MemoryStream)_writeBuffer, _multipartStreamOptions.PartSize);
+                _multipart = true;
+            }
+            catch
+            {
+                // The multipart stream never took ownership of the upload, so
+                // nothing downstream will abort it — clean up the just-opened
+                // upload here so a failed spill doesn't orphan parts server-side.
+                try { await client.AbortMultipartUploadAsync(_file.ObjectKey, uploadId, CancellationToken.None).ConfigureAwait(false); }
+                catch { /* best effort — the original failure is what the caller needs */ }
+                throw;
+            }
         }
 
         protected override void Dispose(bool disposing)

@@ -280,6 +280,9 @@ namespace FileHub.Ftp
                 if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                     throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ftpDir.Path, name));
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
+                // Same connection + same resolved path means moving onto itself.
+                if (string.Equals(destination, FullPath, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", Path);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
                 progress?.Report(new TransferStatus(_length, _length));
                 return new FtpFile(ftpDir, name, _length, _lastWriteTimeUtc, _creationTimeUtc);
@@ -337,6 +340,9 @@ namespace FileHub.Ftp
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
+                // Same connection + same resolved path means copying onto itself.
+                if (string.Equals(FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name), FullPath, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
                 // overwrite: false must not clobber the destination — the upload
                 // below (STOR) would replace it. Check before spilling to temp.
                 if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))

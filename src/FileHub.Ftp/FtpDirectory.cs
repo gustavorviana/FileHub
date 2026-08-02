@@ -517,6 +517,11 @@ namespace FileHub.Ftp
                 PathUtil.ValidateName(name);
                 await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir._rootPathFtp, ftpDir._path, name);
+                // Same connection + same resolved path means moving onto itself.
+                if (string.Equals(destination, _path, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot move directory \"{Path}\" onto itself.", Path);
+                if (IsDescendantPath(destination))
+                    throw new FileHubException($"Cannot move directory \"{Path}\" into one of its descendants.");
                 await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);
                 return new FtpDirectory(ftpDir, name);
             }
@@ -525,6 +530,11 @@ namespace FileHub.Ftp
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+                // Source already gone — move is effectively complete (mirrors
+                // the file-level move so the semantics match across entry types).
             }
             catch (Exception ex)
             {
@@ -543,25 +553,57 @@ namespace FileHub.Ftp
 
         public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
+            if (directory is FtpDirectory ftpDir
+                && FtpSessionTarget.SameConnection(ftpDir._session.Client, _session.Client))
+            {
+                var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir._rootPathFtp, ftpDir._path, name);
+                // Same connection + same resolved path means copying onto itself.
+                if (string.Equals(destination, _path, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+                // Copying into a descendant would recurse into the growing tree.
+                if (IsDescendantPath(destination))
+                    throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
+            }
+
             // FTP has no server-side copy command, even within the same
-            // connection — fall through to a generic recursive copy.
+            // connection — do a generic recursive copy. Each file leaf streams
+            // via FtpFile.CopyToAsync (temp-file spill on the same connection);
+            // the whole walk stays async and honors the cancellation token.
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
-            CopyContentsGeneric(this, newDir);
+            await CopyContentsAsync(this, newDir, cancellationToken).ConfigureAwait(false);
             return newDir;
         }
 
         // === Helpers ===
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination)
+        // True when destination lives strictly beneath this directory's own path
+        // on the same server — used to reject move/copy into its own subtree.
+        private bool IsDescendantPath(string destination)
         {
-            foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+            if (string.IsNullOrEmpty(_path) || _path == "/") return false;
+            var prefix = _path.EndsWith("/") ? _path : _path + "/";
+            return destination.StartsWith(prefix, StringComparison.Ordinal);
+        }
 
-            foreach (var subDir in source.GetDirectories())
+        private static async Task CopyContentsAsync(FileDirectory source, FileDirectory destination, CancellationToken cancellationToken)
+        {
+#if NET8_0_OR_GREATER
+            await foreach (var file in source.GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
+                await file.CopyToAsync(destination, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+            await foreach (var subDir in source.GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
-                var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContentsGeneric(subDir, newSubDir);
+                var newSubDir = await destination.CreateDirectoryAsync(subDir.Name, cancellationToken).ConfigureAwait(false);
+                await CopyContentsAsync(subDir, newSubDir, cancellationToken).ConfigureAwait(false);
             }
+#else
+            foreach (var file in await source.GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
+                await file.CopyToAsync(destination, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+            foreach (var subDir in await source.GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
+            {
+                var newSubDir = await destination.CreateDirectoryAsync(subDir.Name, cancellationToken).ConfigureAwait(false);
+                await CopyContentsAsync(subDir, newSubDir, cancellationToken).ConfigureAwait(false);
+            }
+#endif
         }
     }
 }

@@ -40,7 +40,25 @@ namespace FileHub.Local
             }
             PathUtil.ValidateLocalName(head);
             var filePath = ResolveSafePath(head);
-            File.Create(filePath).Dispose();
+            if (Directory.Exists(filePath))
+                throw new FileAlreadyExistsException(filePath);
+
+            try
+            {
+                File.Create(filePath).Dispose();
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions to callers.
+                if (Directory.Exists(filePath))
+                    throw new FileAlreadyExistsException(filePath);
+
+                throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
+            }
             InvalidateInfo();
             return new LocalFile(this, head);
         }
@@ -264,7 +282,23 @@ namespace FileHub.Local
         public override void Delete()
         {
             ThrowIfReadOnly();
-            Directory.Delete(Path, recursive: true);
+            try
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // Already gone — deletion is idempotent.
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions to callers.
+                throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
+            }
             InvalidateInfo();
         }
 
@@ -281,12 +315,28 @@ namespace FileHub.Local
             }
             PathUtil.ValidateLocalName(head);
             var fullPath = ResolveSafePath(head);
-            if (Directory.Exists(fullPath))
-                Directory.Delete(fullPath, recursive: true);
-            else if (File.Exists(fullPath))
-                File.Delete(fullPath);
-            else
+
+            var isDir = Directory.Exists(fullPath);
+            var isFile = !isDir && File.Exists(fullPath);
+            if (!isDir && !isFile)
                 throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+
+            try
+            {
+                if (isDir)
+                    Directory.Delete(fullPath, recursive: true);
+                else
+                    File.Delete(fullPath);
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions to callers.
+                throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
+            }
             InvalidateInfo();
         }
 
@@ -310,6 +360,9 @@ namespace FileHub.Local
             var newPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(parentPath, newName));
 
             EnsureWithinRoot(newPath);
+#if NET8_0_OR_GREATER
+            EnsureNoSymlinkEscape(newPath);
+#endif
 
             // Rename never overwrites — a name already taken is an error.
             if (Directory.Exists(newPath) || File.Exists(newPath))
@@ -334,25 +387,110 @@ namespace FileHub.Local
         {
             ThrowIfReadOnly();
 
+            // Same-filesystem move: rename via Directory.Move (atomic) when the
+            // destination is a fresh name on the same volume. Directory.Move does
+            // NOT span volumes, so a cross-volume (or cross-driver, or merge-into-
+            // existing) destination falls back to copy + delete.
+            if (directory is LocalDirectory localDir)
+            {
+                if (NestedPath.HasSeparator(name))
+                {
+                    if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                        return MoveTo(localDir.CreateDirectory(subPath), leaf);
+                    name = leaf;
+                }
+
+                PathUtil.ValidateLocalName(name);
+                var destPath = localDir.ResolveSafeChildPath(name);
+
+                // Moving onto the same physical path is a caller error — refuse it
+                // explicitly. Otherwise the copy+delete fallback would copy the
+                // directory onto itself and then delete the source (losing it, and
+                // an empty source outright). Mirrors File.Move's self-move refusal.
+                if (string.Equals(System.IO.Path.GetFullPath(Path), destPath, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot move directory \"{Path}\" onto itself.", Path);
+
+                // Moving a directory into one of its own descendants would make
+                // the copy+delete fallback recurse into the tree it is growing.
+                if (IsDescendantPath(destPath))
+                    throw new FileHubException($"Cannot move directory \"{Path}\" into one of its descendants.");
+
+                // Only take the atomic path for a clean, non-existing target;
+                // merging into an existing directory keeps the copy+delete
+                // semantics callers already rely on.
+                if (!Directory.Exists(destPath) && !File.Exists(destPath))
+                {
+                    try
+                    {
+                        Directory.Move(Path, destPath);
+                        InvalidateInfo();
+                        return new LocalDirectory(destPath, localDir.RootPath, localDir);
+                    }
+                    catch (IOException)
+                    {
+                        // Cross-volume move is unsupported by Directory.Move —
+                        // fall through to copy + delete.
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        throw new FileHubException($"Failed to move directory \"{Path}\" to \"{destPath}\".", ex);
+                    }
+                }
+            }
+
+            return MoveByCopyDelete(directory, name);
+        }
+
+        // Copy the subtree, then delete the source. A delete failure rolls the
+        // copy back so no duplicate is left behind, and the raw System.IO error
+        // is translated before it reaches the caller.
+        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name)
+        {
             var copied = CopyTo(directory, name);
             try
             {
                 Directory.Delete(Path, recursive: true);
             }
-            catch
+            catch (DirectoryNotFoundException)
             {
-                // Rollback: delete the copy that was made to keep state consistent
-                try { copied.Delete(); } catch { }
-                throw;
+                // Source already gone — move is effectively complete.
             }
+            catch (Exception ex)
+            {
+                try { copied.Delete(); } catch { /* best effort rollback */ }
+                throw new FileHubException(
+                    $"Failed to move directory \"{Path}\" to \"{copied.Path}\"; the partial copy was rolled back.", ex);
+            }
+            InvalidateInfo();
             return copied;
         }
 
         public override FileDirectory CopyTo(FileDirectory directory, string name)
         {
+            if (directory is LocalDirectory localDir)
+            {
+                var destPath = localDir.ResolveSafeChildPath(name);
+                // Copying onto the same physical path is a caller error.
+                if (string.Equals(System.IO.Path.GetFullPath(Path), destPath, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+                // Copying into a descendant would recurse into the growing tree.
+                if (IsDescendantPath(destPath))
+                    throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
+            }
+
             var newDir = directory.CreateDirectory(name);
             CopyContents(this, newDir);
             return newDir;
+        }
+
+        // True when destFullPath lives strictly beneath this directory's own
+        // path — used to reject move/copy of a directory into its own subtree.
+        private bool IsDescendantPath(string destFullPath)
+        {
+            var source = System.IO.Path.GetFullPath(Path);
+            var sep = System.IO.Path.DirectorySeparatorChar;
+            var sourceWithSep = source.EndsWith(sep.ToString()) ? source : source + sep;
+            return destFullPath.StartsWith(sourceWithSep, StringComparison.OrdinalIgnoreCase);
         }
 
         // === Helpers ===

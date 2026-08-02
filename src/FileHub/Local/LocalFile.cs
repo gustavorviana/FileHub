@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.Local
 {
@@ -43,7 +45,23 @@ namespace FileHub.Local
         public override void Delete()
         {
             ThrowIfReadOnly();
-            File.Delete(Path);
+            try
+            {
+                File.Delete(Path);
+            }
+            catch (DirectoryNotFoundException)
+            {
+                // Parent directory gone — nothing to delete. Deletion is idempotent.
+            }
+            catch (IOException ex)
+            {
+                // Never leak raw System.IO exceptions to callers.
+                throw new FileHubException($"Failed to delete \"{Path}\".", ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new FileHubException($"Failed to delete \"{Path}\".", ex);
+            }
         }
 
         // 80 KB matches the copy-loop buffer in FileEntry, so each ReadAsync
@@ -112,9 +130,180 @@ namespace FileHub.Local
         public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
         {
             ThrowIfReadOnly();
+
+            // Same-filesystem move: rename via File.Move — atomic within a volume,
+            // and .NET's File.Move already handles the cross-volume case by
+            // copying then deleting the source. Only a cross-driver destination
+            // (e.g. moving into an S3 hub) needs the manual copy + delete below.
+            if (directory is LocalDirectory localDir)
+            {
+                if (NestedPath.HasSeparator(name))
+                {
+                    if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                        return MoveTo(localDir.CreateDirectory(subPath), leaf, progress, overwrite);
+                    name = leaf;
+                }
+
+                PathUtil.ValidateLocalName(name);
+                var destPath = localDir.ResolveSafeChildPath(name);
+
+                // Moving onto the same physical path is a caller error — refuse
+                // it explicitly. Silently succeeding would hide the mistake, and
+                // "clearing the target" below would delete the source before the
+                // File.Move, losing the file.
+                if (string.Equals(System.IO.Path.GetFullPath(Path), destPath, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", destPath);
+
+                // Native File.Move is atomic and fast but reports no byte-level
+                // progress. With a progress sink, fall through to the streaming
+                // copy+delete (MoveAcrossDrivers) so callers still see granular
+                // progress.
+                if (progress == null)
+                {
+                    try
+                    {
+                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                        {
+                            if (!overwrite)
+                                throw new FileAlreadyExistsException(destPath);
+                            // File.Move has no overwrite overload on netstandard2.0,
+                            // so clear the existing target first.
+                            if (File.Exists(destPath)) File.Delete(destPath);
+                            else Directory.Delete(destPath, recursive: true);
+                        }
+                        File.Move(Path, destPath);
+                    }
+                    catch (IOException ex)
+                    {
+                        if (File.Exists(destPath) || Directory.Exists(destPath))
+                            throw new FileAlreadyExistsException(destPath);
+                        throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
+                    }
+
+                    return new LocalFile(localDir, name);
+                }
+            }
+
+            return MoveAcrossDrivers(directory, name, progress, overwrite);
+        }
+
+        // Cross-driver move: copy the bytes, then delete the source. The copy
+        // runs first so a failure leaves the original intact; a delete that
+        // fails after a good copy surfaces as PartialMoveException instead of
+        // pretending the move fully succeeded or fully failed.
+        private FileEntry MoveAcrossDrivers(FileDirectory directory, string name, IProgress<TransferStatus> progress, bool overwrite)
+        {
             var newFile = CopyTo(directory, name, progress, overwrite);
-            Delete();
+            try
+            {
+                Delete();
+            }
+            catch (FileNotFoundException)
+            {
+                // Source already gone — move is effectively complete.
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"File was copied to \"{newFile.Path}\" but the original at \"{Path}\" could not be deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newFile.Path,
+                    innerException: ex);
+            }
             return newFile;
+        }
+
+        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // A same-filesystem move is a fast local syscall — run it inline.
+            // A cross-driver move must stay genuinely async (it may hit the
+            // network), so defer to the async copy + delete below.
+            if (directory is LocalDirectory)
+                return Task.FromResult(MoveTo(directory, name, progress, overwrite));
+
+            return MoveAcrossDriversAsync(directory, name, progress, overwrite, cancellationToken);
+        }
+
+        private async Task<FileEntry> MoveAcrossDriversAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress, bool overwrite, CancellationToken cancellationToken)
+        {
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+                // Source already gone — move is effectively complete.
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"File was copied to \"{newFile.Path}\" but the original at \"{Path}\" could not be deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newFile.Path,
+                    innerException: ex);
+            }
+            return newFile;
+        }
+
+        // Same-filesystem copy uses File.Copy so the OS moves the bytes; a
+        // cross-driver destination falls back to the stream-based base copy.
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        {
+            if (directory is LocalDirectory localDir)
+            {
+                if (NestedPath.HasSeparator(name))
+                {
+                    if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                        return CopyTo(localDir.CreateDirectory(subPath), leaf, progress, overwrite);
+                    name = leaf;
+                }
+
+                PathUtil.ValidateLocalName(name);
+                var destPath = localDir.ResolveSafeChildPath(name);
+
+                // Copying onto the same physical path is a caller error — refuse
+                // it explicitly rather than lean on File.Copy's opaque IOException.
+                if (string.Equals(System.IO.Path.GetFullPath(Path), destPath, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", destPath);
+
+                if (!overwrite && (File.Exists(destPath) || Directory.Exists(destPath)))
+                    throw new FileAlreadyExistsException(destPath);
+
+                // Native File.Copy lets the OS move the bytes but reports no
+                // byte-level progress. With a progress sink, fall through to the
+                // stream-based base copy so callers still see granular progress.
+                if (progress == null)
+                {
+                    try
+                    {
+                        File.Copy(Path, destPath, overwrite);
+                    }
+                    catch (IOException ex)
+                    {
+                        if (!overwrite && (File.Exists(destPath) || Directory.Exists(destPath)))
+                            throw new FileAlreadyExistsException(destPath);
+                        throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
+                    }
+
+                    return new LocalFile(localDir, name);
+                }
+            }
+
+            return base.CopyTo(directory, name, progress, overwrite);
         }
 
         private FileInfo RefreshInfo()
