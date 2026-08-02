@@ -260,7 +260,7 @@ namespace FileHub.OracleObjectStorage
             // Rename never overwrites — the server-side rename would replace an
             // existing object silently, so guard with a HEAD. Best-effort.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destinationObject = PathUtil.CombineKey(_parent.PrefixInternal, newName);
 
@@ -295,10 +295,16 @@ namespace FileHub.OracleObjectStorage
                 && string.Equals(ociDir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal))
             {
                 PathUtil.ValidateName(name);
+                // IsSameBucket adds the region check (a bucket name can repeat
+                // across regions) so an identical object name only counts as
+                // moving onto itself when it truly resolves to the same object.
+                if (IsSameBucket(ociDir)
+                    && string.Equals(PathUtil.CombineKey(ociDir.PrefixInternal, name), ObjectName, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", Path);
                 // overwrite: false must not clobber an existing object — the
                 // server-side rename would replace it silently. Best-effort HEAD.
                 if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
                 // Same rationale as CopyToAsync — load the source so the new
                 // file doesn't carry _length = -1.
                 if (!_isLoaded)
@@ -352,13 +358,18 @@ namespace FileHub.OracleObjectStorage
             {
                 PathUtil.ValidateName(name);
 
+                // Refuse copy/move onto the exact same object (same bucket + name).
+                if (IsSameBucket(ociDir)
+                    && string.Equals(PathUtil.CombineKey(ociDir.PrefixInternal, name), ObjectName, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
+
                 if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{ociDir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
 
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look
-                // missing to any consumer that reads Length.
-                if (!_isLoaded && progress != null)
+                // missing to any consumer that reads Length. 
+                if (!_isLoaded)
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
 
                 var destinationObject = PathUtil.CombineKey(ociDir.PrefixInternal, name);
@@ -374,7 +385,7 @@ namespace FileHub.OracleObjectStorage
 
                 var progressReporter = TransferStatusProgress.FromCallback(_length, progress);
 
-                await operationHandle.WaitAndRequestCancellationAsync(progressReporter, cancellationToken);
+                await operationHandle.WaitAndRequestCancellationAsync(progressReporter, cancellationToken).ConfigureAwait(false);
 
                 progressReporter?.Report(100);
 
@@ -470,6 +481,14 @@ namespace FileHub.OracleObjectStorage
             }
             base.Dispose();
         }
+
+        // True when the target directory resolves to the same physical bucket as
+        // this file. Region is part of identity: a bucket name can repeat across
+        // regions within a namespace, so namespace + region + bucket must match.
+        private bool IsSameBucket(OracleObjectStorageDirectory dir)
+            => string.Equals(dir.SessionInternal.Client.Namespace, SessionInternal.Client.Namespace, StringComparison.Ordinal)
+               && string.Equals(dir.SessionInternal.Client.Region, SessionInternal.Client.Region, StringComparison.Ordinal)
+               && string.Equals(dir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal);
 
         private static string ConcatPath(string parentPath, string name)
         {

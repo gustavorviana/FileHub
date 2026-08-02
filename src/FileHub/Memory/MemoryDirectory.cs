@@ -26,8 +26,11 @@ namespace FileHub.Memory
             : base(name, rootPath: null)
         {
             _parent = parent;
+            // Driver-neutral "/" join (see PathUtil.JoinDisplay) — Memory is a
+            // logical key store, so paths stay OS-independent and never double
+            // the separator at the root.
             Path = parent != null
-                ? System.IO.Path.Combine(parent.Path, name)
+                ? PathUtil.JoinDisplay(parent.Path, name)
                 : name;
             CreationTimeUtc = DateTime.UtcNow;
             LastWriteTimeUtc = CreationTimeUtc;
@@ -48,7 +51,7 @@ namespace FileHub.Memory
             // A file and a directory cannot share a name (mirrors the
             // local-filesystem driver).
             if (_directories.ContainsKey(head))
-                throw new FileAlreadyExistsException($"{Path}/{head}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(Path, head));
             var data = new MemoryFileData(head);
             _files[head] = data;
             return new MemoryFile(this, data);
@@ -107,7 +110,7 @@ namespace FileHub.Memory
                     // A file and a directory cannot share a name (mirrors the
                     // local-filesystem driver).
                     if (current._files.ContainsKey(seg))
-                        throw new FileAlreadyExistsException($"{current.Path}/{seg}");
+                        throw new FileAlreadyExistsException(PathUtil.JoinDisplay(current.Path, seg));
                     child = new MemoryDirectory(seg, current);
                     current._directories[seg] = child;
                 }
@@ -284,7 +287,7 @@ namespace FileHub.Memory
 
             // Rename never overwrites — a name already taken is an error.
             if (_parent != null && _parent.Exists(newName))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             _parent?.RemoveDirectory(Name);
             var renamed = new MemoryDirectory(newName, _parent);
@@ -301,6 +304,33 @@ namespace FileHub.Memory
         public override FileDirectory MoveTo(FileDirectory directory, string name)
         {
             ThrowIfReadOnly();
+
+            // Same-store move: rebuild the directory nodes (their Path is
+            // immutable) but hand the file payloads over by reference instead of
+            // deep-cloning them — O(files), not O(bytes).
+            if (directory is MemoryDirectory destParent)
+            {
+                // Same parent instance + same leaf name means moving onto itself.
+                if (ReferenceEquals(destParent, _parent) && !NestedPath.HasSeparator(name)
+                    && string.Equals(name, Name, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot move directory \"{Path}\" onto itself.", Path);
+
+                // Moving a directory into itself or one of its descendants would
+                // orphan the rebuilt node (and, for copy, recurse into the growing
+                // tree). Refuse it.
+                if (IsSelfOrDescendant(destParent))
+                    throw new FileHubException($"Cannot move directory \"{Path}\" into itself or one of its descendants.");
+
+                var moved = (MemoryDirectory)destParent.CreateDirectory(name);
+                MoveContentsTo(this, moved);
+                _parent?.RemoveDirectory(Name);
+                _files.Clear();
+                _directories.Clear();
+                Dispose();
+                return moved;
+            }
+
+            // Cross-driver: deep copy then delete the source.
             var copied = CopyTo(directory, name);
             _parent?.RemoveDirectory(Name);
 
@@ -313,12 +343,34 @@ namespace FileHub.Memory
 
         public override FileDirectory CopyTo(FileDirectory directory, string name)
         {
+            if (directory is MemoryDirectory destParent)
+            {
+                // Same parent instance + same leaf name means copying onto itself.
+                if (ReferenceEquals(destParent, _parent) && !NestedPath.HasSeparator(name)
+                    && string.Equals(name, Name, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+
+                // Copying a directory into itself or a descendant would recurse
+                // into the tree it is still growing. Refuse it.
+                if (IsSelfOrDescendant(destParent))
+                    throw new FileHubException($"Cannot copy directory \"{Path}\" into itself or one of its descendants.");
+            }
+
             var newDir = directory.CreateDirectory(name);
             if (newDir is MemoryDirectory memDir)
                 CopyContentsTo(this, memDir);
             else
                 CopyContentsGeneric(this, newDir);
             return newDir;
+        }
+
+        // True when candidate is this directory or lives somewhere beneath it —
+        // moving/copying into it would place the target inside the source.
+        private bool IsSelfOrDescendant(MemoryDirectory candidate)
+        {
+            for (var d = candidate; d != null; d = d._parent)
+                if (ReferenceEquals(d, this)) return true;
+            return false;
         }
 
         // === Internal helpers ===
@@ -330,6 +382,22 @@ namespace FileHub.Memory
         internal void AddDirectory(MemoryDirectory dir) => _directories[dir.Name] = dir;
 
         // === Private helpers ===
+
+        // Like CopyContentsTo, but transfers the file payloads by reference (no
+        // Clone) — used by same-store moves where the source is deleted right
+        // after, so the buffers can be handed over instead of duplicated.
+        private static void MoveContentsTo(MemoryDirectory source, MemoryDirectory destination)
+        {
+            foreach (var kvp in source._files)
+                destination._files[kvp.Key] = kvp.Value;
+
+            foreach (var kvp in source._directories)
+            {
+                var subDir = new MemoryDirectory(kvp.Key, destination);
+                MoveContentsTo(kvp.Value, subDir);
+                destination._directories[kvp.Key] = subDir;
+            }
+        }
 
         private static void CopyContentsTo(MemoryDirectory source, MemoryDirectory destination)
         {

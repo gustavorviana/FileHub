@@ -639,7 +639,7 @@ namespace FileHub.OracleObjectStorage
 
             // Rename never overwrites — a name already taken is an error.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
@@ -691,6 +691,20 @@ namespace FileHub.OracleObjectStorage
                 && OciSessionTarget.SameCredentials(ociDir._session.Client, _session.Client))
             {
                 var destinationPrefix = PathUtil.ResolveSafeChildPrefix(ociDir._rootPrefix, ociDir._prefix, name);
+                // Same namespace + region + bucket + prefix means copying/moving
+                // the directory onto itself — refuse before recopying every
+                // object. Region is part of identity: a bucket name can repeat
+                // across regions within a namespace.
+                if (IsSameBucket(ociDir))
+                {
+                    // Same prefix = onto itself; a prefix under the source = into a
+                    // descendant, which would recurse (copied objects reappear
+                    // under the source prefix).
+                    if (string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal))
+                        throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+                    if (IsDescendantPath(destinationPrefix))
+                        throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
+                }
                 await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }
@@ -701,6 +715,21 @@ namespace FileHub.OracleObjectStorage
         }
 
         // === Helpers ===
+
+        // True when the other directory resolves to the same physical bucket.
+        // Region is part of identity: a bucket name can repeat across regions
+        // within a namespace, so namespace + region + bucket must all match.
+        private bool IsSameBucket(OracleObjectStorageDirectory other)
+            => string.Equals(other._session.Client.Namespace, _session.Client.Namespace, StringComparison.Ordinal)
+               && string.Equals(other._session.Client.Region, _session.Client.Region, StringComparison.Ordinal)
+               && string.Equals(other._session.Client.Bucket, _session.Client.Bucket, StringComparison.Ordinal);
+
+        // True when destinationPrefix lives strictly beneath this directory's own
+        // prefix — used to reject move/copy of a directory into its own subtree.
+        private bool IsDescendantPath(string destinationPrefix)
+            => !string.IsNullOrEmpty(_prefix)
+               && !string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal)
+               && destinationPrefix.StartsWith(_prefix, StringComparison.Ordinal);
 
         private bool IsChildFile(string objectName, out string leaf)
         {
@@ -777,13 +806,18 @@ namespace FileHub.OracleObjectStorage
                 foreach (var obj in page.Objects)
                 {
                     var destName = destinationPrefix + obj.Name.Substring(sourcePrefix.Length);
-                    await _session.Client.CopyObjectAsync(
+                    var handle = await _session.Client.CopyObjectAsync(
                         obj.Name,
                         destinationClient.Namespace,
                         destinationClient.Bucket,
                         destinationClient.Region,
                         destName,
                         cancellationToken).ConfigureAwait(false);
+                    // OCI CopyObject is an async work request. Wait for it to
+                    // reach a terminal state before moving on — otherwise the
+                    // directory copy (and any move built on it) could return
+                    // before the objects are durably copied server-side.
+                    await handle.WaitAndRequestCancellationAsync(progress: null, cancellationToken).ConfigureAwait(false);
                 }
                 start = page.NextStartWith;
             } while (!string.IsNullOrEmpty(start));

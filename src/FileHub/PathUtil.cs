@@ -153,6 +153,39 @@ namespace FileHub
         }
 
         /// <summary>
+        /// Joins path <paramref name="parts"/> using the driver-neutral
+        /// <c>/</c> separator, collapsing separators where a part already ends
+        /// (or the next begins) with one — e.g. the object-storage / FTP root
+        /// <c>"/"</c>. Empty/null parts are skipped. Single joining rule for
+        /// every logical driver so display paths and exception messages never
+        /// carry a doubled <c>"//"</c> at the root.
+        /// </summary>
+        public static string JoinDisplay(params string[] parts)
+        {
+            if (parts == null || parts.Length == 0)
+                return string.Empty;
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var part in parts)
+            {
+                if (string.IsNullOrEmpty(part))
+                    continue;
+
+                if (sb.Length == 0)
+                {
+                    sb.Append(part);
+                    continue;
+                }
+
+                if (sb[sb.Length - 1] != '/')
+                    sb.Append('/');
+                    
+                sb.Append(part[0] == '/' ? part.Substring(1) : part);
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
         /// Verifies that <paramref name="candidate"/> sits inside
         /// <paramref name="rootPrefix"/>. When <paramref name="rootPrefix"/>
         /// is null/empty the hub is intentionally unconfined and has full

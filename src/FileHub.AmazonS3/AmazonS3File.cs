@@ -255,7 +255,7 @@ namespace FileHub.AmazonS3
             // Rename never overwrites — CopyObject would clobber an existing
             // key, so guard with a HEAD. Best-effort, not atomic.
             if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
-                throw new FileAlreadyExistsException($"{_parent.Path}/{newName}");
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var sourceKey = ObjectKey;
             var destinationKey = PathUtil.CombineKey(_parent.PrefixInternal, newName);
@@ -376,11 +376,17 @@ namespace FileHub.AmazonS3
                 && S3SessionTarget.SameCredentials(s3Dir.SessionInternal.Client, SessionInternal.Client))
             {
                 PathUtil.ValidateName(name);
+                // Refuse copy/move onto the exact same object (same bucket + same
+                // key) — a self-copy is a no-op that S3 itself rejects, and a
+                // self-move would then delete the object it just "moved".
+                if (IsSameBucket(s3Dir)
+                    && string.Equals(PathUtil.CombineKey(s3Dir.PrefixInternal, name), ObjectKey, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
                 // overwrite: false must not clobber an existing object. S3 PutObject
                 // (and CopyObject) always overwrite, so guard with an explicit HEAD.
                 // Best-effort — not atomic against a concurrent writer.
                 if (!overwrite && await s3Dir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                    throw new FileAlreadyExistsException($"{s3Dir.Path}/{name}");
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(s3Dir.Path, name));
                 // Ensure we know the source size — without this, a stub created
                 // via OpenFile(name, createIfNotExists: true) that was never
                 // refreshed would propagate _length = -1 into the new file,
@@ -536,6 +542,13 @@ namespace FileHub.AmazonS3
             }
             base.Dispose();
         }
+
+        // True when the target directory resolves to the same physical bucket as
+        // this file — the precondition for a server-side copy and for the
+        // self-move/copy guard (a matching key in a different bucket is a
+        // different object).
+        private bool IsSameBucket(AmazonS3Directory dir)
+            => string.Equals(dir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal);
 
         private static string ConcatPath(string parentPath, string name)
         {

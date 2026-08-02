@@ -763,6 +763,31 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
+    public void CreateDirectory_MixedSeparators_PathUsesForwardSlashOnly()
+    {
+        var root = NewRoot();
+
+        // Input mixes both a backslash and a forward slash. Memory is a
+        // logical key store, so `.Path` must normalize to "/" regardless of OS
+        // — never echo an OS-native backslash.
+        var leaf = root.CreateDirectory("x\\y/z");
+
+        Assert.Equal($"{root.Path}/x/y/z", leaf.Path);
+        Assert.DoesNotContain('\\', leaf.Path);
+    }
+
+    [Fact]
+    public void CreateFile_MixedSeparators_PathUsesForwardSlashOnly()
+    {
+        var root = NewRoot();
+
+        var file = root.CreateFile("a\\b/c\\d.txt");
+
+        Assert.Equal($"{root.Path}/a/b/c/d.txt", file.Path);
+        Assert.DoesNotContain('\\', file.Path);
+    }
+
+    [Fact]
     public void CreateDirectory_Nested_ReusesExistingIntermediate()
     {
         var root = NewRoot();

@@ -7,6 +7,30 @@ namespace FileHub.Tests;
 /// </summary>
 public class PathUtilTests
 {
+    // === JoinDisplay (single "/" join rule, collapses at the root) ===
+
+    [Theory]
+    [InlineData("/", "ghost.txt", "/ghost.txt")]      // cloud/FTP root — no "//"
+    [InlineData("/a/b", "c.txt", "/a/b/c.txt")]        // nested cloud path
+    [InlineData("root", "a", "root/a")]                // memory named root
+    [InlineData("root/a", "b", "root/a/b")]            // nested memory path
+    [InlineData("", "a", "a")]                          // empty parent
+    public void JoinDisplay_JoinsWithSingleForwardSlash(string parent, string name, string expected)
+    {
+        var result = PathUtil.JoinDisplay(parent, name);
+
+        Assert.Equal(expected, result);
+        Assert.DoesNotContain("//", result);
+    }
+
+    [Fact]
+    public void JoinDisplay_JoinsManyPartsAndSkipsEmpty()
+    {
+        Assert.Equal("/a/b/c", PathUtil.JoinDisplay("/", "a", "b", "c"));
+        Assert.Equal("a/b/c", PathUtil.JoinDisplay("a", "", "b", null, "c"));
+        Assert.Equal(string.Empty, PathUtil.JoinDisplay());
+    }
+
     // === ValidateName (portable) ===
 
     [Theory]
