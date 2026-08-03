@@ -653,7 +653,7 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
@@ -670,10 +670,10 @@ namespace FileHub.OracleObjectStorage
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory and recurse with the leaf.
@@ -682,7 +682,7 @@ namespace FileHub.OracleObjectStorage
                 if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
                 {
                     var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
-                    return await CopyToAsync(deeper, leaf, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, overwrite, cancellationToken).ConfigureAwait(false);
                 }
                 name = leaf;
             }
@@ -705,12 +705,20 @@ namespace FileHub.OracleObjectStorage
                     if (IsDescendantPath(destinationPrefix))
                         throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
                 }
+                // overwrite: false must not clobber an existing destination. The
+                // server-side CopyObject loop below always overwrites colliding
+                // keys, so guard with a LIST up-front.
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
                 await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }
 
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(directory.Path, name));
+
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
-            CopyContentsGeneric(this, newDir);
+            CopyContentsGeneric(this, newDir, overwrite);
             return newDir;
         }
 
@@ -827,15 +835,15 @@ namespace FileHub.OracleObjectStorage
             // implicit (same invariant we keep on nested writes).
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination)
+        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContentsGeneric(subDir, newSubDir);
+                CopyContentsGeneric(subDir, newSubDir, overwrite);
             }
         }
     }

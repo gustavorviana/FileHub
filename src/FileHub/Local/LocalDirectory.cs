@@ -224,10 +224,10 @@ namespace FileHub.Local
             return Task.FromResult(MoveTo(directory, name));
         }
 
-        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(CopyTo(directory, name));
+            return Task.FromResult(CopyTo(directory, name, overwrite));
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
@@ -465,7 +465,7 @@ namespace FileHub.Local
             return copied;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {
@@ -478,8 +478,14 @@ namespace FileHub.Local
                     throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
             }
 
+            // overwrite: false must not clobber an existing destination — throw
+            // before anything is copied. overwrite: true merges, replacing
+            // colliding leaves.
+            if (!overwrite && directory.Exists(name))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newDir = directory.CreateDirectory(name);
-            CopyContents(this, newDir);
+            CopyContents(this, newDir, overwrite);
             return newDir;
         }
 
@@ -530,15 +536,15 @@ namespace FileHub.Local
             return (info.Attributes & FileAttributes.ReparsePoint) != 0;
         }
 
-        private static void CopyContents(FileDirectory source, FileDirectory destination)
+        private static void CopyContents(FileDirectory source, FileDirectory destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContents(subDir, newSubDir);
+                CopyContents(subDir, newSubDir, overwrite);
             }
         }
 

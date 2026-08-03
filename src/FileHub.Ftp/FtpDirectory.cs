@@ -526,7 +526,7 @@ namespace FileHub.Ftp
                 return new FtpDirectory(ftpDir, name);
             }
 
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -548,10 +548,10 @@ namespace FileHub.Ftp
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir._session.Client, _session.Client))
@@ -565,12 +565,18 @@ namespace FileHub.Ftp
                     throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
             }
 
+            // overwrite: false must not clobber an existing destination — throw
+            // before anything is copied. overwrite: true merges, replacing
+            // colliding leaves.
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(directory.Path, name));
+
             // FTP has no server-side copy command, even within the same
             // connection — do a generic recursive copy. Each file leaf streams
             // via FtpFile.CopyToAsync (temp-file spill on the same connection);
             // the whole walk stays async and honors the cancellation token.
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
-            await CopyContentsAsync(this, newDir, cancellationToken).ConfigureAwait(false);
+            await CopyContentsAsync(this, newDir, overwrite, cancellationToken).ConfigureAwait(false);
             return newDir;
         }
 
@@ -585,23 +591,23 @@ namespace FileHub.Ftp
             return destination.StartsWith(prefix, StringComparison.Ordinal);
         }
 
-        private static async Task CopyContentsAsync(FileDirectory source, FileDirectory destination, CancellationToken cancellationToken)
+        private static async Task CopyContentsAsync(FileDirectory source, FileDirectory destination, bool overwrite, CancellationToken cancellationToken)
         {
 #if NET8_0_OR_GREATER
             await foreach (var file in source.GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(destination, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(destination, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             await foreach (var subDir in source.GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
                 var newSubDir = await destination.CreateDirectoryAsync(subDir.Name, cancellationToken).ConfigureAwait(false);
-                await CopyContentsAsync(subDir, newSubDir, cancellationToken).ConfigureAwait(false);
+                await CopyContentsAsync(subDir, newSubDir, overwrite, cancellationToken).ConfigureAwait(false);
             }
 #else
             foreach (var file in await source.GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(destination, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(destination, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             foreach (var subDir in await source.GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
             {
                 var newSubDir = await destination.CreateDirectoryAsync(subDir.Name, cancellationToken).ConfigureAwait(false);
-                await CopyContentsAsync(subDir, newSubDir, cancellationToken).ConfigureAwait(false);
+                await CopyContentsAsync(subDir, newSubDir, overwrite, cancellationToken).ConfigureAwait(false);
             }
 #endif
         }

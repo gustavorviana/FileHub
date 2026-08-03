@@ -162,7 +162,7 @@ namespace FileHub
         public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(cancellationToken).ConfigureAwait(false);
             return newDir;
         }
@@ -179,29 +179,35 @@ namespace FileHub
         /// backed by a store with server-side copy (S3 <c>CopyObject</c>,
         /// OCI <c>CopyObject</c>) override for cheaper bulk copy.
         /// </summary>
-        public virtual async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (directory == null) throw new ArgumentNullException(nameof(directory));
 
+            // overwrite: false must not clobber an existing destination — throw
+            // up-front so nothing is half-copied. overwrite: true merges into the
+            // destination, replacing colliding leaves.
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
 #if NET8_0_OR_GREATER
             await foreach (var file in GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(newDir, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(newDir, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             await foreach (var subDir in GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await subDir.CopyToAsync(newDir, subDir.Name, cancellationToken).ConfigureAwait(false);
+                await subDir.CopyToAsync(newDir, subDir.Name, overwrite, cancellationToken).ConfigureAwait(false);
 #else
             foreach (var file in await GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(newDir, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(newDir, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             foreach (var subDir in await GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await subDir.CopyToAsync(newDir, subDir.Name, cancellationToken).ConfigureAwait(false);
+                await subDir.CopyToAsync(newDir, subDir.Name, overwrite, cancellationToken).ConfigureAwait(false);
 #endif
             return newDir;
         }
 
-        /// <inheritdoc cref="CopyToAsync(FileDirectory, string, CancellationToken)"/>
-        public virtual FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        /// <inheritdoc cref="CopyToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        public virtual FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
         public virtual async Task<FileEntry> CreateFileAsync(string name, bool overwrite, CancellationToken cancellationToken = default)
         {
