@@ -152,7 +152,7 @@ namespace FileHub
 
         /// <summary>
         /// Rename this directory under the same parent. Base implementation
-        /// delegates to <see cref="MoveToAsync(FileDirectory, string, CancellationToken)"/>
+        /// delegates to <see cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
         /// with the same parent — drivers backed by a store that has a native
         /// rename (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
         /// <c>Move</c>) override to use it directly.
@@ -162,7 +162,7 @@ namespace FileHub
             ThrowIfReadOnly();
             if (Parent == null)
                 throw new InvalidOperationException("Cannot rename the root directory.");
-            return await MoveToAsync(Parent, newName, cancellationToken).ConfigureAwait(false);
+            return await MoveToAsync(Parent, newName, overwrite: false, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc cref="RenameAsync(string, CancellationToken)"/>
@@ -174,17 +174,17 @@ namespace FileHub
         /// <paramref name="name"/>. Base implementation = copy then delete.
         /// Drivers with an atomic move primitive override.
         /// </summary>
-        public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(recursive: true, cancellationToken).ConfigureAwait(false);
             return newDir;
         }
 
-        /// <inheritdoc cref="MoveToAsync(FileDirectory, string, CancellationToken)"/>
-        public virtual FileDirectory MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        /// <inheritdoc cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        public virtual FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
         /// <summary>
         /// Recursively copy this directory's contents into a new directory

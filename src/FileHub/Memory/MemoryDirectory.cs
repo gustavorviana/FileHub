@@ -196,10 +196,10 @@ namespace FileHub.Memory
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(MoveTo(directory, name));
+            return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
         public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
@@ -304,7 +304,7 @@ namespace FileHub.Memory
             return renamed;
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -334,7 +334,7 @@ namespace FileHub.Memory
             }
 
             // Cross-driver: deep copy then delete the source.
-            var copied = CopyTo(directory, name);
+            var copied = CopyTo(directory, name, overwrite);
             _parent?.RemoveDirectory(Name);
 
             // Clear and dispose the old instance so stale references stop reporting as alive.

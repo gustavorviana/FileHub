@@ -134,7 +134,7 @@ namespace FileHub
         public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
         public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
         public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileDirectory MoveTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
         public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 }

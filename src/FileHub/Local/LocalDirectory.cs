@@ -214,10 +214,10 @@ namespace FileHub.Local
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(MoveTo(directory, name));
+            return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
         public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
@@ -377,7 +377,7 @@ namespace FileHub.Local
             return new LocalDirectory(newPath, RootPath, Parent);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -390,7 +390,7 @@ namespace FileHub.Local
                 if (NestedPath.HasSeparator(name))
                 {
                     if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
-                        return MoveTo(localDir.CreateDirectory(subPath), leaf);
+                        return MoveTo(localDir.CreateDirectory(subPath), leaf, overwrite);
                     name = leaf;
                 }
 
@@ -428,15 +428,15 @@ namespace FileHub.Local
                 }
             }
 
-            return MoveByCopyDelete(directory, name);
+            return MoveByCopyDelete(directory, name, overwrite);
         }
 
         // Copy the subtree, then delete the source. A delete failure rolls the
         // copy back so no duplicate is left behind, and the raw System.IO error
         // is translated before it reaches the caller.
-        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name)
+        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name, bool overwrite)
         {
-            var copied = CopyTo(directory, name);
+            var copied = CopyTo(directory, name, overwrite);
             try
             {
                 Directory.Delete(Path, recursive: true);
