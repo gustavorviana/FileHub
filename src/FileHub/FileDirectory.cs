@@ -151,10 +151,14 @@ namespace FileHub
         // === Composite operations (async holds the logic; sync bridges) ===
 
         /// <summary>
-        /// Rename this directory under the same parent. Base implementation
-        /// delegates to <see cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
-        /// with the same parent — drivers backed by a store that has a native
-        /// rename (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
+        /// Change this directory's leaf name in place under the same parent.
+        /// <paramref name="newName"/> must be a single name: a value containing
+        /// a <c>/</c> or <c>\</c> separator throws
+        /// <see cref="ArgumentException"/> — use
+        /// <see cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        /// to relocate. Base implementation delegates to <c>MoveToAsync</c> with
+        /// the same parent — drivers backed by a store that has a native rename
+        /// (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
         /// <c>Move</c>) override to use it directly.
         /// </summary>
         public virtual async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
@@ -162,6 +166,7 @@ namespace FileHub
             ThrowIfReadOnly();
             if (Parent == null)
                 throw new InvalidOperationException("Cannot rename the root directory.");
+            NestedPath.EnsureLeaf(newName);
             return await MoveToAsync(Parent, newName, overwrite: false, cancellationToken).ConfigureAwait(false);
         }
 

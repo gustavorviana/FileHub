@@ -86,16 +86,7 @@ namespace FileHub.Local
         public override FileEntry Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory under the current parent
-            // and move into it (never overwriting, like any rename).
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf, progress: null, overwrite: false);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateLocalName(newName);
             var newPath = ((LocalDirectory)Parent).ResolveSafeChildPath(newName);

@@ -246,33 +246,29 @@ public class LocalFileTests
     // === Nested target names (path/leaf) ===
 
     [Fact]
-    public void Rename_NestedName_MovesIntoSubPath()
+    public void Rename_NestedName_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.txt");
         file.SetText("data");
 
-        var moved = file.Rename("sub/deep/b.txt");
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/deep/b.txt"));
 
-        Assert.Equal("b.txt", moved.Name);
-        Assert.Equal("data", moved.ReadAllText());
-        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "deep", "b.txt")));
-        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source gone
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source untouched
     }
 
     [Fact]
-    public void Rename_NestedNameBackslash_MovesIntoSubPath()
+    public void Rename_NestedNameBackslash_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.txt");
         file.SetText("x");
 
-        var moved = file.Rename(@"sub\b.txt");
+        Assert.Throws<ArgumentException>(() => file.Rename(@"sub\b.txt"));
 
-        Assert.Equal("x", moved.ReadAllText());
-        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "b.txt")));
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
     }
 
     [Fact]
@@ -308,7 +304,7 @@ public class LocalFileTests
     }
 
     [Fact]
-    public void Rename_NestedOntoExisting_Throws()
+    public void Rename_WithSeparator_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
@@ -316,7 +312,7 @@ public class LocalFileTests
         file.SetText("new");
         root.CreateFile("sub/b.txt").SetText("old");
 
-        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("sub/b.txt"));
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/b.txt"));
         Assert.Equal("old", root.OpenFile("sub/b.txt").ReadAllText());
         Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
     }

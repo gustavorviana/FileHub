@@ -276,15 +276,7 @@ namespace FileHub.Memory
         public override FileDirectory Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName) && Parent != null)
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             ValidateName(newName);
 

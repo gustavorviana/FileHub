@@ -33,6 +33,16 @@ namespace FileHub
         /// exists is a no-op on every backend, matching <c>File.Delete</c>.
         /// </summary>
         public abstract void Delete();
+
+        /// <summary>
+        /// Change this file's leaf name in place under the same directory.
+        /// <paramref name="newName"/> must be a single name: a value containing
+        /// a <c>/</c> or <c>\</c> separator throws
+        /// <see cref="System.ArgumentException"/> — use
+        /// <see cref="MoveTo(FileDirectory, string, IProgress{TransferStatus}, bool)"/>
+        /// to relocate. An existing target throws
+        /// <see cref="FileAlreadyExistsException"/>.
+        /// </summary>
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false);
 

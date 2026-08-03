@@ -87,16 +87,14 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
     }
 
     [Fact]
-    public void Rename_NestedName_MovesToSubPathKey()
+    public void Rename_NestedName_Throws()
     {
-        var scope = Scope(nameof(Rename_NestedName_MovesToSubPathKey));
+        var scope = Scope(nameof(Rename_NestedName_Throws));
         scope.CreateFile("a.txt").SetText("data");
 
-        var moved = scope.OpenFile("a.txt").Rename("sub/deep/b.txt");
+        Assert.Throws<ArgumentException>(() => scope.OpenFile("a.txt").Rename("sub/deep/b.txt"));
 
-        Assert.Equal("b.txt", moved.Name);
-        Assert.False(scope.FileExists("a.txt"));
-        Assert.Equal("data", scope.OpenFile("sub/deep/b.txt").ReadAllText());
+        Assert.True(scope.FileExists("a.txt"));
     }
 
     [Fact]
