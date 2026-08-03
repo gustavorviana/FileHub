@@ -1,5 +1,4 @@
 using Amazon;
-using Amazon.Runtime;
 using Amazon.Runtime.CredentialManagement;
 using Amazon.S3;
 using FileHub.AmazonS3.Internal;
@@ -28,14 +27,14 @@ namespace FileHub.AmazonS3
             Root = new AmazonS3Directory(_session, rootPrefix);
         }
 
-        // === Canonical factory: options bag (preferred from v0.next onward) ===
+        // === Canonical factory: options bag ===
 
         /// <summary>
         /// Build a FileHub from an <see cref="S3HubOptions"/> bag. This is the
-        /// canonical entry point: it covers profile-, credentials-, and
-        /// client-based construction in one place. The legacy <c>From*</c>
-        /// methods remain for source compatibility but are marked
-        /// <see cref="ObsoleteAttribute"/> in favour of this overload.
+        /// only entry point: it covers profile-, credentials-, and client-based
+        /// construction in one place. Pick the strategy via a typed factory on
+        /// <see cref="S3HubOptions"/> (<c>FromProfile</c>, <c>FromCredentials</c>,
+        /// <c>FromClient</c>).
         /// </summary>
         public static AmazonS3FileHub Create(S3HubOptions options)
             => SyncBridge.Run(ct => CreateAsync(options, ct));
@@ -128,133 +127,6 @@ namespace FileHub.AmazonS3
             config.RegionEndpoint = RegionEndpoint.GetBySystemName(region);
             return config;
         }
-
-        // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===
-
-        /// <summary>
-        /// Build a FileHub using a profile from <c>~/.aws/credentials</c>.
-        /// </summary>
-        [Obsolete("Use Create(S3HubOptions.FromProfile(bucketName, profile, region, rootPath)) instead. This overload will be removed in v1.")]
-        public static AmazonS3FileHub FromProfile(
-            string rootPath,
-            string bucketName,
-            string profile = "default",
-            string region = null)
-            => Create(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Profile = profile,
-                Region = region,
-            });
-
-        [Obsolete("Use CreateAsync(S3HubOptions.FromProfile(bucketName, profile, region, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<AmazonS3FileHub> FromProfileAsync(
-            string rootPath,
-            string bucketName,
-            string profile = "default",
-            string region = null,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Profile = profile,
-                Region = region,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub from explicit AWS credentials and region.
-        /// </summary>
-        [Obsolete("Use Create(S3HubOptions.FromCredentials(bucketName, credentials, region, rootPath)) instead. This overload will be removed in v1.")]
-        public static AmazonS3FileHub FromCredentials(
-            string rootPath,
-            string bucketName,
-            AWSCredentials credentials,
-            string region)
-            => Create(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Credentials = credentials,
-                Region = region,
-            });
-
-        [Obsolete("Use CreateAsync(S3HubOptions.FromCredentials(bucketName, credentials, region, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<AmazonS3FileHub> FromCredentialsAsync(
-            string rootPath,
-            string bucketName,
-            AWSCredentials credentials,
-            string region,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Credentials = credentials,
-                Region = region,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub around an externally-owned <see cref="IAmazonS3"/>.
-        /// </summary>
-        [Obsolete("Use Create(S3HubOptions.FromClient(bucketName, client, region, rootPath)) instead. This overload will be removed in v1.")]
-        public static AmazonS3FileHub FromClient(
-            string bucketName,
-            string rootPath,
-            IAmazonS3 client,
-            string region)
-            => Create(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-                Region = region,
-            });
-
-        [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, client, region, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<AmazonS3FileHub> FromClientAsync(
-            string bucketName,
-            string rootPath,
-            IAmazonS3 client,
-            string region,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-                Region = region,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub around an externally-owned <see cref="AmazonS3Client"/>.
-        /// Region is read from the client's <c>Config.RegionEndpoint</c>.
-        /// </summary>
-        [Obsolete("Use Create(S3HubOptions.FromClient(bucketName, AmazonS3Client, rootPath)) — region is read from client.Config.RegionEndpoint. This overload will be removed in v1.")]
-        public static AmazonS3FileHub FromClient(
-            string bucketName,
-            string rootPath,
-            AmazonS3Client client)
-            => Create(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-            });
-
-        [Obsolete("Use CreateAsync(S3HubOptions.FromClient(bucketName, AmazonS3Client, rootPath), ct) — region is read from client.Config.RegionEndpoint. This overload will be removed in v1.")]
-        public static Task<AmazonS3FileHub> FromClientAsync(
-            string bucketName,
-            string rootPath,
-            AmazonS3Client client,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new S3HubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-            }, cancellationToken);
 
         // === Internal factory (tests with in-memory fake) ===
 

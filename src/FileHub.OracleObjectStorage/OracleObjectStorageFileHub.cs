@@ -28,14 +28,14 @@ namespace FileHub.OracleObjectStorage
             Root = new OracleObjectStorageDirectory(_session, rootPrefix);
         }
 
-        // === Canonical factory: options bag (preferred from v0.next onward) ===
+        // === Canonical factory: options bag ===
 
         /// <summary>
         /// Build a FileHub from an <see cref="OciHubOptions"/> bag. This is the
-        /// canonical entry point: covers config-file, provider-, and
-        /// client-based construction in one place. The legacy <c>From*</c>
-        /// methods remain for source compatibility but are marked
-        /// <see cref="ObsoleteAttribute"/> in favour of this overload.
+        /// only entry point: covers config-file, provider-, and client-based
+        /// construction in one place. Pick the strategy via a typed factory on
+        /// <see cref="OciHubOptions"/> (<c>FromConfigFile</c>, <c>FromProvider</c>,
+        /// <c>FromClient</c>).
         /// </summary>
         public static OracleObjectStorageFileHub Create(OciHubOptions options)
             => SyncBridge.Run(ct => CreateAsync(options, ct));
@@ -125,137 +125,6 @@ namespace FileHub.OracleObjectStorage
             var realClient = new RealOciClient(sdkClient, @namespace, options.BucketName, regionId, ownsClient: true);
             return await BuildAsync(realClient, options.RootPath, cancellationToken, options.Multipart).ConfigureAwait(false);
         }
-
-        // === Legacy factories: thin wrappers over Create. Will be removed in v1. ===
-
-        /// <summary>
-        /// Build a FileHub using an OCI config file (<c>~/.oci/config</c>) and profile.
-        /// </summary>
-        [Obsolete("Use Create(OciHubOptions.FromConfigFile(bucketName, profile, configFilePath, rootPath)) instead. This overload will be removed in v1.")]
-        public static OracleObjectStorageFileHub FromConfigFile(
-            string rootPath,
-            string bucketName,
-            string configFilePath = null,
-            string profile = "DEFAULT")
-            => Create(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                ConfigFilePath = configFilePath,
-                Profile = profile,
-            });
-
-        [Obsolete("Use CreateAsync(OciHubOptions.FromConfigFile(bucketName, profile, configFilePath, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<OracleObjectStorageFileHub> FromConfigFileAsync(
-            string rootPath,
-            string bucketName,
-            string configFilePath = null,
-            string profile = "DEFAULT",
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                ConfigFilePath = configFilePath,
-                Profile = profile,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub from a user-supplied authentication provider and region id.
-        /// </summary>
-        [Obsolete("Use Create(OciHubOptions.FromProvider(bucketName, provider, regionId, rootPath)) instead. This overload will be removed in v1.")]
-        public static OracleObjectStorageFileHub FromProvider(
-            string rootPath,
-            string bucketName,
-            IAuthenticationDetailsProvider provider,
-            string regionId)
-            => Create(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Provider = provider,
-                RegionId = regionId,
-            });
-
-        [Obsolete("Use CreateAsync(OciHubOptions.FromProvider(bucketName, provider, regionId, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<OracleObjectStorageFileHub> FromProviderAsync(
-            string rootPath,
-            string bucketName,
-            IAuthenticationDetailsProvider provider,
-            string regionId,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Provider = provider,
-                RegionId = regionId,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub from a <see cref="ConfigFileAuthenticationDetailsProvider"/>;
-        /// region is read from the provider.
-        /// </summary>
-        [Obsolete("Use Create(OciHubOptions.FromProvider(bucketName, ConfigFileAuthenticationDetailsProvider, rootPath)) — region is read from provider.Region.RegionId. This overload will be removed in v1.")]
-        public static OracleObjectStorageFileHub FromProvider(
-            string rootPath,
-            string bucketName,
-            ConfigFileAuthenticationDetailsProvider provider)
-            => Create(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Provider = provider,
-            });
-
-        [Obsolete("Use CreateAsync(OciHubOptions.FromProvider(bucketName, ConfigFileAuthenticationDetailsProvider, rootPath), ct) — region is read from provider.Region.RegionId. This overload will be removed in v1.")]
-        public static Task<OracleObjectStorageFileHub> FromProviderAsync(
-            string rootPath,
-            string bucketName,
-            ConfigFileAuthenticationDetailsProvider provider,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Provider = provider,
-            }, cancellationToken);
-
-        /// <summary>
-        /// Build a FileHub around an externally-owned <see cref="ObjectStorageClient"/>.
-        /// </summary>
-        [Obsolete("Use Create(OciHubOptions.FromClient(bucketName, client, regionId, namespace, rootPath)) instead. This overload will be removed in v1.")]
-        public static OracleObjectStorageFileHub FromClient(
-            string bucketName,
-            string rootPath,
-            ObjectStorageClient client,
-            string regionId,
-            string @namespace)
-            => Create(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-                RegionId = regionId,
-                Namespace = @namespace,
-            });
-
-        [Obsolete("Use CreateAsync(OciHubOptions.FromClient(bucketName, client, regionId, namespace, rootPath), ct) instead. This overload will be removed in v1.")]
-        public static Task<OracleObjectStorageFileHub> FromClientAsync(
-            string bucketName,
-            string rootPath,
-            ObjectStorageClient client,
-            string regionId,
-            string @namespace,
-            CancellationToken cancellationToken = default)
-            => CreateAsync(new OciHubOptions
-            {
-                BucketName = bucketName,
-                RootPath = rootPath,
-                Client = client,
-                RegionId = regionId,
-                Namespace = @namespace,
-            }, cancellationToken);
 
         // === Internal factories (used by tests with an in-memory fake) ===
 
