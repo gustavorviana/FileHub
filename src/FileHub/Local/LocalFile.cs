@@ -160,21 +160,23 @@ namespace FileHub.Local
                 // progress.
                 if (progress == null)
                 {
+                    if (File.Exists(destPath) || Directory.Exists(destPath))
+                    {
+                        if (!overwrite)
+                            throw new FileAlreadyExistsException(destPath);
+                        // A file must never replace a directory — mirror
+                        // System.IO.File.Move, which refuses this regardless of
+                        // overwrite rather than recursively wiping the folder.
+                        if (Directory.Exists(destPath))
+                            throw new FileHubException($"Cannot overwrite directory \"{destPath}\" with the file \"{Path}\".");
+                    }
+
                     try
                     {
-                        if (File.Exists(destPath) || Directory.Exists(destPath))
-                        {
-                            if (!overwrite)
-                                throw new FileAlreadyExistsException(destPath);
-                            // A file must never replace a directory — mirror
-                            // System.IO.File.Move, which refuses this regardless of
-                            // overwrite rather than recursively wiping the folder.
-                            if (Directory.Exists(destPath))
-                                throw new FileHubException($"Cannot overwrite directory \"{destPath}\" with the file \"{Path}\".");
-                            // File.Move has no overwrite overload on netstandard2.0,
-                            // so clear the existing target first.
+                        // File.Move has no overwrite overload on netstandard2.0,
+                        // so clear the existing target first.
+                        if (File.Exists(destPath))
                             File.Delete(destPath);
-                        }
                         File.Move(Path, destPath);
                     }
                     catch (IOException ex)
@@ -261,7 +263,7 @@ namespace FileHub.Local
 
         // Same-filesystem copy uses File.Copy so the OS moves the bytes; a
         // cross-driver destination falls back to the stream-based base copy.
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {

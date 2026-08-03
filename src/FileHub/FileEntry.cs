@@ -114,10 +114,10 @@ namespace FileHub
             }
         }
 
-        public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => CopyTo(Parent, newName, progress, overwrite);
 
-        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             if (!overwrite && directory.Exists(name))
                 throw new FileAlreadyExistsException(directory.CombineChildPath(name));
@@ -306,12 +306,12 @@ namespace FileHub
             return Task.CompletedTask;
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(string newName, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(string newName, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             return await CopyToAsync(Parent, newName, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

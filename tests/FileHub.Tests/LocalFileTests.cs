@@ -380,7 +380,22 @@ public class LocalFileTests
     // === Overwrite ===
 
     [Fact]
-    public void CopyTo_DefaultOverwritesExisting()
+    public void CopyTo_DefaultOverwrite_ThrowsWhenDestinationExists()
+    {
+        // Default overwrite is false (BCL File.Copy parity) — an existing
+        // destination must not be clobbered when the flag is omitted.
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        Assert.Throws<FileAlreadyExistsException>(() => src.CopyTo(root, "b.txt"));
+        Assert.Equal("old", root.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyTo_OverwriteTrue_ReplacesExisting()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
@@ -388,7 +403,7 @@ public class LocalFileTests
         src.SetText("new");
         root.CreateFile("b.txt").SetText("old");
 
-        var copy = src.CopyTo(root, "b.txt");
+        var copy = src.CopyTo(root, "b.txt", progress: null, overwrite: true);
 
         Assert.Equal("new", copy.ReadAllText());
     }

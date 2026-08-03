@@ -157,13 +157,13 @@ namespace FileHub.Memory
             return Task.FromResult(MoveTo(directory, name, progress, overwrite));
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyTo(directory, name, progress, overwrite);
         }
 
-        public override Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyToAsync(directory, name, progress, overwrite, cancellationToken);

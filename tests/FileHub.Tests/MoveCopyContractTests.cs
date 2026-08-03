@@ -143,6 +143,42 @@ public abstract class MoveCopyContractTests : IDisposable
     }
 
     [Fact]
+    public void CopyFile_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // overwrite defaults to false (BCL File.Copy parity) — an existing
+        // destination must not be clobbered when the caller omits the flag.
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => b.CopyTo(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public async Task CopyFileAsync_DefaultOverwrite_OntoExisting_Throws()
+    {
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(() => b.CopyToAsync(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyFile_OverwriteTrue_ReplacesTarget()
+    {
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        b.CopyTo(Root, "a.txt", overwrite: true);
+
+        Assert.Equal("2", Root.OpenFile("a.txt").ReadAllText());
+        Assert.True(Root.FileExists("b.txt"));
+    }
+
+    [Fact]
     public void CopyFile_OntoItself_Throws_AndKeepsFile()
     {
         var file = Root.CreateFile("a.txt", Bytes("keep"));
