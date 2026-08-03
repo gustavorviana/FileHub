@@ -593,11 +593,8 @@ namespace FileHub.OracleObjectStorage
             {
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is OracleObjectStorageDirectory ociDir)
-                {
                     await ociDir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+                return;
             }
             PathUtil.ValidateName(head);
 
@@ -619,10 +616,7 @@ namespace FileHub.OracleObjectStorage
                     throw new DirectoryNotEmptyException(CombineChildPath(head));
 
                 await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
-                return;
             }
-
-            throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
         }
 
         public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));

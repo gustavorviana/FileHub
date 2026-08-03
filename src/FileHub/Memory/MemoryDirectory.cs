@@ -259,9 +259,8 @@ namespace FileHub.Memory
             var (head, rest) = SplitPath(name);
             if (rest != null)
             {
-                if (!TryOpenDirectory(head, out var dir))
-                    throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest, recursive);
+                if (TryOpenDirectory(head, out var dir))
+                    dir.Delete(rest, recursive);
                 return;
             }
             ValidateName(head);
@@ -271,9 +270,7 @@ namespace FileHub.Memory
                 if (!recursive && (child._files.Count > 0 || child._directories.Count > 0))
                     throw new DirectoryNotEmptyException(child.Path);
                 _directories.Remove(head);
-                return;
             }
-            throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
         }
 
         public override FileDirectory Rename(string newName)

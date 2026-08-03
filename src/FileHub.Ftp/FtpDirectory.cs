@@ -441,11 +441,8 @@ namespace FileHub.Ftp
             {
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is FtpDirectory ftpDir)
-                {
                     await ftpDir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
+                return;
             }
             PathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
@@ -464,10 +461,7 @@ namespace FileHub.Ftp
                     throw new DirectoryNotEmptyException(CombineChildPath(head));
 
                 await _session.Client.DeleteDirectoryAsync(fullPath, cancellationToken).ConfigureAwait(false);
-                return;
             }
-
-            throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
         }
 
         // Emptiness probe for the non-recursive delete contract: a directory is

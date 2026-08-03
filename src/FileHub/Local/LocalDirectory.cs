@@ -312,9 +312,8 @@ namespace FileHub.Local
             var (head, rest) = SplitPath(name);
             if (rest != null)
             {
-                if (!TryOpenDirectory(head, out var dir))
-                    throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest, recursive);
+                if (TryOpenDirectory(head, out var dir))
+                    dir.Delete(rest, recursive);
                 return;
             }
             PathUtil.ValidateLocalName(head);
@@ -323,7 +322,7 @@ namespace FileHub.Local
             var isDir = Directory.Exists(fullPath);
             var isFile = !isDir && File.Exists(fullPath);
             if (!isDir && !isFile)
-                throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+                return;
 
             if (isDir && !recursive && Directory.EnumerateFileSystemEntries(fullPath).Any())
                 throw new DirectoryNotEmptyException(fullPath);

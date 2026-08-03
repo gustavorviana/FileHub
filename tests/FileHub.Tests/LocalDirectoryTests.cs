@@ -312,11 +312,11 @@ public class LocalDirectoryTests
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_Missing_IsSilent()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        root.Delete("ghost");
     }
 
     [Fact]

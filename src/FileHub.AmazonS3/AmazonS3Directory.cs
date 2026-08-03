@@ -537,11 +537,8 @@ namespace FileHub.AmazonS3
             {
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is AmazonS3Directory s3Dir)
-                {
                     await s3Dir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+                return;
             }
             PathUtil.ValidateName(head);
 

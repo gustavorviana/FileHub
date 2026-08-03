@@ -435,10 +435,10 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_Missing_IsSilent()
     {
         var root = NewRoot();
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        root.Delete("ghost");
     }
 
     [Fact]
