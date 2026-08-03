@@ -58,10 +58,6 @@ namespace FileHub.Local
                 // Never leak raw System.IO exceptions to callers.
                 throw new FileHubException($"Failed to delete \"{Path}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to delete \"{Path}\".", ex);
-            }
         }
 
         // 80 KB matches the copy-loop buffer in FileEntry, so each ReadAsync
@@ -185,10 +181,6 @@ namespace FileHub.Local
                             throw new FileAlreadyExistsException(destPath);
                         throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
                     }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
-                    }
 
                     return new LocalFile(localDir, name);
                 }
@@ -298,10 +290,6 @@ namespace FileHub.Local
                     {
                         if (!overwrite && (File.Exists(destPath) || Directory.Exists(destPath)))
                             throw new FileAlreadyExistsException(destPath);
-                        throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
                         throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
                     }
 

@@ -55,10 +55,6 @@ namespace FileHub.Local
 
                 throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
-            }
             InvalidateInfo();
             return new LocalFile(this, head);
         }
@@ -299,10 +295,6 @@ namespace FileHub.Local
                 // Never leak raw System.IO exceptions to callers.
                 throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
-            }
             InvalidateInfo();
         }
 
@@ -337,10 +329,6 @@ namespace FileHub.Local
             catch (IOException ex)
             {
                 // Never leak raw System.IO exceptions to callers.
-                throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
                 throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
             }
             InvalidateInfo();
@@ -436,10 +424,6 @@ namespace FileHub.Local
                     {
                         // Cross-volume move is unsupported by Directory.Move —
                         // fall through to copy + delete.
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        throw new FileHubException($"Failed to move directory \"{Path}\" to \"{destPath}\".", ex);
                     }
                 }
             }
