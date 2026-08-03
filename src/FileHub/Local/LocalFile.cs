@@ -127,7 +127,7 @@ namespace FileHub.Local
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -166,10 +166,14 @@ namespace FileHub.Local
                         {
                             if (!overwrite)
                                 throw new FileAlreadyExistsException(destPath);
+                            // A file must never replace a directory — mirror
+                            // System.IO.File.Move, which refuses this regardless of
+                            // overwrite rather than recursively wiping the folder.
+                            if (Directory.Exists(destPath))
+                                throw new FileHubException($"Cannot overwrite directory \"{destPath}\" with the file \"{Path}\".");
                             // File.Move has no overwrite overload on netstandard2.0,
                             // so clear the existing target first.
-                            if (File.Exists(destPath)) File.Delete(destPath);
-                            else Directory.Delete(destPath, recursive: true);
+                            File.Delete(destPath);
                         }
                         File.Move(Path, destPath);
                     }
@@ -218,7 +222,7 @@ namespace FileHub.Local
             return newFile;
         }
 
-        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();

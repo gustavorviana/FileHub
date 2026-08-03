@@ -46,7 +46,7 @@ namespace FileHub
         public override Stream GetWriteStream(FileWriteOptions options = null) { ThrowIfReadOnly(); return null; }
         public override void Delete() => ThrowIfReadOnly();
         public override FileEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true) { ThrowIfReadOnly(); return null; }
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 
     internal class ReadOnlyDirectoryWrapper : FileDirectory

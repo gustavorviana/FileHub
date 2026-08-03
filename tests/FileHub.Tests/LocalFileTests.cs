@@ -438,6 +438,26 @@ public class LocalFileTests
     }
 
     [Fact]
+    public void MoveTo_OntoExistingDirectory_ThrowsEvenWhenOverwrite_AndKeepsDirectory()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("data");
+        // "target" is a populated directory. A file must never replace it,
+        // even with overwrite:true — mirrors System.IO.File.Move.
+        var target = root.CreateDirectory("target");
+        target.CreateFile("keep.txt").SetText("keep");
+
+        Assert.Throws<FileHubException>(() => src.MoveTo(root, "target", progress: null, overwrite: true));
+
+        // Directory and its contents survive; the source file is untouched.
+        Assert.True(root.DirectoryExists("target"));
+        Assert.Equal("keep", root.OpenFile("target/keep.txt").ReadAllText());
+        Assert.True(root.FileExists("a.txt"));
+    }
+
+    [Fact]
     public async Task CopyToAsync_OverwriteFalse_ThrowsWhenDestinationExists()
     {
         using var temp = new TempDirectory();

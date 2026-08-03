@@ -29,7 +29,7 @@ namespace FileHub
         public abstract Stream GetWriteStream(FileWriteOptions options = null);
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
-        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true);
+        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false);
 
         // === Sync convenience (implemented using streams) ===
 
@@ -337,7 +337,7 @@ namespace FileHub
             return newFile;
         }
 
-        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(cancellationToken).ConfigureAwait(false);
