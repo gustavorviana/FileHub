@@ -138,6 +138,9 @@ namespace FileHub.Ftp
             PathUtil.ValidateName(head);
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
 
+            if (await ExistsAsync(head, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(CombineChildPath(head));
+
             var fullPath = FtpPathUtil.ResolveSafeChildPath(_rootPathFtp, _path, head);
 #if NET8_0_OR_GREATER
             await using (var stream = await _session.Client.OpenWriteAsync(fullPath, cancellationToken).ConfigureAwait(false))

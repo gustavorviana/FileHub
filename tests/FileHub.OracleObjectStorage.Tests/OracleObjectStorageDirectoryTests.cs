@@ -158,6 +158,16 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        var scope = Scope(nameof(CreateFile_SingleArg_ExistingFile_Throws));
+        scope.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => scope.CreateFile("a.txt"));
+        Assert.Equal("keep", scope.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
     public void Rename_Directory_CopiesAllAndDeletesOriginal()
     {
         var scope = Scope(nameof(Rename_Directory_CopiesAllAndDeletesOriginal));

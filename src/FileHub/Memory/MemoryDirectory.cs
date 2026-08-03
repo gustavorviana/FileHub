@@ -48,9 +48,7 @@ namespace FileHub.Memory
                 return dir.CreateFile(rest);
             }
             ValidateName(head);
-            // A file and a directory cannot share a name (mirrors the
-            // local-filesystem driver).
-            if (_directories.ContainsKey(head))
+            if (_directories.ContainsKey(head) || _files.ContainsKey(head))
                 throw new FileAlreadyExistsException(PathUtil.JoinDisplay(Path, head));
             var data = new MemoryFileData(head);
             _files[head] = data;

@@ -40,7 +40,7 @@ namespace FileHub.Local
             }
             PathUtil.ValidateLocalName(head);
             var filePath = ResolveSafePath(head);
-            if (Directory.Exists(filePath))
+            if (Directory.Exists(filePath) || File.Exists(filePath))
                 throw new FileAlreadyExistsException(filePath);
 
             try

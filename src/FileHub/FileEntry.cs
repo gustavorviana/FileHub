@@ -122,7 +122,7 @@ namespace FileHub
             if (!overwrite && directory.Exists(name))
                 throw new FileAlreadyExistsException(directory.CombineChildPath(name));
 
-            var newFile = directory.CreateFile(name);
+            var newFile = directory.CreateFile(name, overwrite);
             using (var writeStream = newFile.GetWriteStream())
                 CopyToStream(writeStream, progress);
             return newFile;
@@ -318,7 +318,7 @@ namespace FileHub
             if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
                 throw new FileAlreadyExistsException(directory.CombineChildPath(name));
 
-            var newFile = await directory.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
+            var newFile = await directory.CreateFileAsync(name, overwrite, cancellationToken).ConfigureAwait(false);
 
             var writeStream = await newFile.GetWriteStreamAsync(options: null, cancellationToken: cancellationToken).ConfigureAwait(false);
             try

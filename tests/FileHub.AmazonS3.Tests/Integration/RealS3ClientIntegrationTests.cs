@@ -26,7 +26,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -43,7 +43,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -65,7 +65,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -90,7 +90,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -126,7 +126,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -152,7 +152,7 @@ public class RealS3ClientIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 }

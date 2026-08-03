@@ -126,6 +126,16 @@ public class AmazonS3DirectoryTests
     }
 
     [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var hub = NewHub();
+        hub.Root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => hub.Root.CreateFile("a.txt"));
+        Assert.Equal("keep", hub.Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
     public void DeleteIfExists_ExistingFile_NoHeadProbe()
     {
         var client = new InMemoryS3Client();

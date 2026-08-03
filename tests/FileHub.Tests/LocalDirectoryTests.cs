@@ -42,6 +42,17 @@ public class LocalDirectoryTests
     }
 
     [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("a.txt"));
+        Assert.Equal("keep", root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
     public void CreateDirectory_CreatesDirectoryOnDisk()
     {
         using var temp = new TempDirectory();

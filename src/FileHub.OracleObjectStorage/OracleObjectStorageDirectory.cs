@@ -142,6 +142,10 @@ namespace FileHub.OracleObjectStorage
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
+            
+            if (await ExistsAsync(head, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(CombineChildPath(head));
+
             var objectName = PathUtil.ResolveSafeKey(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {

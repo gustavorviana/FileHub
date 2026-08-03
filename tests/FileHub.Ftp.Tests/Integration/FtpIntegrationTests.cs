@@ -29,7 +29,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
     {
         if (hub.Root.TryOpenDirectory(name, out var existing))
         {
-            existing.Delete();
+            existing.Delete(recursive: true);
         }
         return await hub.Root.CreateDirectoryAsync(name);
     }
@@ -234,7 +234,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
         sub.CreateFile("inner.txt").SetText("x");
         sub.CreateDirectory("deeper").CreateFile("leaf.txt").SetText("y");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(scope.DirectoryExists("to-delete"));
     }
