@@ -213,7 +213,14 @@ namespace FileHub.Ftp
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            
+            try
+            {
+                await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+            }
             _length = -1;
         }
 

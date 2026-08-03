@@ -27,6 +27,11 @@ namespace FileHub
         /// support ignore it silently.
         /// </summary>
         public abstract Stream GetWriteStream(FileWriteOptions options = null);
+
+        /// <summary>
+        /// Deletes the file. Idempotent-silent: deleting a file that no longer
+        /// exists is a no-op on every backend, matching <c>File.Delete</c>.
+        /// </summary>
         public abstract void Delete();
         public abstract FileEntry Rename(string newName);
         public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false);

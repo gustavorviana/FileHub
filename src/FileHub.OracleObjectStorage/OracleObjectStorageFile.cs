@@ -233,7 +233,14 @@ namespace FileHub.OracleObjectStorage
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            await SessionInternal.Client.DeleteObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            
+            try
+            {
+                await SessionInternal.Client.DeleteObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+            }
             _length = -1;
         }
 
