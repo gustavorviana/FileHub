@@ -565,20 +565,23 @@ namespace FileHub.OracleObjectStorage
             return false;
         }
 
-        public override void Delete() => SyncBridge.Run(ct => DeleteAsync(ct));
+        public override void Delete(bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
 
-        public override async Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_prefix == _rootPrefix)
                 throw new NotSupportedException("Cannot delete the root directory of the FileHub.");
 
+            if (!recursive && await AnyChildUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false))
+                throw new DirectoryNotEmptyException(Path);
+
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete(string name) => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        public override void Delete(string name, bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
-        public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
@@ -587,7 +590,7 @@ namespace FileHub.OracleObjectStorage
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is OracleObjectStorageDirectory ociDir)
                 {
-                    await ociDir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
+                    await ociDir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
@@ -608,6 +611,9 @@ namespace FileHub.OracleObjectStorage
             var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
             {
+                if (!recursive && await AnyChildUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
+                    throw new DirectoryNotEmptyException(CombineChildPath(head));
+
                 await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
                 return;
             }
@@ -755,6 +761,19 @@ namespace FileHub.OracleObjectStorage
         {
             var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: 1, start: null, cancellationToken).ConfigureAwait(false);
             return page.Objects.Count > 0;
+        }
+
+        // "Empty directory" test: any object under the prefix other than the
+        // directory's own marker key (whose name equals the prefix). LIST 2 so a
+        // page returning only the marker still lets us see whether a child
+        // follows it.
+        private async Task<bool> AnyChildUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
+        {
+            var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: 2, start: null, cancellationToken).ConfigureAwait(false);
+            foreach (var obj in page.Objects)
+                if (!string.Equals(obj.Name, prefix, StringComparison.Ordinal))
+                    return true;
+            return false;
         }
 
         private async Task DeleteAllUnderPrefixAsync(string prefix, CancellationToken cancellationToken)

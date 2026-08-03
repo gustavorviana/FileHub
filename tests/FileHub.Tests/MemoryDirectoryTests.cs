@@ -433,6 +433,30 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => sub.Delete());
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(root.DirectoryExists("sub"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryRecursive_Removes()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        root.Delete("sub", recursive: true);
+
+        Assert.False(root.DirectoryExists("sub"));
+    }
+
+    [Fact]
     public void DeleteIfExists_MissingItem_NoOp()
     {
         var root = NewRoot();

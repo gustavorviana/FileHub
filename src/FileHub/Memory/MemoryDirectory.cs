@@ -178,17 +178,17 @@ namespace FileHub.Memory
             return Task.FromResult(DirectoryExists(name));
         }
 
-        public override Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete();
+            Delete(recursive);
             return Task.CompletedTask;
         }
 
-        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete(name);
+            Delete(name, recursive);
             return Task.CompletedTask;
         }
 
@@ -244,16 +244,18 @@ namespace FileHub.Memory
 
         public override bool Exists() => !Disposed;
 
-        public override void Delete()
+        public override void Delete(bool recursive = false)
         {
             ThrowIfReadOnly();
+            if (!recursive && (_files.Count > 0 || _directories.Count > 0))
+                throw new DirectoryNotEmptyException(Path);
             _files.Clear();
             _directories.Clear();
             _parent?.RemoveDirectory(Name);
             Dispose();
         }
 
-        public override void Delete(string name)
+        public override void Delete(string name, bool recursive = false)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
@@ -261,12 +263,18 @@ namespace FileHub.Memory
             {
                 if (!TryOpenDirectory(head, out var dir))
                     throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest);
+                dir.Delete(rest, recursive);
                 return;
             }
             ValidateName(head);
             if (_files.Remove(head)) return;
-            if (_directories.Remove(head)) return;
+            if (_directories.TryGetValue(head, out var child))
+            {
+                if (!recursive && (child._files.Count > 0 || child._directories.Count > 0))
+                    throw new DirectoryNotEmptyException(child.Path);
+                _directories.Remove(head);
+                return;
+            }
             throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
         }
 

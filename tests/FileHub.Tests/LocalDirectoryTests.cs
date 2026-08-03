@@ -283,9 +283,21 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("nested.txt");
 
-        root.Delete("sub");
+        root.Delete("sub", recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
+    }
+
+    [Fact]
+    public void Delete_ByName_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("nested.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }
 
     [Fact]
@@ -304,7 +316,7 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("a.txt");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }

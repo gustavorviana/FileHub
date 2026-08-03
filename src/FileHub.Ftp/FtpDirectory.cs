@@ -412,21 +412,25 @@ namespace FileHub.Ftp
             return info != null;
         }
 
-        public override void Delete() => SyncBridge.Run(DeleteAsync);
+        public override void Delete(bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
 
-        public override async Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_path == _rootPathFtp)
                 throw new NotSupportedException("Cannot delete the root directory of the FileHub.");
 
             await _session.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!recursive && await AnyChildAsync(_path, cancellationToken).ConfigureAwait(false))
+                throw new DirectoryNotEmptyException(Path);
+
             await _session.Client.DeleteDirectoryAsync(_path, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete(string name) => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        public override void Delete(string name, bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
-        public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
@@ -435,7 +439,7 @@ namespace FileHub.Ftp
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is FtpDirectory ftpDir)
                 {
-                    await ftpDir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
+                    await ftpDir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
@@ -453,11 +457,22 @@ namespace FileHub.Ftp
 
             if (await _session.Client.DirectoryExistsAsync(fullPath, cancellationToken).ConfigureAwait(false))
             {
+                if (!recursive && await AnyChildAsync(fullPath, cancellationToken).ConfigureAwait(false))
+                    throw new DirectoryNotEmptyException(CombineChildPath(head));
+
                 await _session.Client.DeleteDirectoryAsync(fullPath, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             throw new FileNotFoundException($"The item \"{name}\" was not found under \"{_path}\".");
+        }
+
+        // Emptiness probe for the non-recursive delete contract: a directory is
+        // empty when a LIST returns no entries.
+        private async Task<bool> AnyChildAsync(string path, CancellationToken cancellationToken)
+        {
+            var items = await _session.Client.ListAsync(path, cancellationToken).ConfigureAwait(false);
+            return items.Count > 0;
         }
 
         public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
@@ -529,7 +544,7 @@ namespace FileHub.Ftp
             var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
             try
             {
-                await DeleteAsync(cancellationToken).ConfigureAwait(false);
+                await DeleteAsync(recursive: true, cancellationToken).ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {

@@ -227,9 +227,19 @@ public class FtpDirectoryTests : FtpTestBase
         var sub = Root.CreateDirectory("sub");
         sub.CreateFile("inner.txt");
 
-        Root.Delete("sub");
+        Root.Delete("sub", recursive: true);
 
         Assert.Null(Client.Server.Find("/sub"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var sub = Root.CreateDirectory("sub");
+        sub.CreateFile("inner.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => Root.Delete("sub"));
+        Assert.NotNull(Client.Server.Find("/sub"));
     }
 
     [Fact]

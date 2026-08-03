@@ -198,17 +198,17 @@ namespace FileHub.Local
             return Task.FromResult(DirectoryExists(name));
         }
 
-        public override Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete();
+            Delete(recursive);
             return Task.CompletedTask;
         }
 
-        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete(name);
+            Delete(name, recursive);
             return Task.CompletedTask;
         }
 
@@ -279,12 +279,16 @@ namespace FileHub.Local
 
         public override bool Exists() => Directory.Exists(Path);
 
-        public override void Delete()
+        public override void Delete(bool recursive = false)
         {
             ThrowIfReadOnly();
+            // Surface the non-empty case as the library's own type instead of a
+            // raw System.IO.IOException wrapped into a generic FileHubException.
+            if (!recursive && Directory.Exists(Path) && Directory.EnumerateFileSystemEntries(Path).Any())
+                throw new DirectoryNotEmptyException(Path);
             try
             {
-                Directory.Delete(Path, recursive: true);
+                Directory.Delete(Path, recursive);
             }
             catch (DirectoryNotFoundException)
             {
@@ -302,7 +306,7 @@ namespace FileHub.Local
             InvalidateInfo();
         }
 
-        public override void Delete(string name)
+        public override void Delete(string name, bool recursive = false)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
@@ -310,7 +314,7 @@ namespace FileHub.Local
             {
                 if (!TryOpenDirectory(head, out var dir))
                     throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest);
+                dir.Delete(rest, recursive);
                 return;
             }
             PathUtil.ValidateLocalName(head);
@@ -321,10 +325,13 @@ namespace FileHub.Local
             if (!isDir && !isFile)
                 throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
 
+            if (isDir && !recursive && Directory.EnumerateFileSystemEntries(fullPath).Any())
+                throw new DirectoryNotEmptyException(fullPath);
+
             try
             {
                 if (isDir)
-                    Directory.Delete(fullPath, recursive: true);
+                    Directory.Delete(fullPath, recursive);
                 else
                     File.Delete(fullPath);
             }
@@ -457,7 +464,7 @@ namespace FileHub.Local
             }
             catch (Exception ex)
             {
-                try { copied.Delete(); } catch { /* best effort rollback */ }
+                try { copied.Delete(recursive: true); } catch { /* best effort rollback */ }
                 throw new FileHubException(
                     $"Failed to move directory \"{Path}\" to \"{copied.Path}\"; the partial copy was rolled back.", ex);
             }

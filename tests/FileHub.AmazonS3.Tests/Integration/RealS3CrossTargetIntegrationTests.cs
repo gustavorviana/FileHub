@@ -32,8 +32,8 @@ public class RealS3CrossTargetIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            TryDelete(rootA.Delete);
-            TryDelete(rootB.Delete);
+            TryDelete(() => rootA.Delete(recursive: true));
+            TryDelete(() => rootB.Delete(recursive: true));
         }
     }
 
@@ -59,8 +59,8 @@ public class RealS3CrossTargetIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            TryDelete(rootA.Delete);
-            TryDelete(rootB.Delete);
+            TryDelete(() => rootA.Delete(recursive: true));
+            TryDelete(() => rootB.Delete(recursive: true));
         }
     }
 

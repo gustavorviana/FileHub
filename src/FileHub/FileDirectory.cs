@@ -37,9 +37,22 @@ namespace FileHub
 
         public abstract Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default);
 
-        public abstract Task DeleteAsync(CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Delete this directory. When <paramref name="recursive"/> is
+        /// <c>false</c> (the default) and the directory is not empty, throws
+        /// <see cref="DirectoryNotEmptyException"/> — mirroring
+        /// <see cref="System.IO.Directory.Delete(string)"/>. Pass
+        /// <c>recursive: true</c> to remove the whole subtree.
+        /// </summary>
+        public abstract Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default);
 
-        public abstract Task DeleteAsync(string name, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Delete the child named <paramref name="name"/>. A file is deleted
+        /// regardless of <paramref name="recursive"/>; a non-empty child
+        /// directory throws <see cref="DirectoryNotEmptyException"/> unless
+        /// <paramref name="recursive"/> is <c>true</c>.
+        /// </summary>
+        public abstract Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default);
 
         // === Abstract enumeration ===
         // Enumeration stays a sync pull model because IAsyncEnumerable is not
@@ -78,11 +91,13 @@ namespace FileHub
         public virtual bool DirectoryExists(string name)
             => SyncBridge.Run(ct => DirectoryExistsAsync(name, ct));
 
-        public virtual void Delete()
-            => SyncBridge.Run(ct => DeleteAsync(ct));
+        /// <inheritdoc cref="DeleteAsync(bool, CancellationToken)"/>
+        public virtual void Delete(bool recursive = false)
+            => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
 
-        public virtual void Delete(string name)
-            => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        /// <inheritdoc cref="DeleteAsync(string, bool, CancellationToken)"/>
+        public virtual void Delete(string name, bool recursive = false)
+            => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
         /// <summary>
         /// Returns whether <em>anything</em> — a file or a directory — already
@@ -163,7 +178,7 @@ namespace FileHub
         {
             ThrowIfReadOnly();
             var newDir = await CopyToAsync(directory, name, overwrite: false, cancellationToken).ConfigureAwait(false);
-            await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            await DeleteAsync(recursive: true, cancellationToken).ConfigureAwait(false);
             return newDir;
         }
 
@@ -309,7 +324,7 @@ namespace FileHub
         {
             ThrowIfReadOnly();
             if (await ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                await DeleteAsync(name, cancellationToken).ConfigureAwait(false);
+                await DeleteAsync(name, recursive: false, cancellationToken).ConfigureAwait(false);
         }
 
         public virtual void DeleteIfExists(string name)
