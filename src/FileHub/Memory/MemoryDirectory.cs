@@ -324,6 +324,9 @@ namespace FileHub.Memory
                 if (IsSelfOrDescendant(destParent))
                     throw new FileHubException($"Cannot move directory \"{Path}\" into itself or one of its descendants.");
 
+                if (!overwrite && destParent.Exists(name))
+                    throw new FileAlreadyExistsException(destParent.CombineChildPath(name));
+
                 var moved = (MemoryDirectory)destParent.CreateDirectory(name);
                 MoveContentsTo(this, moved);
                 _parent?.RemoveDirectory(Name);

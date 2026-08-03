@@ -205,6 +205,54 @@ public abstract class MoveCopyContractTests : IDisposable
     }
 
     [Fact]
+    public void MoveDirectory_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // Directory move mirrors Directory.Move — an existing destination is a
+        // throw, never a silent merge, when the flag is omitted.
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("f.txt", Bytes("new"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("f.txt", Bytes("old"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => Root.OpenDirectory("d1").MoveTo(Root, "d2"));
+
+        // Source untouched — the failed move must not have deleted it.
+        Assert.Equal("new", Root.OpenFile("d1/f.txt").ReadAllText());
+        Assert.Equal("old", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public async Task MoveDirectoryAsync_DefaultOverwrite_OntoExisting_Throws()
+    {
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("f.txt", Bytes("new"));
+        Root.CreateDirectory("d2").CreateFile("f.txt", Bytes("old"));
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(() => Root.OpenDirectory("d1").MoveToAsync(Root, "d2"));
+
+        Assert.True(Root.DirectoryExists("d1"));
+        Assert.Equal("old", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void MoveDirectory_OverwriteTrue_MergesAndRemovesSource()
+    {
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("shared.txt", Bytes("new"));
+        src.CreateFile("only-src.txt", Bytes("s"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("shared.txt", Bytes("old"));
+        dst.CreateFile("only-dst.txt", Bytes("d"));
+
+        Root.OpenDirectory("d1").MoveTo(Root, "d2", overwrite: true);
+
+        Assert.False(Root.DirectoryExists("d1"));                            // source removed
+        Assert.Equal("new", Root.OpenFile("d2/shared.txt").ReadAllText());   // colliding leaf replaced
+        Assert.Equal("s", Root.OpenFile("d2/only-src.txt").ReadAllText());   // source-only added
+        Assert.Equal("d", Root.OpenFile("d2/only-dst.txt").ReadAllText());   // destination-only kept
+    }
+
+    [Fact]
     public void CopyDirectory_DuplicatesTreeAndKeepsSource()
     {
         var dir = Root.CreateDirectory("d1");

@@ -171,8 +171,11 @@ namespace FileHub
 
         /// <summary>
         /// Move this directory under <paramref name="directory"/> with
-        /// <paramref name="name"/>. Base implementation = copy then delete.
-        /// Drivers with an atomic move primitive override.
+        /// <paramref name="name"/>. When <paramref name="overwrite"/> is
+        /// <c>false</c> (the default) an existing destination throws
+        /// <see cref="FileAlreadyExistsException"/>; pass <c>true</c> to merge
+        /// into it. Base implementation = copy then delete. Drivers with an
+        /// atomic move primitive override.
         /// </summary>
         public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {

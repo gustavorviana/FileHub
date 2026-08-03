@@ -534,8 +534,15 @@ namespace FileHub.Ftp
                     throw new FileAlreadyExistsException($"Cannot move directory \"{Path}\" onto itself.", Path);
                 if (IsDescendantPath(destination))
                     throw new FileHubException($"Cannot move directory \"{Path}\" into one of its descendants.");
-                await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);
-                return new FtpDirectory(ftpDir, name);
+
+                // RNFR/RNTO cannot merge into an existing target — only take the
+                // native rename for a clean destination; anything else falls
+                // through to copy+delete, which throws (or merges) per overwrite.
+                if (!await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                {
+                    await _session.Client.RenameAsync(_path, destination, cancellationToken).ConfigureAwait(false);
+                    return new FtpDirectory(ftpDir, name);
+                }
             }
 
             var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
