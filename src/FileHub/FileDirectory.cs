@@ -261,6 +261,16 @@ namespace FileHub
         public virtual Task<FileEntry> OpenFileAsync(string name, CancellationToken cancellationToken = default)
             => OpenFileAsync(name, createIfNotExists: false, cancellationToken);
 
+        /// <summary>
+        /// Open the file at <paramref name="name"/> (which may be a nested
+        /// path). When <paramref name="createIfNotExists"/> is <c>true</c> and
+        /// the file is absent, the file <em>and every missing ancestor
+        /// directory</em> are created — unlike
+        /// <see cref="System.IO.File.Open(string, System.IO.FileMode)"/>, which
+        /// throws <see cref="DirectoryNotFoundException"/> when a parent is
+        /// missing. When <c>false</c>, a missing file throws
+        /// <see cref="FileNotFoundException"/>.
+        /// </summary>
         public virtual async Task<FileEntry> OpenFileAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (head, rest) = SplitPath(name);
@@ -290,6 +300,13 @@ namespace FileHub
         public virtual Task<FileDirectory> OpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
             => OpenDirectoryAsync(name, createIfNotExists: false, cancellationToken);
 
+        /// <summary>
+        /// Open the directory at <paramref name="name"/> (which may be a nested
+        /// path). When <paramref name="createIfNotExists"/> is <c>true</c> and
+        /// the path is absent, the directory <em>and every missing ancestor</em>
+        /// are created. When <c>false</c>, a missing segment throws
+        /// <see cref="DirectoryNotFoundException"/>.
+        /// </summary>
         public virtual async Task<FileDirectory> OpenDirectoryAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (head, rest) = SplitPath(name);
