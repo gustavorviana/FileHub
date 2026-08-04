@@ -87,6 +87,14 @@ namespace FileHub
         /// Compiles a <c>*</c>/<c>?</c> glob into a cached case-insensitive
         /// regex. Every driver uses this same contract so a pattern like
         /// <c>"report_?.csv"</c> yields the same result everywhere.
+        /// <para>
+        /// Matching is <b>intentionally case-insensitive on every backend</b>,
+        /// including Linux. This is a deliberate divergence from
+        /// <see cref="System.IO.Directory.GetFiles(string, string)"/>, whose
+        /// case sensitivity follows the underlying filesystem
+        /// (case-sensitive on Linux, insensitive on Windows) — chosen so a glob
+        /// behaves identically across drivers and operating systems.
+        /// </para>
         /// </summary>
         public static Regex BuildSearchPatternRegex(string pattern)
         {

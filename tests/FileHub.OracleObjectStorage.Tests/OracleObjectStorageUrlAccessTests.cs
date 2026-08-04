@@ -127,8 +127,10 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
-    public void GetSignedUploadUrl_WithOptions_CreatesWritePar()
+    public void GetSignedUploadUrl_WithHeaderBindingOptions_Throws()
     {
+        // OCI PARs can't bind headers; refuse rather than hand back an
+        // unconstrained URL the caller would believe is constrained.
         var dir = (ISignedUploadable)Root;
         var options = new FileWriteOptions
         {
@@ -137,9 +139,21 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
             Metadata = new Dictionary<string, string> { ["owner"] = "alice" },
         };
 
-        var url = dir.GetSignedUploadUrl("uploads/img.png", TimeSpan.FromMinutes(15), options);
+        Assert.Throws<NotSupportedException>(
+            () => dir.GetSignedUploadUrl("uploads/bound.png", TimeSpan.FromMinutes(15), options));
+        Assert.DoesNotContain(_fixture.Client.Pars, p => p.ObjectName == "uploads/bound.png");
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_WithEmptyOptions_CreatesWritePar()
+    {
+        // An options object with no header-binding fields carries no constraint
+        // to drop, so it is honored like the no-options overload.
+        var dir = (ISignedUploadable)Root;
+
+        var url = dir.GetSignedUploadUrl("uploads/empty.png", TimeSpan.FromMinutes(15), new FileWriteOptions());
 
         Assert.Contains("/p/filehub-upload-", url.ToString());
-        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "uploads/img.png"));
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "uploads/empty.png");
     }
 }

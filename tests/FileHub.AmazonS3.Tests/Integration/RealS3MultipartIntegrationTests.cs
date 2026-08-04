@@ -38,7 +38,7 @@ public class RealS3MultipartIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            TryDelete(rootDir.Delete);
+            TryDelete(() => rootDir.Delete(recursive: true));
         }
     }
 
@@ -101,7 +101,7 @@ public class RealS3MultipartIntegrationTests : RealS3IntegrationTestBase
         }
         finally
         {
-            TryDelete(rootDir.Delete);
+            TryDelete(() => rootDir.Delete(recursive: true));
         }
     }
 

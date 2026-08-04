@@ -42,6 +42,17 @@ public class LocalDirectoryTests
     }
 
     [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("a.txt"));
+        Assert.Equal("keep", root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
     public void CreateDirectory_CreatesDirectoryOnDisk()
     {
         using var temp = new TempDirectory();
@@ -283,17 +294,29 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("nested.txt");
 
-        root.Delete("sub");
+        root.Delete("sub", recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_ByName_NonEmptyDirectoryWithoutRecursive_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("nested.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "sub")));
+    }
+
+    [Fact]
+    public void Delete_Missing_IsSilent()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.Delete("ghost");
     }
 
     [Fact]
@@ -304,7 +327,7 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("a.txt");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }

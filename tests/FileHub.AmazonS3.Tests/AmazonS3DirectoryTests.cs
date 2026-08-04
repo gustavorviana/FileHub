@@ -92,9 +92,20 @@ public class AmazonS3DirectoryTests
         dir.CreateFile("x.txt").SetText("1");
         dir.CreateDirectory("sub").CreateFile("y.txt").SetText("2");
 
-        dir.Delete();
+        dir.Delete(recursive: true);
 
         Assert.False(hub.Root.TryOpenDirectory("deleteme", out _));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        using var hub = NewHub();
+        var dir = hub.Root.CreateDirectory("deleteme");
+        dir.CreateFile("x.txt").SetText("1");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => dir.Delete());
+        Assert.True(hub.Root.TryOpenDirectory("deleteme", out _));
     }
 
     [Fact]
@@ -112,6 +123,16 @@ public class AmazonS3DirectoryTests
     {
         using var hub = NewHub();
         Assert.Throws<System.NotSupportedException>(() => hub.Root.Delete());
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var hub = NewHub();
+        hub.Root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => hub.Root.CreateFile("a.txt"));
+        Assert.Equal("keep", hub.Root.OpenFile("a.txt").ReadAllText());
     }
 
     [Fact]
@@ -161,7 +182,7 @@ public class AmazonS3DirectoryTests
             hub.Root.CreateFile($"bulk/{i:D3}.bin").SetBytes(new byte[] { (byte)i });
 
         var deleteBefore = client.DeleteInvocationCount;
-        hub.Root.Delete("bulk");
+        hub.Root.Delete("bulk", recursive: true);
 
         // 1 batch delete covers all 50 children + the prefix marker.
         Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
@@ -181,7 +202,7 @@ public class AmazonS3DirectoryTests
         hub.Root.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
         hub.Root.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
 
-        hub.Root.Delete("sub");
+        hub.Root.Delete("sub", recursive: true);
 
         Assert.False(hub.Root.FileExists("sub/a.txt"));
         Assert.False(hub.Root.FileExists("sub/b.txt"));

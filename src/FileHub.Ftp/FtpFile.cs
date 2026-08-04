@@ -213,7 +213,14 @@ namespace FileHub.Ftp
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            
+            try
+            {
+                await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+            }
             _length = -1;
         }
 
@@ -222,18 +229,7 @@ namespace FileHub.Ftp
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                {
-                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
-                    return await MoveToAsync(targetDir, leaf, progress: null, overwrite: false, cancellationToken).ConfigureAwait(false);
-                }
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateName(newName);
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
@@ -250,10 +246,10 @@ namespace FileHub.Ftp
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -309,7 +305,7 @@ namespace FileHub.Ftp
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
         /// <summary>
@@ -322,7 +318,7 @@ namespace FileHub.Ftp
         /// Both legs stream in chunks; memory usage is constant regardless of
         /// file size. Cross-connection copies still stream directly.
         /// </summary>
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory and recurse with the leaf.

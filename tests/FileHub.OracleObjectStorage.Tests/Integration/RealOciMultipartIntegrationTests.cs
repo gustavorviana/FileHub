@@ -38,7 +38,7 @@ public class RealOciMultipartIntegrationTests : RealIntegrationTestBase
         finally
         {
             rootDir.DeleteIfExists(name);
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 }

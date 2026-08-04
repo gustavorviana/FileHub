@@ -237,18 +237,7 @@ namespace FileHub.AmazonS3
             // S3 has no atomic rename. Fall back to copy+delete in-place.
             // Always default COPY — source metadata is preserved on the new key.
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                {
-                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
-                    return await MoveToAsync(targetDir, leaf, progress: null, overwrite: false, cancellationToken).ConfigureAwait(false);
-                }
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateName(newName);
 
@@ -271,10 +260,10 @@ namespace FileHub.AmazonS3
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -354,10 +343,10 @@ namespace FileHub.AmazonS3
             };
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory under the destination and

@@ -246,33 +246,29 @@ public class LocalFileTests
     // === Nested target names (path/leaf) ===
 
     [Fact]
-    public void Rename_NestedName_MovesIntoSubPath()
+    public void Rename_NestedName_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.txt");
         file.SetText("data");
 
-        var moved = file.Rename("sub/deep/b.txt");
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/deep/b.txt"));
 
-        Assert.Equal("b.txt", moved.Name);
-        Assert.Equal("data", moved.ReadAllText());
-        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "deep", "b.txt")));
-        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source gone
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source untouched
     }
 
     [Fact]
-    public void Rename_NestedNameBackslash_MovesIntoSubPath()
+    public void Rename_NestedNameBackslash_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
         var file = root.CreateFile("a.txt");
         file.SetText("x");
 
-        var moved = file.Rename(@"sub\b.txt");
+        Assert.Throws<ArgumentException>(() => file.Rename(@"sub\b.txt"));
 
-        Assert.Equal("x", moved.ReadAllText());
-        Assert.True(File.Exists(Path.Combine(temp.Path, "sub", "b.txt")));
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
     }
 
     [Fact]
@@ -308,7 +304,7 @@ public class LocalFileTests
     }
 
     [Fact]
-    public void Rename_NestedOntoExisting_Throws()
+    public void Rename_WithSeparator_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
@@ -316,7 +312,7 @@ public class LocalFileTests
         file.SetText("new");
         root.CreateFile("sub/b.txt").SetText("old");
 
-        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("sub/b.txt"));
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/b.txt"));
         Assert.Equal("old", root.OpenFile("sub/b.txt").ReadAllText());
         Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
     }
@@ -380,7 +376,22 @@ public class LocalFileTests
     // === Overwrite ===
 
     [Fact]
-    public void CopyTo_DefaultOverwritesExisting()
+    public void CopyTo_DefaultOverwrite_ThrowsWhenDestinationExists()
+    {
+        // Default overwrite is false (BCL File.Copy parity) — an existing
+        // destination must not be clobbered when the flag is omitted.
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        Assert.Throws<FileAlreadyExistsException>(() => src.CopyTo(root, "b.txt"));
+        Assert.Equal("old", root.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyTo_OverwriteTrue_ReplacesExisting()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
@@ -388,7 +399,7 @@ public class LocalFileTests
         src.SetText("new");
         root.CreateFile("b.txt").SetText("old");
 
-        var copy = src.CopyTo(root, "b.txt");
+        var copy = src.CopyTo(root, "b.txt", progress: null, overwrite: true);
 
         Assert.Equal("new", copy.ReadAllText());
     }
@@ -435,6 +446,26 @@ public class LocalFileTests
         // Move aborted before delete — source still there.
         Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
         Assert.Equal("old", dst.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void MoveTo_OntoExistingDirectory_ThrowsEvenWhenOverwrite_AndKeepsDirectory()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("data");
+        // "target" is a populated directory. A file must never replace it,
+        // even with overwrite:true — mirrors System.IO.File.Move.
+        var target = root.CreateDirectory("target");
+        target.CreateFile("keep.txt").SetText("keep");
+
+        Assert.Throws<FileHubException>(() => src.MoveTo(root, "target", progress: null, overwrite: true));
+
+        // Directory and its contents survive; the source file is untouched.
+        Assert.True(root.DirectoryExists("target"));
+        Assert.Equal("keep", root.OpenFile("target/keep.txt").ReadAllText());
+        Assert.True(root.FileExists("a.txt"));
     }
 
     [Fact]

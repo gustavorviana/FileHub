@@ -194,11 +194,11 @@ public class PathSemanticsTests
     }
 
     [Fact]
-    public void Memory_Delete_NestedMissing_Throws()
+    public void Memory_Delete_NestedMissing_IsSilent()
     {
         var root = NewMemory();
 
-        Assert.Throws<FileNotFoundException>(() => root.Delete("a/b/nope.txt"));
+        root.Delete("a/b/nope.txt");
     }
 
     [Fact]

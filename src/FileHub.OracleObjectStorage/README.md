@@ -34,8 +34,6 @@ Always `using` or register as a singleton — the hub owns the SDK HTTP client b
 - `OciHubOptions.FromProvider(...)` — explicit `IAuthenticationDetailsProvider` (instance / resource principals, custom).
 - `OciHubOptions.FromClient(...)` — reuse an existing `ObjectStorageClient`. Caller owns it.
 
-The legacy `OracleObjectStorageFileHub.From*` static factories on the hub class are kept marked `[Obsolete]` for one release cycle, then removed in v1.
-
 ## Features
 
 - Server-side `Rename` / `CopyTo` / `MoveTo` (same-region and cross-region).

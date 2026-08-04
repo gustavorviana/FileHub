@@ -37,9 +37,22 @@ namespace FileHub
 
         public abstract Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default);
 
-        public abstract Task DeleteAsync(CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Delete this directory. When <paramref name="recursive"/> is
+        /// <c>false</c> (the default) and the directory is not empty, throws
+        /// <see cref="DirectoryNotEmptyException"/> — mirroring
+        /// <see cref="System.IO.Directory.Delete(string)"/>. Pass
+        /// <c>recursive: true</c> to remove the whole subtree.
+        /// </summary>
+        public abstract Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default);
 
-        public abstract Task DeleteAsync(string name, CancellationToken cancellationToken = default);
+        /// <summary>
+        /// Delete the child named <paramref name="name"/>. A file is deleted
+        /// regardless of <paramref name="recursive"/>; a non-empty child
+        /// directory throws <see cref="DirectoryNotEmptyException"/> unless
+        /// <paramref name="recursive"/> is <c>true</c>.
+        /// </summary>
+        public abstract Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default);
 
         // === Abstract enumeration ===
         // Enumeration stays a sync pull model because IAsyncEnumerable is not
@@ -78,11 +91,13 @@ namespace FileHub
         public virtual bool DirectoryExists(string name)
             => SyncBridge.Run(ct => DirectoryExistsAsync(name, ct));
 
-        public virtual void Delete()
-            => SyncBridge.Run(ct => DeleteAsync(ct));
+        /// <inheritdoc cref="DeleteAsync(bool, CancellationToken)"/>
+        public virtual void Delete(bool recursive = false)
+            => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
 
-        public virtual void Delete(string name)
-            => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        /// <inheritdoc cref="DeleteAsync(string, bool, CancellationToken)"/>
+        public virtual void Delete(string name, bool recursive = false)
+            => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
         /// <summary>
         /// Returns whether <em>anything</em> — a file or a directory — already
@@ -136,10 +151,14 @@ namespace FileHub
         // === Composite operations (async holds the logic; sync bridges) ===
 
         /// <summary>
-        /// Rename this directory under the same parent. Base implementation
-        /// delegates to <see cref="MoveToAsync(FileDirectory, string, CancellationToken)"/>
-        /// with the same parent — drivers backed by a store that has a native
-        /// rename (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
+        /// Change this directory's leaf name in place under the same parent.
+        /// <paramref name="newName"/> must be a single name: a value containing
+        /// a <c>/</c> or <c>\</c> separator throws
+        /// <see cref="ArgumentException"/> — use
+        /// <see cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        /// to relocate. Base implementation delegates to <c>MoveToAsync</c> with
+        /// the same parent — drivers backed by a store that has a native rename
+        /// (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
         /// <c>Move</c>) override to use it directly.
         /// </summary>
         public virtual async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
@@ -147,7 +166,8 @@ namespace FileHub
             ThrowIfReadOnly();
             if (Parent == null)
                 throw new InvalidOperationException("Cannot rename the root directory.");
-            return await MoveToAsync(Parent, newName, cancellationToken).ConfigureAwait(false);
+            NestedPath.EnsureLeaf(newName);
+            return await MoveToAsync(Parent, newName, overwrite: false, cancellationToken).ConfigureAwait(false);
         }
 
         /// <inheritdoc cref="RenameAsync(string, CancellationToken)"/>
@@ -156,20 +176,23 @@ namespace FileHub
 
         /// <summary>
         /// Move this directory under <paramref name="directory"/> with
-        /// <paramref name="name"/>. Base implementation = copy then delete.
-        /// Drivers with an atomic move primitive override.
+        /// <paramref name="name"/>. When <paramref name="overwrite"/> is
+        /// <c>false</c> (the default) an existing destination throws
+        /// <see cref="FileAlreadyExistsException"/>; pass <c>true</c> to merge
+        /// into it. Base implementation = copy then delete. Drivers with an
+        /// atomic move primitive override.
         /// </summary>
-        public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
-            await DeleteAsync(cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
+            await DeleteAsync(recursive: true, cancellationToken).ConfigureAwait(false);
             return newDir;
         }
 
-        /// <inheritdoc cref="MoveToAsync(FileDirectory, string, CancellationToken)"/>
-        public virtual FileDirectory MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        /// <inheritdoc cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        public virtual FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
         /// <summary>
         /// Recursively copy this directory's contents into a new directory
@@ -179,29 +202,35 @@ namespace FileHub
         /// backed by a store with server-side copy (S3 <c>CopyObject</c>,
         /// OCI <c>CopyObject</c>) override for cheaper bulk copy.
         /// </summary>
-        public virtual async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public virtual async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (directory == null) throw new ArgumentNullException(nameof(directory));
 
+            // overwrite: false must not clobber an existing destination — throw
+            // up-front so nothing is half-copied. overwrite: true merges into the
+            // destination, replacing colliding leaves.
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
 #if NET8_0_OR_GREATER
             await foreach (var file in GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(newDir, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(newDir, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             await foreach (var subDir in GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await subDir.CopyToAsync(newDir, subDir.Name, cancellationToken).ConfigureAwait(false);
+                await subDir.CopyToAsync(newDir, subDir.Name, overwrite, cancellationToken).ConfigureAwait(false);
 #else
             foreach (var file in await GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await file.CopyToAsync(newDir, file.Name, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await file.CopyToAsync(newDir, file.Name, overwrite: overwrite, cancellationToken: cancellationToken).ConfigureAwait(false);
             foreach (var subDir in await GetDirectoriesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))
-                await subDir.CopyToAsync(newDir, subDir.Name, cancellationToken).ConfigureAwait(false);
+                await subDir.CopyToAsync(newDir, subDir.Name, overwrite, cancellationToken).ConfigureAwait(false);
 #endif
             return newDir;
         }
 
-        /// <inheritdoc cref="CopyToAsync(FileDirectory, string, CancellationToken)"/>
-        public virtual FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        /// <inheritdoc cref="CopyToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        public virtual FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
         public virtual async Task<FileEntry> CreateFileAsync(string name, bool overwrite, CancellationToken cancellationToken = default)
         {
@@ -237,6 +266,16 @@ namespace FileHub
         public virtual Task<FileEntry> OpenFileAsync(string name, CancellationToken cancellationToken = default)
             => OpenFileAsync(name, createIfNotExists: false, cancellationToken);
 
+        /// <summary>
+        /// Open the file at <paramref name="name"/> (which may be a nested
+        /// path). When <paramref name="createIfNotExists"/> is <c>true</c> and
+        /// the file is absent, the file <em>and every missing ancestor
+        /// directory</em> are created — unlike
+        /// <see cref="System.IO.File.Open(string, System.IO.FileMode)"/>, which
+        /// throws <see cref="DirectoryNotFoundException"/> when a parent is
+        /// missing. When <c>false</c>, a missing file throws
+        /// <see cref="FileNotFoundException"/>.
+        /// </summary>
         public virtual async Task<FileEntry> OpenFileAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (head, rest) = SplitPath(name);
@@ -266,6 +305,13 @@ namespace FileHub
         public virtual Task<FileDirectory> OpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
             => OpenDirectoryAsync(name, createIfNotExists: false, cancellationToken);
 
+        /// <summary>
+        /// Open the directory at <paramref name="name"/> (which may be a nested
+        /// path). When <paramref name="createIfNotExists"/> is <c>true</c> and
+        /// the path is absent, the directory <em>and every missing ancestor</em>
+        /// are created. When <c>false</c>, a missing segment throws
+        /// <see cref="DirectoryNotFoundException"/>.
+        /// </summary>
         public virtual async Task<FileDirectory> OpenDirectoryAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (head, rest) = SplitPath(name);
@@ -303,7 +349,7 @@ namespace FileHub
         {
             ThrowIfReadOnly();
             if (await ExistsAsync(name, cancellationToken).ConfigureAwait(false))
-                await DeleteAsync(name, cancellationToken).ConfigureAwait(false);
+                await DeleteAsync(name, recursive: false, cancellationToken).ConfigureAwait(false);
         }
 
         public virtual void DeleteIfExists(string name)

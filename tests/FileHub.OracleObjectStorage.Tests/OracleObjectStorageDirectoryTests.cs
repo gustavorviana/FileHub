@@ -119,11 +119,22 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         scope.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
         scope.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
 
-        scope.Delete("sub");
+        scope.Delete("sub", recursive: true);
 
         Assert.False(scope.FileExists("sub/a.txt"));
         Assert.False(scope.FileExists("sub/b.txt"));
         Assert.True(scope.FileExists("sibling.txt"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var scope = Scope(nameof(Delete_NonEmptyDirectoryWithoutRecursive_Throws));
+        var sub = scope.CreateDirectory("to-delete");
+        sub.CreateFile("a.txt").SetText("A");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => sub.Delete());
+        Assert.True(scope.DirectoryExists("to-delete"));
     }
 
     [Fact]
@@ -134,7 +145,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         sub.CreateFile("a.txt").SetText("A");
         sub.CreateDirectory("nested").CreateFile("b.txt").SetText("B");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(scope.DirectoryExists("to-delete"));
         Assert.Empty(_fixture.Client.Keys.Where(k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/")));
@@ -144,6 +155,16 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     public void Delete_Root_ThrowsNotSupported()
     {
         Assert.Throws<NotSupportedException>(() => Root.Delete());
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        var scope = Scope(nameof(CreateFile_SingleArg_ExistingFile_Throws));
+        scope.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => scope.CreateFile("a.txt"));
+        Assert.Equal("keep", scope.OpenFile("a.txt").ReadAllText());
     }
 
     [Fact]

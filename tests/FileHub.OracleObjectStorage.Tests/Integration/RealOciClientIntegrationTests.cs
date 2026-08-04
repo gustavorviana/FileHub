@@ -24,7 +24,7 @@ public class RealOciClientIntegrationTests : RealIntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -39,7 +39,7 @@ public class RealOciClientIntegrationTests : RealIntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -62,7 +62,7 @@ public class RealOciClientIntegrationTests : RealIntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 
@@ -84,7 +84,7 @@ public class RealOciClientIntegrationTests : RealIntegrationTestBase
         }
         finally
         {
-            rootDir.Delete();
+            rootDir.Delete(recursive: true);
         }
     }
 }

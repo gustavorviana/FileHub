@@ -46,7 +46,7 @@ namespace FileHub
         public override Stream GetWriteStream(FileWriteOptions options = null) { ThrowIfReadOnly(); return null; }
         public override void Delete() => ThrowIfReadOnly();
         public override FileEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true) { ThrowIfReadOnly(); return null; }
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 
     internal class ReadOnlyDirectoryWrapper : FileDirectory
@@ -129,12 +129,12 @@ namespace FileHub
         public override Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileEntry>(null); }
         public override FileDirectory CreateDirectory(string name) { ThrowIfReadOnly(); return null; }
         public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileDirectory>(null); }
-        public override void Delete() => ThrowIfReadOnly();
-        public override void Delete(string name) => ThrowIfReadOnly();
-        public override Task DeleteAsync(CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
-        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
+        public override void Delete(bool recursive = false) => ThrowIfReadOnly();
+        public override void Delete(string name, bool recursive = false) => ThrowIfReadOnly();
+        public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
+        public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
         public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileDirectory MoveTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
-        public override FileDirectory CopyTo(FileDirectory directory, string name) { ThrowIfReadOnly(); return null; }
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 }

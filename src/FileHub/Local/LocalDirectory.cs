@@ -40,7 +40,7 @@ namespace FileHub.Local
             }
             PathUtil.ValidateLocalName(head);
             var filePath = ResolveSafePath(head);
-            if (Directory.Exists(filePath))
+            if (Directory.Exists(filePath) || File.Exists(filePath))
                 throw new FileAlreadyExistsException(filePath);
 
             try
@@ -53,10 +53,6 @@ namespace FileHub.Local
                 if (Directory.Exists(filePath))
                     throw new FileAlreadyExistsException(filePath);
 
-                throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
                 throw new FileHubException($"Failed to create file \"{filePath}\".", ex);
             }
             InvalidateInfo();
@@ -198,17 +194,17 @@ namespace FileHub.Local
             return Task.FromResult(DirectoryExists(name));
         }
 
-        public override Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete();
+            Delete(recursive);
             return Task.CompletedTask;
         }
 
-        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete(name);
+            Delete(name, recursive);
             return Task.CompletedTask;
         }
 
@@ -218,16 +214,16 @@ namespace FileHub.Local
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(MoveTo(directory, name));
+            return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
-        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(CopyTo(directory, name));
+            return Task.FromResult(CopyTo(directory, name, overwrite));
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
@@ -279,12 +275,16 @@ namespace FileHub.Local
 
         public override bool Exists() => Directory.Exists(Path);
 
-        public override void Delete()
+        public override void Delete(bool recursive = false)
         {
             ThrowIfReadOnly();
+            // Surface the non-empty case as the library's own type instead of a
+            // raw System.IO.IOException wrapped into a generic FileHubException.
+            if (!recursive && Directory.Exists(Path) && Directory.EnumerateFileSystemEntries(Path).Any())
+                throw new DirectoryNotEmptyException(Path);
             try
             {
-                Directory.Delete(Path, recursive: true);
+                Directory.Delete(Path, recursive);
             }
             catch (DirectoryNotFoundException)
             {
@@ -295,22 +295,17 @@ namespace FileHub.Local
                 // Never leak raw System.IO exceptions to callers.
                 throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to delete directory \"{Path}\".", ex);
-            }
             InvalidateInfo();
         }
 
-        public override void Delete(string name)
+        public override void Delete(string name, bool recursive = false)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
             if (rest != null)
             {
-                if (!TryOpenDirectory(head, out var dir))
-                    throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest);
+                if (TryOpenDirectory(head, out var dir))
+                    dir.Delete(rest, recursive);
                 return;
             }
             PathUtil.ValidateLocalName(head);
@@ -319,12 +314,15 @@ namespace FileHub.Local
             var isDir = Directory.Exists(fullPath);
             var isFile = !isDir && File.Exists(fullPath);
             if (!isDir && !isFile)
-                throw new FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+                return;
+
+            if (isDir && !recursive && Directory.EnumerateFileSystemEntries(fullPath).Any())
+                throw new DirectoryNotEmptyException(fullPath);
 
             try
             {
                 if (isDir)
-                    Directory.Delete(fullPath, recursive: true);
+                    Directory.Delete(fullPath, recursive);
                 else
                     File.Delete(fullPath);
             }
@@ -333,26 +331,13 @@ namespace FileHub.Local
                 // Never leak raw System.IO exceptions to callers.
                 throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to delete \"{fullPath}\".", ex);
-            }
             InvalidateInfo();
         }
 
         public override FileDirectory Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory under the parent and move
-            // into it.
-            if (NestedPath.HasSeparator(newName) && Parent != null)
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateLocalName(newName);
 
@@ -383,7 +368,7 @@ namespace FileHub.Local
             return new LocalDirectory(newPath, RootPath, Parent);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -396,7 +381,7 @@ namespace FileHub.Local
                 if (NestedPath.HasSeparator(name))
                 {
                     if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
-                        return MoveTo(localDir.CreateDirectory(subPath), leaf);
+                        return MoveTo(localDir.CreateDirectory(subPath), leaf, overwrite);
                     name = leaf;
                 }
 
@@ -431,22 +416,18 @@ namespace FileHub.Local
                         // Cross-volume move is unsupported by Directory.Move —
                         // fall through to copy + delete.
                     }
-                    catch (UnauthorizedAccessException ex)
-                    {
-                        throw new FileHubException($"Failed to move directory \"{Path}\" to \"{destPath}\".", ex);
-                    }
                 }
             }
 
-            return MoveByCopyDelete(directory, name);
+            return MoveByCopyDelete(directory, name, overwrite);
         }
 
         // Copy the subtree, then delete the source. A delete failure rolls the
         // copy back so no duplicate is left behind, and the raw System.IO error
         // is translated before it reaches the caller.
-        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name)
+        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name, bool overwrite)
         {
-            var copied = CopyTo(directory, name);
+            var copied = CopyTo(directory, name, overwrite);
             try
             {
                 Directory.Delete(Path, recursive: true);
@@ -457,7 +438,7 @@ namespace FileHub.Local
             }
             catch (Exception ex)
             {
-                try { copied.Delete(); } catch { /* best effort rollback */ }
+                try { copied.Delete(recursive: true); } catch { /* best effort rollback */ }
                 throw new FileHubException(
                     $"Failed to move directory \"{Path}\" to \"{copied.Path}\"; the partial copy was rolled back.", ex);
             }
@@ -465,7 +446,7 @@ namespace FileHub.Local
             return copied;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {
@@ -478,8 +459,14 @@ namespace FileHub.Local
                     throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
             }
 
+            // overwrite: false must not clobber an existing destination — throw
+            // before anything is copied. overwrite: true merges, replacing
+            // colliding leaves.
+            if (!overwrite && directory.Exists(name))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newDir = directory.CreateDirectory(name);
-            CopyContents(this, newDir);
+            CopyContents(this, newDir, overwrite);
             return newDir;
         }
 
@@ -530,15 +517,15 @@ namespace FileHub.Local
             return (info.Attributes & FileAttributes.ReparsePoint) != 0;
         }
 
-        private static void CopyContents(FileDirectory source, FileDirectory destination)
+        private static void CopyContents(FileDirectory source, FileDirectory destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContents(subDir, newSubDir);
+                CopyContents(subDir, newSubDir, overwrite);
             }
         }
 

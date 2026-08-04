@@ -142,6 +142,10 @@ namespace FileHub.OracleObjectStorage
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
+            
+            if (await ExistsAsync(head, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(CombineChildPath(head));
+
             var objectName = PathUtil.ResolveSafeKey(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
@@ -399,13 +403,18 @@ namespace FileHub.OracleObjectStorage
         public Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null)
             => SyncBridge.Run(ct => GetSignedUploadUrlAsync(name, expiresIn, options, ct));
 
-        // OCI PARs can't bind request headers to the URL — the caller is free
-        // to send any Content-Type/metadata on the PUT, so 'options' is
-        // accepted for API parity with S3 but silently ignored here.
         public async Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name cannot be null or empty.", nameof(name));
             if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
+
+            // OCI PARs can't bind request headers to the URL. Rather than hand
+            // back a URL the caller believes is header-constrained but isn't
+            // (S3 binds them), refuse header-binding options outright.
+            if (options != null && (options.ContentType != null || options.CacheControl != null || options.Metadata != null))
+                throw new NotSupportedException(
+                    "OCI pre-authenticated requests cannot bind Content-Type, Cache-Control or metadata headers to " +
+                    "the upload URL. Omit these options, or enforce the headers server-side after the upload completes.");
 
             // Resolve to a full object name under this prefix. Reuses the
             // nested-path validation PathUtil already applies — rejects
@@ -565,20 +574,23 @@ namespace FileHub.OracleObjectStorage
             return false;
         }
 
-        public override void Delete() => SyncBridge.Run(ct => DeleteAsync(ct));
+        public override void Delete(bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
 
-        public override async Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_prefix == _rootPrefix)
                 throw new NotSupportedException("Cannot delete the root directory of the FileHub.");
 
+            if (!recursive && await AnyChildUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false))
+                throw new DirectoryNotEmptyException(Path);
+
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete(string name) => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        public override void Delete(string name, bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
-        public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
@@ -586,11 +598,8 @@ namespace FileHub.OracleObjectStorage
             {
                 var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
                 if (dir is OracleObjectStorageDirectory ociDir)
-                {
-                    await ociDir.DeleteAsync(rest, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+                    await ociDir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
+                return;
             }
             PathUtil.ValidateName(head);
 
@@ -608,11 +617,11 @@ namespace FileHub.OracleObjectStorage
             var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
             {
-                await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
-                return;
-            }
+                if (!recursive && await AnyChildUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
+                    throw new DirectoryNotEmptyException(CombineChildPath(head));
 
-            throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
+                await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
@@ -622,18 +631,7 @@ namespace FileHub.OracleObjectStorage
             ThrowIfReadOnly();
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                {
-                    var targetDir = await _parent.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
-                    return await MoveToAsync(targetDir, leaf, cancellationToken).ConfigureAwait(false);
-                }
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateName(newName);
 
@@ -647,13 +645,13 @@ namespace FileHub.OracleObjectStorage
             return new OracleObjectStorageDirectory(_parent, newName);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
@@ -670,10 +668,10 @@ namespace FileHub.OracleObjectStorage
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory and recurse with the leaf.
@@ -682,7 +680,7 @@ namespace FileHub.OracleObjectStorage
                 if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
                 {
                     var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
-                    return await CopyToAsync(deeper, leaf, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, overwrite, cancellationToken).ConfigureAwait(false);
                 }
                 name = leaf;
             }
@@ -705,12 +703,20 @@ namespace FileHub.OracleObjectStorage
                     if (IsDescendantPath(destinationPrefix))
                         throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
                 }
+                // overwrite: false must not clobber an existing destination. The
+                // server-side CopyObject loop below always overwrites colliding
+                // keys, so guard with a LIST up-front.
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
                 await CopyAllObjectsAsync(_prefix, ociDir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new OracleObjectStorageDirectory(ociDir, name);
             }
 
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(directory.Path, name));
+
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
-            CopyContentsGeneric(this, newDir);
+            CopyContentsGeneric(this, newDir, overwrite);
             return newDir;
         }
 
@@ -747,6 +753,19 @@ namespace FileHub.OracleObjectStorage
         {
             var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: 1, start: null, cancellationToken).ConfigureAwait(false);
             return page.Objects.Count > 0;
+        }
+
+        // "Empty directory" test: any object under the prefix other than the
+        // directory's own marker key (whose name equals the prefix). LIST 2 so a
+        // page returning only the marker still lets us see whether a child
+        // follows it.
+        private async Task<bool> AnyChildUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
+        {
+            var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: 2, start: null, cancellationToken).ConfigureAwait(false);
+            foreach (var obj in page.Objects)
+                if (!string.Equals(obj.Name, prefix, StringComparison.Ordinal))
+                    return true;
+            return false;
         }
 
         private async Task DeleteAllUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
@@ -827,15 +846,15 @@ namespace FileHub.OracleObjectStorage
             // implicit (same invariant we keep on nested writes).
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination)
+        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContentsGeneric(subDir, newSubDir);
+                CopyContentsGeneric(subDir, newSubDir, overwrite);
             }
         }
     }

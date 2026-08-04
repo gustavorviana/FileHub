@@ -19,6 +19,20 @@ namespace FileHub
             => !string.IsNullOrEmpty(name) && (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0);
 
         /// <summary>
+        /// Throws <see cref="System.ArgumentException"/> when
+        /// <paramref name="name"/> contains a <c>/</c> or <c>\</c> separator. A
+        /// rename changes the leaf name in place; relocating an entry into
+        /// another directory must go through <c>MoveTo</c>.
+        /// </summary>
+        public static void EnsureLeaf(string name, string paramName = "newName")
+        {
+            if (HasSeparator(name))
+                throw new System.ArgumentException(
+                    $"Rename target \"{name}\" must be a single name without a path separator; use MoveTo to relocate.",
+                    paramName);
+        }
+
+        /// <summary>
         /// Splits a caller-supplied name at its <em>last</em> separator so the
         /// tail is the real entry name and everything before it is the path:
         /// <c>"a/b/c.txt"</c> → <paramref name="subPath"/> <c>"a/b"</c>,

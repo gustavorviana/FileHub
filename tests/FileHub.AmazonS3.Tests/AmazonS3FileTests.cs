@@ -84,17 +84,14 @@ public class AmazonS3FileTests
     }
 
     [Fact]
-    public void Rename_NestedName_MovesToSubPathKey()
+    public void Rename_NestedName_Throws()
     {
         using var hub = NewHub(out var client);
         hub.Root.CreateFile("a.txt").SetText("data");
 
-        var moved = hub.Root.OpenFile("a.txt").Rename("sub/deep/b.txt");
+        Assert.Throws<ArgumentException>(() => hub.Root.OpenFile("a.txt").Rename("sub/deep/b.txt"));
 
-        Assert.Equal("b.txt", moved.Name);
-        Assert.False(client.TryGetBody("a.txt", out _));            // source key gone
-        Assert.True(client.TryGetBody("sub/deep/b.txt", out var body));
-        Assert.Equal("data", Encoding.UTF8.GetString(body));
+        Assert.True(client.TryGetBody("a.txt", out _));            // source key untouched
     }
 
     [Fact]

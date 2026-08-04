@@ -41,14 +41,23 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
-    public void CreateFile_OverwriteFalse_KeepsFirstDeletedNothing()
+    public void CreateFile_OverwriteFalse_ExistingFile_Throws()
     {
         var root = NewRoot();
         root.CreateFile("x.txt").SetText("hello");
 
-        var again = root.CreateFile("x.txt", overwrite: false);
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("x.txt", overwrite: false));
+        Assert.Equal("hello", root.OpenFile("x.txt").ReadAllText());
+    }
 
-        Assert.Equal("x.txt", again.Name);
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("x.txt").SetText("hello");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("x.txt"));
+        Assert.Equal("hello", root.OpenFile("x.txt").ReadAllText());
     }
 
     // === TryOpenFile / OpenFile ===
@@ -426,10 +435,34 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_Missing_IsSilent()
     {
         var root = NewRoot();
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        root.Delete("ghost");
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => sub.Delete());
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(root.DirectoryExists("sub"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryRecursive_Removes()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        root.Delete("sub", recursive: true);
+
+        Assert.False(root.DirectoryExists("sub"));
     }
 
     [Fact]

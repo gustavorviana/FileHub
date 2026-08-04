@@ -61,6 +61,32 @@ public abstract class MoveCopyContractTests : IDisposable
     }
 
     [Fact]
+    public void MoveFile_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // overwrite defaults to false (BCL File.Move parity) — an existing
+        // destination must not be clobbered when the caller omits the flag.
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => b.MoveTo(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+        Assert.True(Root.FileExists("b.txt"));
+    }
+
+    [Fact]
+    public async Task MoveFileAsync_DefaultOverwrite_OntoExisting_Throws()
+    {
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(() => b.MoveToAsync(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+        Assert.True(Root.FileExists("b.txt"));
+    }
+
+    [Fact]
     public void MoveFile_OverwriteTrue_ReplacesTarget()
     {
         Root.CreateFile("a.txt", Bytes("1"));
@@ -117,6 +143,42 @@ public abstract class MoveCopyContractTests : IDisposable
     }
 
     [Fact]
+    public void CopyFile_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // overwrite defaults to false (BCL File.Copy parity) — an existing
+        // destination must not be clobbered when the caller omits the flag.
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => b.CopyTo(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public async Task CopyFileAsync_DefaultOverwrite_OntoExisting_Throws()
+    {
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(() => b.CopyToAsync(Root, "a.txt"));
+
+        Assert.Equal("1", Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyFile_OverwriteTrue_ReplacesTarget()
+    {
+        Root.CreateFile("a.txt", Bytes("1"));
+        var b = Root.CreateFile("b.txt", Bytes("2"));
+
+        b.CopyTo(Root, "a.txt", overwrite: true);
+
+        Assert.Equal("2", Root.OpenFile("a.txt").ReadAllText());
+        Assert.True(Root.FileExists("b.txt"));
+    }
+
+    [Fact]
     public void CopyFile_OntoItself_Throws_AndKeepsFile()
     {
         var file = Root.CreateFile("a.txt", Bytes("keep"));
@@ -143,6 +205,54 @@ public abstract class MoveCopyContractTests : IDisposable
     }
 
     [Fact]
+    public void MoveDirectory_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // Directory move mirrors Directory.Move — an existing destination is a
+        // throw, never a silent merge, when the flag is omitted.
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("f.txt", Bytes("new"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("f.txt", Bytes("old"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => Root.OpenDirectory("d1").MoveTo(Root, "d2"));
+
+        // Source untouched — the failed move must not have deleted it.
+        Assert.Equal("new", Root.OpenFile("d1/f.txt").ReadAllText());
+        Assert.Equal("old", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public async Task MoveDirectoryAsync_DefaultOverwrite_OntoExisting_Throws()
+    {
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("f.txt", Bytes("new"));
+        Root.CreateDirectory("d2").CreateFile("f.txt", Bytes("old"));
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(() => Root.OpenDirectory("d1").MoveToAsync(Root, "d2"));
+
+        Assert.True(Root.DirectoryExists("d1"));
+        Assert.Equal("old", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void MoveDirectory_OverwriteTrue_MergesAndRemovesSource()
+    {
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("shared.txt", Bytes("new"));
+        src.CreateFile("only-src.txt", Bytes("s"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("shared.txt", Bytes("old"));
+        dst.CreateFile("only-dst.txt", Bytes("d"));
+
+        Root.OpenDirectory("d1").MoveTo(Root, "d2", overwrite: true);
+
+        Assert.False(Root.DirectoryExists("d1"));                            // source removed
+        Assert.Equal("new", Root.OpenFile("d2/shared.txt").ReadAllText());   // colliding leaf replaced
+        Assert.Equal("s", Root.OpenFile("d2/only-src.txt").ReadAllText());   // source-only added
+        Assert.Equal("d", Root.OpenFile("d2/only-dst.txt").ReadAllText());   // destination-only kept
+    }
+
+    [Fact]
     public void CopyDirectory_DuplicatesTreeAndKeepsSource()
     {
         var dir = Root.CreateDirectory("d1");
@@ -152,6 +262,39 @@ public abstract class MoveCopyContractTests : IDisposable
 
         Assert.Equal("data", Root.OpenFile("d1/f.txt").ReadAllText());
         Assert.Equal("data", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyDirectory_DefaultOverwrite_OntoExisting_Throws()
+    {
+        // Default overwrite is false — an existing destination directory must
+        // not be clobbered/merged into when the flag is omitted.
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("f.txt", Bytes("new"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("f.txt", Bytes("old"));
+
+        Assert.Throws<FileAlreadyExistsException>(() => Root.OpenDirectory("d1").CopyTo(Root, "d2"));
+
+        // Destination untouched — nothing half-copied.
+        Assert.Equal("old", Root.OpenFile("d2/f.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyDirectory_OverwriteTrue_MergesAndReplacesCollisions()
+    {
+        var src = Root.CreateDirectory("d1");
+        src.CreateFile("shared.txt", Bytes("new"));
+        src.CreateFile("only-src.txt", Bytes("s"));
+        var dst = Root.CreateDirectory("d2");
+        dst.CreateFile("shared.txt", Bytes("old"));
+        dst.CreateFile("only-dst.txt", Bytes("d"));
+
+        Root.OpenDirectory("d1").CopyTo(Root, "d2", overwrite: true);
+
+        Assert.Equal("new", Root.OpenFile("d2/shared.txt").ReadAllText()); // colliding leaf replaced
+        Assert.Equal("s", Root.OpenFile("d2/only-src.txt").ReadAllText()); // source-only added
+        Assert.True(Root.FileExists("d1/shared.txt"));                     // source kept
     }
 
     [Fact]

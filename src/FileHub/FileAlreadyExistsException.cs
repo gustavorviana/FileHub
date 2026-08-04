@@ -9,6 +9,15 @@ namespace FileHub
     /// Thrown by a copy or move that was asked not to overwrite
     /// (<c>overwrite: false</c>) when an entry already exists at the
     /// destination. The source is left untouched — no bytes were written.
+    /// <para>
+    /// The BCL surfaces a name collision as an opaque
+    /// <see cref="System.IO.IOException"/>. This type is a deliberate refinement:
+    /// via <see cref="FileHubException"/> it still derives from
+    /// <see cref="System.IO.IOException"/>, so an existing
+    /// <c>catch (IOException)</c> keeps working, while a
+    /// <c>catch (FileAlreadyExistsException)</c> can single out the collision
+    /// and read the offending <see cref="DestinationPath"/>.
+    /// </para>
     /// </summary>
 #if !NET8_0_OR_GREATER
     [Serializable]

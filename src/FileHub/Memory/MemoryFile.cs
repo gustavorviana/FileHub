@@ -72,15 +72,7 @@ namespace FileHub.Memory
         public override FileEntry Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf, progress: null, overwrite: false);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             ValidateName(newName);
 
@@ -95,7 +87,7 @@ namespace FileHub.Memory
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -151,19 +143,19 @@ namespace FileHub.Memory
             return newFile;
         }
 
-        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(MoveTo(directory, name, progress, overwrite));
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyTo(directory, name, progress, overwrite);
         }
 
-        public override Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyToAsync(directory, name, progress, overwrite, cancellationToken);

@@ -58,10 +58,6 @@ namespace FileHub.Local
                 // Never leak raw System.IO exceptions to callers.
                 throw new FileHubException($"Failed to delete \"{Path}\".", ex);
             }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new FileHubException($"Failed to delete \"{Path}\".", ex);
-            }
         }
 
         // 80 KB matches the copy-loop buffer in FileEntry, so each ReadAsync
@@ -90,16 +86,7 @@ namespace FileHub.Local
         public override FileEntry Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory under the current parent
-            // and move into it (never overwriting, like any rename).
-            if (NestedPath.HasSeparator(newName))
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf, progress: null, overwrite: false);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             PathUtil.ValidateLocalName(newName);
             var newPath = ((LocalDirectory)Parent).ResolveSafeChildPath(newName);
@@ -127,7 +114,7 @@ namespace FileHub.Local
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -160,27 +147,29 @@ namespace FileHub.Local
                 // progress.
                 if (progress == null)
                 {
+                    if (File.Exists(destPath) || Directory.Exists(destPath))
+                    {
+                        if (!overwrite)
+                            throw new FileAlreadyExistsException(destPath);
+                        // A file must never replace a directory — mirror
+                        // System.IO.File.Move, which refuses this regardless of
+                        // overwrite rather than recursively wiping the folder.
+                        if (Directory.Exists(destPath))
+                            throw new FileHubException($"Cannot overwrite directory \"{destPath}\" with the file \"{Path}\".");
+                    }
+
                     try
                     {
-                        if (File.Exists(destPath) || Directory.Exists(destPath))
-                        {
-                            if (!overwrite)
-                                throw new FileAlreadyExistsException(destPath);
-                            // File.Move has no overwrite overload on netstandard2.0,
-                            // so clear the existing target first.
-                            if (File.Exists(destPath)) File.Delete(destPath);
-                            else Directory.Delete(destPath, recursive: true);
-                        }
+                        // File.Move has no overwrite overload on netstandard2.0,
+                        // so clear the existing target first.
+                        if (File.Exists(destPath))
+                            File.Delete(destPath);
                         File.Move(Path, destPath);
                     }
                     catch (IOException ex)
                     {
                         if (File.Exists(destPath) || Directory.Exists(destPath))
                             throw new FileAlreadyExistsException(destPath);
-                        throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
                         throw new FileHubException($"Failed to move \"{Path}\" to \"{destPath}\".", ex);
                     }
 
@@ -218,7 +207,7 @@ namespace FileHub.Local
             return newFile;
         }
 
-        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
@@ -257,7 +246,7 @@ namespace FileHub.Local
 
         // Same-filesystem copy uses File.Copy so the OS moves the bytes; a
         // cross-driver destination falls back to the stream-based base copy.
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = true)
+        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {
@@ -292,10 +281,6 @@ namespace FileHub.Local
                     {
                         if (!overwrite && (File.Exists(destPath) || Directory.Exists(destPath)))
                             throw new FileAlreadyExistsException(destPath);
-                        throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
-                    }
-                    catch (UnauthorizedAccessException ex)
-                    {
                         throw new FileHubException($"Failed to copy \"{Path}\" to \"{destPath}\".", ex);
                     }
 

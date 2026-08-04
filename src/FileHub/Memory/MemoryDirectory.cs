@@ -48,9 +48,7 @@ namespace FileHub.Memory
                 return dir.CreateFile(rest);
             }
             ValidateName(head);
-            // A file and a directory cannot share a name (mirrors the
-            // local-filesystem driver).
-            if (_directories.ContainsKey(head))
+            if (_directories.ContainsKey(head) || _files.ContainsKey(head))
                 throw new FileAlreadyExistsException(PathUtil.JoinDisplay(Path, head));
             var data = new MemoryFileData(head);
             _files[head] = data;
@@ -178,17 +176,17 @@ namespace FileHub.Memory
             return Task.FromResult(DirectoryExists(name));
         }
 
-        public override Task DeleteAsync(CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete();
+            Delete(recursive);
             return Task.CompletedTask;
         }
 
-        public override Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Delete(name);
+            Delete(name, recursive);
             return Task.CompletedTask;
         }
 
@@ -198,16 +196,16 @@ namespace FileHub.Memory
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(MoveTo(directory, name));
+            return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
-        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(CopyTo(directory, name));
+            return Task.FromResult(CopyTo(directory, name, overwrite));
         }
 
         public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
@@ -244,44 +242,41 @@ namespace FileHub.Memory
 
         public override bool Exists() => !Disposed;
 
-        public override void Delete()
+        public override void Delete(bool recursive = false)
         {
             ThrowIfReadOnly();
+            if (!recursive && (_files.Count > 0 || _directories.Count > 0))
+                throw new DirectoryNotEmptyException(Path);
             _files.Clear();
             _directories.Clear();
             _parent?.RemoveDirectory(Name);
             Dispose();
         }
 
-        public override void Delete(string name)
+        public override void Delete(string name, bool recursive = false)
         {
             ThrowIfReadOnly();
             var (head, rest) = SplitPath(name);
             if (rest != null)
             {
-                if (!TryOpenDirectory(head, out var dir))
-                    throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
-                dir.Delete(rest);
+                if (TryOpenDirectory(head, out var dir))
+                    dir.Delete(rest, recursive);
                 return;
             }
             ValidateName(head);
             if (_files.Remove(head)) return;
-            if (_directories.Remove(head)) return;
-            throw new System.IO.FileNotFoundException($"The item \"{name}\" was not found in \"{Path}\".");
+            if (_directories.TryGetValue(head, out var child))
+            {
+                if (!recursive && (child._files.Count > 0 || child._directories.Count > 0))
+                    throw new DirectoryNotEmptyException(child.Path);
+                _directories.Remove(head);
+            }
         }
 
         public override FileDirectory Rename(string newName)
         {
             ThrowIfReadOnly();
-
-            // A separator means the tail is the real name and the rest is a
-            // path — resolve/create that subdirectory and move into it.
-            if (NestedPath.HasSeparator(newName) && Parent != null)
-            {
-                if (NestedPath.TrySplitLeaf(newName, out var subPath, out var leaf))
-                    return MoveTo(Parent.CreateDirectory(subPath), leaf);
-                newName = leaf;
-            }
+            NestedPath.EnsureLeaf(newName);
 
             ValidateName(newName);
 
@@ -301,7 +296,7 @@ namespace FileHub.Memory
             return renamed;
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
+        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -321,6 +316,9 @@ namespace FileHub.Memory
                 if (IsSelfOrDescendant(destParent))
                     throw new FileHubException($"Cannot move directory \"{Path}\" into itself or one of its descendants.");
 
+                if (!overwrite && destParent.Exists(name))
+                    throw new FileAlreadyExistsException(destParent.CombineChildPath(name));
+
                 var moved = (MemoryDirectory)destParent.CreateDirectory(name);
                 MoveContentsTo(this, moved);
                 _parent?.RemoveDirectory(Name);
@@ -331,7 +329,7 @@ namespace FileHub.Memory
             }
 
             // Cross-driver: deep copy then delete the source.
-            var copied = CopyTo(directory, name);
+            var copied = CopyTo(directory, name, overwrite);
             _parent?.RemoveDirectory(Name);
 
             // Clear and dispose the old instance so stale references stop reporting as alive.
@@ -341,7 +339,7 @@ namespace FileHub.Memory
             return copied;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
+        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
         {
             if (directory is MemoryDirectory destParent)
             {
@@ -356,11 +354,17 @@ namespace FileHub.Memory
                     throw new FileHubException($"Cannot copy directory \"{Path}\" into itself or one of its descendants.");
             }
 
+            // overwrite: false must not clobber an existing destination — throw
+            // before anything is copied. overwrite: true merges, replacing
+            // colliding leaves.
+            if (!overwrite && directory.Exists(name))
+                throw new FileAlreadyExistsException(directory.CombineChildPath(name));
+
             var newDir = directory.CreateDirectory(name);
             if (newDir is MemoryDirectory memDir)
                 CopyContentsTo(this, memDir);
             else
-                CopyContentsGeneric(this, newDir);
+                CopyContentsGeneric(this, newDir, overwrite);
             return newDir;
         }
 
@@ -412,15 +416,15 @@ namespace FileHub.Memory
             }
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination)
+        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContentsGeneric(subDir, newSubDir);
+                CopyContentsGeneric(subDir, newSubDir, overwrite);
             }
         }
 
@@ -433,6 +437,9 @@ namespace FileHub.Memory
             return names.Where(n => regex.IsMatch(n));
         }
 
+        // Case-insensitive to match the glob contract shared across every
+        // driver (see PathUtil.BuildSearchPatternRegex) — a deliberate,
+        // OS-independent divergence from Directory.GetFiles on Linux.
         private static Regex GlobToRegex(string pattern)
         {
             var sb = new StringBuilder(pattern.Length + 8);
