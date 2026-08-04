@@ -437,6 +437,9 @@ namespace FileHub.Memory
             return names.Where(n => regex.IsMatch(n));
         }
 
+        // Case-insensitive to match the glob contract shared across every
+        // driver (see PathUtil.BuildSearchPatternRegex) — a deliberate,
+        // OS-independent divergence from Directory.GetFiles on Linux.
         private static Regex GlobToRegex(string pattern)
         {
             var sb = new StringBuilder(pattern.Length + 8);
