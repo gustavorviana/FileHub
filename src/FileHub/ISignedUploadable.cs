@@ -29,13 +29,16 @@ namespace FileHub
         /// <c>Content-Type</c> / <c>Cache-Control</c> / user-metadata headers
         /// on the PUT request, otherwise the backend rejects with a signature
         /// mismatch. Drivers that cannot bind headers to the signature
-        /// (currently OCI) ignore <paramref name="options"/> silently — the
-        /// client is then free to send any headers.
+        /// (currently OCI, whose pre-authenticated requests carry no header
+        /// constraints) throw <see cref="NotSupportedException"/> when
+        /// header-binding options are passed, rather than return a URL the
+        /// caller would wrongly believe is constrained.
         /// </para>
         /// </summary>
         /// <param name="name">File name or relative path under this directory.</param>
         /// <param name="expiresIn">Duration until the URL expires.</param>
         /// <param name="options">Optional headers to bind into the signature.</param>
+        /// <param name="cancellationToken">Token to cancel the request.</param>
         Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default);
 
         /// <summary>Sync version of <see cref="GetSignedUploadUrlAsync(string, TimeSpan, FileWriteOptions, CancellationToken)"/>.</summary>

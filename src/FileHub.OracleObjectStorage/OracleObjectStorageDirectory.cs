@@ -403,13 +403,18 @@ namespace FileHub.OracleObjectStorage
         public Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null)
             => SyncBridge.Run(ct => GetSignedUploadUrlAsync(name, expiresIn, options, ct));
 
-        // OCI PARs can't bind request headers to the URL — the caller is free
-        // to send any Content-Type/metadata on the PUT, so 'options' is
-        // accepted for API parity with S3 but silently ignored here.
         public async Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name cannot be null or empty.", nameof(name));
             if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
+
+            // OCI PARs can't bind request headers to the URL. Rather than hand
+            // back a URL the caller believes is header-constrained but isn't
+            // (S3 binds them), refuse header-binding options outright.
+            if (options != null && (options.ContentType != null || options.CacheControl != null || options.Metadata != null))
+                throw new NotSupportedException(
+                    "OCI pre-authenticated requests cannot bind Content-Type, Cache-Control or metadata headers to " +
+                    "the upload URL. Omit these options, or enforce the headers server-side after the upload completes.");
 
             // Resolve to a full object name under this prefix. Reuses the
             // nested-path validation PathUtil already applies — rejects
