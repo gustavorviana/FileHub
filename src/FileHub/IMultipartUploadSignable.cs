@@ -16,30 +16,34 @@ namespace FileHub
     /// Use when the backend does not hold the bytes — typically when
     /// offloading large uploads from the web tier to clients.
     /// </summary>
-    public interface IMultipartUploadSignable
+    public interface IMultipartUploadSignable : IMultipartCapable
     {
-        /// <summary>Minimum part size (bytes) accepted by the backing store.</summary>
-        long MinimumPartSize { get; }
-
         // === Sync (delegates to async) ===
 
-        SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn);
+        /// <summary>Sync version of <see cref="BeginSignedMultipartUploadAsync"/>.</summary>
+        SignedMultipartUpload BeginSignedMultipartUpload(MultipartUploadSpec spec, TimeSpan expiresIn, FileWriteOptions options = null);
 
+        /// <summary>Sync version of <see cref="CompleteSignedMultipartUploadAsync"/>.</summary>
         void CompleteSignedMultipartUpload(string uploadId, IReadOnlyList<UploadedPart> parts);
 
+        /// <summary>Sync version of <see cref="AbortSignedMultipartUploadAsync"/>.</summary>
         void AbortSignedMultipartUpload(string uploadId);
 
         // === Async (source of truth) ===
 
         /// <summary>
-        /// Begins a multipart upload and returns one pre-signed PUT URL
-        /// for each part described by <paramref name="spec"/>, valid for
-        /// <paramref name="expiresIn"/>. Distribute the URLs to the
-        /// remote client; collect ETags when they finish.
+        /// Begins a multipart upload and returns one pre-signed PUT URL for each
+        /// part described by <paramref name="spec"/>, valid for
+        /// <paramref name="expiresIn"/>. Distribute the URLs to the remote
+        /// client; collect ETags when they finish. <paramref name="options"/>
+        /// (content type, cache-control, user metadata, driver-specific fields)
+        /// are bound to the object at <c>CreateMultipartUpload</c> and take
+        /// effect when the client completes the upload.
         /// </summary>
         Task<SignedMultipartUpload> BeginSignedMultipartUploadAsync(
             MultipartUploadSpec spec,
             TimeSpan expiresIn,
+            FileWriteOptions options = null,
             CancellationToken cancellationToken = default);
 
         /// <summary>

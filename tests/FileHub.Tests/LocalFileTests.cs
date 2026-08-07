@@ -5,7 +5,7 @@ namespace FileHub.Tests;
 
 public class LocalFileTests
 {
-    private static FileDirectory NewRoot(TempDirectory temp) =>
+    private static DirectoryEntry NewRoot(TempDirectory temp) =>
         new LocalFileHub(temp.Path).Root;
 
     [Fact]
@@ -110,6 +110,21 @@ public class LocalFileTests
         using var temp = new TempDirectory();
         var file = NewRoot(temp).CreateFile("a.txt");
         Assert.Throws<ArgumentException>(() => file.Rename(""));
+    }
+
+    [Fact]
+    public void Rename_ToExistingName_ThrowsAndKeepsBoth()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("a");
+        root.CreateFile("b.txt").SetText("b");
+
+        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("b.txt"));
+        // Never overwrites — both survive untouched.
+        Assert.Equal("a", root.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("b", root.OpenFile("b.txt").ReadAllText());
     }
 
     [Fact]
@@ -226,5 +241,244 @@ public class LocalFileTests
         Assert.Throws<ArgumentException>(() => new LocalFile(root, ""));
         Assert.Throws<ArgumentException>(() => new LocalFile(root, ".."));
         Assert.Throws<ArgumentException>(() => new LocalFile(root, "a/b.txt"));
+    }
+
+    // === Nested target names (path/leaf) ===
+
+    [Fact]
+    public void Rename_NestedName_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/deep/b.txt"));
+
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));   // source untouched
+    }
+
+    [Fact]
+    public void Rename_NestedNameBackslash_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("x");
+
+        Assert.Throws<ArgumentException>(() => file.Rename(@"sub\b.txt"));
+
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
+    [Fact]
+    public void CopyTo_NestedName_CreatesIntermediateDirs()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+
+        var copy = file.CopyTo(root, "x/y/z.txt");
+
+        Assert.Equal("z.txt", copy.Name);
+        Assert.Equal("data", copy.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));            // source kept
+        Assert.True(File.Exists(Path.Combine(temp.Path, "x", "y", "z.txt")));
+    }
+
+    [Fact]
+    public void MoveTo_NestedName_CreatesIntermediateDirs()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("data");
+        var dst = root.CreateDirectory("dst");
+
+        var moved = file.MoveTo(dst, "x/y/z.txt");
+
+        Assert.Equal("data", moved.ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "dst", "x", "y", "z.txt")));
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
+    [Fact]
+    public void Rename_WithSeparator_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.txt");
+        file.SetText("new");
+        root.CreateFile("sub/b.txt").SetText("old");
+
+        Assert.Throws<ArgumentException>(() => file.Rename("sub/b.txt"));
+        Assert.Equal("old", root.OpenFile("sub/b.txt").ReadAllText());
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
+    }
+
+    // === Progress reporting ===
+
+    // Larger than the 80 KB copy-loop buffer so a streamed copy yields more
+    // than one progress report.
+    private static byte[] Payload(int size)
+    {
+        var data = new byte[size];
+        for (var i = 0; i < size; i++) data[i] = (byte)i;
+        return data;
+    }
+
+    // Synchronous collector — the driver calls Report() inline on the copy
+    // loop, so reads are deterministic (unlike Progress<T>, which posts async).
+    private sealed class ProgressCollector : IProgress<TransferStatus>
+    {
+        public List<TransferStatus> Reports { get; } = new();
+        public void Report(TransferStatus value) => Reports.Add(value);
+    }
+
+    [Fact]
+    public void CopyTo_ReportsGranularProgress()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.bin");
+        var payload = Payload(FileEntry.ReadBufferSize * 2 + 1);
+        file.SetBytes(payload);
+        var progress = new ProgressCollector();
+
+        var copy = file.CopyTo(root, "b.bin", progress);
+
+        Assert.Equal(payload, copy.ReadAllBytes());
+        Assert.True(progress.Reports.Count > 1, $"expected granular progress, got {progress.Reports.Count} report(s)");
+        Assert.Equal(payload.Length, progress.Reports[^1].BytesTransferred);
+        Assert.Equal(payload.Length, progress.Reports[^1].TotalBytes);
+    }
+
+    [Fact]
+    public void MoveTo_ReportsGranularProgress()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var file = root.CreateFile("a.bin");
+        var payload = Payload(FileEntry.ReadBufferSize * 2 + 1);
+        file.SetBytes(payload);
+        var dst = root.CreateDirectory("dst");
+        var progress = new ProgressCollector();
+
+        var moved = file.MoveTo(dst, "moved.bin", progress);
+
+        Assert.Equal(payload, moved.ReadAllBytes());
+        Assert.False(File.Exists(Path.Combine(temp.Path, "a.bin")));
+        Assert.True(progress.Reports.Count > 1, $"expected granular progress, got {progress.Reports.Count} report(s)");
+        Assert.Equal(payload.Length, progress.Reports[^1].BytesTransferred);
+    }
+
+    // === Overwrite ===
+
+    [Fact]
+    public void CopyTo_DefaultOverwrite_ThrowsWhenDestinationExists()
+    {
+        // Default overwrite is false (BCL File.Copy parity) — an existing
+        // destination must not be clobbered when the flag is omitted.
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        Assert.Throws<FileAlreadyExistsException>(() => src.CopyTo(root, "b.txt"));
+        Assert.Equal("old", root.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void CopyTo_OverwriteTrue_ReplacesExisting()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        var copy = src.CopyTo(root, "b.txt", progress: null, overwrite: true);
+
+        Assert.Equal("new", copy.ReadAllText());
+    }
+
+    [Fact]
+    public void CopyTo_OverwriteFalse_ThrowsWhenDestinationExists()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        var ex = Assert.Throws<FileAlreadyExistsException>(() => src.CopyTo(root, "b.txt", progress: null, overwrite: false));
+        // Source untouched, destination preserved.
+        Assert.Equal("old", root.OpenFile("b.txt").ReadAllText());
+        Assert.Contains("b.txt", ex.DestinationPath);
+    }
+
+    [Fact]
+    public void CopyTo_OverwriteFalse_SucceedsWhenDestinationAbsent()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("data");
+
+        var copy = src.CopyTo(root, "b.txt", progress: null, overwrite: false);
+
+        Assert.Equal("data", copy.ReadAllText());
+    }
+
+    [Fact]
+    public void MoveTo_OverwriteFalse_ThrowsAndKeepsSource()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        var dst = root.CreateDirectory("dst");
+        dst.CreateFile("a.txt").SetText("old");
+
+        Assert.Throws<FileAlreadyExistsException>(() => src.MoveTo(dst, "a.txt", progress: null, overwrite: false));
+        // Move aborted before delete — source still there.
+        Assert.True(File.Exists(Path.Combine(temp.Path, "a.txt")));
+        Assert.Equal("old", dst.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void MoveTo_OntoExistingDirectory_ThrowsEvenWhenOverwrite_AndKeepsDirectory()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("data");
+        // "target" is a populated directory. A file must never replace it,
+        // even with overwrite:true — mirrors System.IO.File.Move.
+        var target = root.CreateDirectory("target");
+        target.CreateFile("keep.txt").SetText("keep");
+
+        Assert.Throws<FileHubException>(() => src.MoveTo(root, "target", progress: null, overwrite: true));
+
+        // Directory and its contents survive; the source file is untouched.
+        Assert.True(root.DirectoryExists("target"));
+        Assert.Equal("keep", root.OpenFile("target/keep.txt").ReadAllText());
+        Assert.True(root.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public async Task CopyToAsync_OverwriteFalse_ThrowsWhenDestinationExists()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        var src = root.CreateFile("a.txt");
+        src.SetText("new");
+        root.CreateFile("b.txt").SetText("old");
+
+        await Assert.ThrowsAsync<FileAlreadyExistsException>(
+            () => src.CopyToAsync(root, "b.txt", progress: null, overwrite: false));
+        Assert.Equal("old", root.OpenFile("b.txt").ReadAllText());
     }
 }

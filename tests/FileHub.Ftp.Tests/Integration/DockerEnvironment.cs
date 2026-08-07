@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using DotNet.Testcontainers.Builders;
 
 namespace FileHub.Ftp.Tests.Integration;

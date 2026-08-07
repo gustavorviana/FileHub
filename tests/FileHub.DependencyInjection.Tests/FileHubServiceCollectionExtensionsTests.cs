@@ -1,4 +1,3 @@
-using FileHub.DependencyInjection;
 using FileHub.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -132,7 +131,7 @@ public class FileHubServiceCollectionExtensionsTests
 
     private sealed class DisposableFileHub : IFileHub, IDisposable
     {
-        public FileDirectory Root { get; } = new MemoryFileHub().Root;
+        public DirectoryEntry Root { get; } = new MemoryFileHub().Root;
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
     }

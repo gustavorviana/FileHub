@@ -4,20 +4,6 @@ using System.Threading.Tasks;
 
 namespace FileHub.OracleObjectStorage.Internal
 {
-    /// <summary>
-    /// Per-FileHub shared state. Owns the <see cref="IOciClient"/> and memoizes
-    /// the "is bucket public" probe so every file in the tree answers
-    /// <c>IsPublic</c> without round-tripping to OCI after the first call.
-    /// </summary>
-    internal interface IOciSession : IDisposable
-    {
-        IOciClient Client { get; }
-
-        bool GetIsPublic();
-
-        Task<bool> GetIsPublicAsync(CancellationToken cancellationToken = default);
-    }
-
     internal static class OciSessionTarget
     {
         /// <summary>
@@ -45,10 +31,12 @@ namespace FileHub.OracleObjectStorage.Internal
         private bool _disposed;
 
         public IOciClient Client { get; }
+        public MultipartStreamOptions Multipart { get; }
 
-        public OciSession(IOciClient client)
+        public OciSession(IOciClient client, MultipartStreamOptions multipart)
         {
             Client = client ?? throw new ArgumentNullException(nameof(client));
+            Multipart = multipart ?? throw new ArgumentNullException(nameof(multipart));
         }
 
         public bool GetIsPublic() => SyncBridge.Run(ct => GetIsPublicAsync(ct));

@@ -1,6 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Collections.Generic;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace FileHub.DependencyInjection
 {
@@ -48,7 +48,7 @@ namespace FileHub.DependencyInjection
             }
         }
 
-        public FileDirectory GetRootByName(string name) => GetByName(name)?.Root;
+        public DirectoryEntry GetRootByName(string name) => GetByName(name)?.Root;
 
         private IFileHub ResolveScoped(string name, NamedFileHubEntry entry)
         {

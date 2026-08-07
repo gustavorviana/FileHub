@@ -35,15 +35,14 @@ namespace FileHub.OracleObjectStorage.Internal
             string objectName,
             Stream body,
             long contentLength,
-            string contentType,
-            IReadOnlyDictionary<string, string> opcMeta,
+            OciWriteOptions options,
             CancellationToken cancellationToken = default);
 
         Task DeleteObjectAsync(string objectName, CancellationToken cancellationToken = default);
 
         Task RenameObjectAsync(string sourceName, string newName, CancellationToken cancellationToken = default);
 
-        Task CopyObjectAsync(
+        Task<IOciWorkRequestHandle> CopyObjectAsync(
             string sourceObjectName,
             string destinationNamespace,
             string destinationBucket,
@@ -56,6 +55,34 @@ namespace FileHub.OracleObjectStorage.Internal
         Task<OciBucketInfo> GetBucketAsync(CancellationToken cancellationToken = default);
 
         Task<string> CreatePreauthenticatedReadRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Pre-authenticated request granting <c>ObjectWrite</c> access — the
+        /// caller can <c>PUT</c> bytes to the returned access URI without
+        /// authenticating against OCI.
+        /// </summary>
+        Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Starts a multipart upload for <paramref name="objectName"/>. The
+        /// write options (content type, cache-control, metadata) are bound to
+        /// the object here — OCI applies them when the upload is committed.
+        /// Returns the upload id used by the other multipart operations.
+        /// </summary>
+        Task<string> CreateMultipartUploadAsync(string objectName, OciWriteOptions options, CancellationToken cancellationToken = default);
+
+        /// <summary>Uploads one part. Returns the ETag returned by the store.</summary>
+        Task<string> UploadPartAsync(string objectName, string uploadId, int partNumber, Stream body, long contentLength, CancellationToken cancellationToken = default);
+
+        Task CommitMultipartUploadAsync(string objectName, string uploadId, IReadOnlyList<OciCompletedPart> parts, CancellationToken cancellationToken = default);
+
+        Task AbortMultipartUploadAsync(string objectName, string uploadId, CancellationToken cancellationToken = default);
+    }
+
+    internal sealed class OciCompletedPart
+    {
+        public int PartNumber { get; set; }
+        public string ETag { get; set; }
     }
 
     internal sealed class OciHeadResult
@@ -63,6 +90,7 @@ namespace FileHub.OracleObjectStorage.Internal
         public long? ContentLength { get; set; }
         public DateTime? LastModified { get; set; }
         public string ContentType { get; set; }
+        public string CacheControl { get; set; }
         public Dictionary<string, string> OpcMeta { get; set; }
     }
 

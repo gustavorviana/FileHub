@@ -4,9 +4,9 @@ namespace FileHub
     /// Capability: the file reference may be a "pending stub" whose
     /// cached state (Length, LastModified, Metadata) has not been loaded
     /// from the store yet. Returned by
-    /// <c>OpenFile(name, createIfNotExists: true)</c> on S3 and OCI —
-    /// those drivers defer every server round-trip until the caller
-    /// actually needs the state.
+    /// <c>OpenFile(name, createIfNotExists: true)</c> on drivers that
+    /// defer every server round-trip until the caller actually needs the
+    /// state (typically object-storage backends).
     ///
     /// <para>
     /// On stubs, <see cref="IsLoaded"/> is <c>false</c> and the cached

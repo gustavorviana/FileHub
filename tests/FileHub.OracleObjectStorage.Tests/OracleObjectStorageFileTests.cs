@@ -1,20 +1,15 @@
-using System;
-using System.IO;
-using System.Linq;
 using System.Security.Cryptography;
-using System.Threading.Tasks;
-using FileHub.OracleObjectStorage.Tests.Fakes;
 
 namespace FileHub.OracleObjectStorage.Tests;
 
 public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageFileTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void SetText_ReadAllText_RoundTrip()
@@ -42,7 +37,7 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
     {
         var scope = Scope(nameof(LargeUpload_ReadChunked_Exercises10MbBoundary));
 
-        // 25 MB crosses both 10 MB chunk boundaries in OciObjectStream.
+        // 25 MB crosses both 10 MB chunk boundaries in OciReadStream.
         var payload = new byte[25 * 1024 * 1024];
         RandomNumberGenerator.Fill(payload);
         var expectedHash = SHA256.HashData(payload);
@@ -76,6 +71,43 @@ public class OracleObjectStorageFileTests : IClassFixture<InMemoryOciFixture>
 
         Assert.False(scope.FileExists("old.txt"));
         Assert.Equal("data", scope.OpenFile("new.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void Rename_ToExistingName_ThrowsAndKeepsBoth()
+    {
+        var scope = Scope(nameof(Rename_ToExistingName_ThrowsAndKeepsBoth));
+        scope.CreateFile("a.txt").SetText("a");
+        scope.CreateFile("b.txt").SetText("b");
+
+        var file = scope.OpenFile("a.txt");
+        Assert.Throws<FileAlreadyExistsException>(() => file.Rename("b.txt"));
+        Assert.Equal("a", scope.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("b", scope.OpenFile("b.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void Rename_NestedName_Throws()
+    {
+        var scope = Scope(nameof(Rename_NestedName_Throws));
+        scope.CreateFile("a.txt").SetText("data");
+
+        Assert.Throws<ArgumentException>(() => scope.OpenFile("a.txt").Rename("sub/deep/b.txt"));
+
+        Assert.True(scope.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public void CopyTo_NestedName_WritesSubPathKey()
+    {
+        var scope = Scope(nameof(CopyTo_NestedName_WritesSubPathKey));
+        scope.CreateFile("a.txt").SetText("data");
+
+        var copy = scope.OpenFile("a.txt").CopyTo(scope, "x/y/z.txt");
+
+        Assert.Equal("z.txt", copy.Name);
+        Assert.Equal("data", scope.OpenFile("a.txt").ReadAllText());
+        Assert.Equal("data", scope.OpenFile("x/y/z.txt").ReadAllText());
     }
 
     [Fact]

@@ -24,6 +24,7 @@ namespace FileHub.DependencyInjection
 
         public IFileHub GetOrCreate(string name, NamedFileHubEntry entry)
         {
+            if (_disposed) throw new ObjectDisposedException(nameof(NamedFileHubsSingletonCache));
             if (entry.Instance != null) return entry.Instance;
 
             lock (_sync)

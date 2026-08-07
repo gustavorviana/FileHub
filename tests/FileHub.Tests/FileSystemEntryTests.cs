@@ -9,32 +9,29 @@ namespace FileHub.Tests;
 /// </summary>
 public class FileSystemEntryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     [Fact]
     public void ValidateName_NullOrEmpty_Throws()
     {
         var root = NewRoot();
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        // null -> ArgumentNullException; empty/whitespace -> ArgumentException.
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateDirectory(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateDirectory(null));
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
     }
 
     public static IEnumerable<object[]> InvalidNameChars()
     {
-        // ValidateName delegates to System.IO.Path.GetInvalidFileNameChars(),
-        // whose set is OS-dependent: Windows includes :, |, ?, *, etc.;
-        // Linux/macOS only NUL and "/". We assert the BCL contract per host
-        // rather than enforcing our own portable set.
-        var invalid = System.IO.Path.GetInvalidFileNameChars();
-        foreach (var c in invalid)
-        {
-            // Skip "/" — the driver treats it as a path separator and routes
-            // to nested-directory creation rather than rejecting the name.
-            if (c == '/' || c == '\\') continue;
-            yield return new object[] { $"a{c}b.txt" };
-        }
+        // ValidateName applies FileHub's portable rule set (PathUtil):
+        // control characters are rejected on every OS, so a hub that is not
+        // bound to a real file system behaves the same on Windows and Linux.
+        // OS-specific characters (e.g. Windows <>:"|?*) are a concern of the
+        // Local driver only, via PathUtil.ValidateLocalName.
+        yield return new object[] { "a\tb.txt" };
+        yield return new object[] { "a\nb.txt" };
+        yield return new object[] { "a\0b.txt" };
     }
 
     [Theory]
@@ -43,6 +40,16 @@ public class FileSystemEntryTests
     {
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(name));
+    }
+
+    [Fact]
+    public void ValidateName_OsSpecificCharacters_AcceptedInMemory()
+    {
+        // Deterministic across OSes: names that only Windows forbids on disk
+        // are legal in the memory driver.
+        var root = NewRoot();
+        var file = root.CreateFile("a<b>.txt");
+        Assert.True(file.Exists());
     }
 
     [Theory]

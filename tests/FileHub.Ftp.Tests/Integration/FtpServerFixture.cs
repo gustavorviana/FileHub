@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using FluentFTP;
@@ -19,9 +17,13 @@ public sealed class FtpServerFixture : IAsyncLifetime
     private const string Image = "stilliard/pure-ftpd:latest";
 
     // Picked outside the typical dev FTP / passive range to avoid clashes.
+    // A wide passive range matters: the suite opens a fresh control + data
+    // connection per test in quick succession, and a narrow range gets
+    // recycled before the OS clears TIME_WAIT — the longest-lived transfer
+    // (the multi-MB round-trip) then lands on a stale data port and truncates.
     private const int ControlHostPort = 22121;
     private const int PasvMin = 22130;
-    private const int PasvMax = 22139;
+    private const int PasvMax = 22169;
 
     public const string User = "testuser";
     public const string Password = "testpass";
@@ -30,6 +32,16 @@ public sealed class FtpServerFixture : IAsyncLifetime
     public int Port => ControlHostPort;
 
     public string? SkipReason { get; private set; }
+
+    /// <summary>
+    /// A single hub / control connection shared by the whole integration
+    /// class. Reusing one connection is both closer to real usage (a hub is
+    /// long-lived) and avoids the passive-data-channel races that rapid
+    /// per-test connect/disconnect cycling triggers against one container.
+    /// Tests isolate themselves via per-test subdirectories, not per-test
+    /// connections. <c>null</c> when Docker is unavailable.
+    /// </summary>
+    public FtpFileHub? Hub { get; private set; }
 
     private IContainer? _container;
 
@@ -50,6 +62,12 @@ public sealed class FtpServerFixture : IAsyncLifetime
                 .WithEnvironment("FTP_USER_HOME", $"/home/{User}")
                 .WithEnvironment("FTP_USER_UID", "1000")
                 .WithEnvironment("FTP_USER_GID", "1000")
+                // pure-ftpd defaults to 5 clients / 5 connections-per-IP. The
+                // suite opens a fresh connection per test and lingering ones
+                // sit in TIME_WAIT, so the cap is hit under load and transfers
+                // truncate. Raise it well above the test count.
+                .WithEnvironment("FTP_MAX_CLIENTS", "50")
+                .WithEnvironment("FTP_MAX_CONNECTIONS", "50")
                 .WithEnvironment("FTP_PASSIVE_PORTS", $"{PasvMin}:{PasvMax}")
                 // Control channel: host 22121 → container 21.
                 .WithPortBinding(ControlHostPort, 21);
@@ -63,9 +81,14 @@ public sealed class FtpServerFixture : IAsyncLifetime
             _container = builder.Build();
             await _container.StartAsync();
 
-            // vsftpd comes up a beat after the container is marked running.
-            // Poll the control port via FluentFTP until it accepts a login.
-            await WaitForFtpReadyAsync(timeout: TimeSpan.FromSeconds(30));
+            // pure-ftpd comes up a beat after the container is marked running
+            // (user creation + daemon start), and the first FluentFTP login
+            // can take several seconds on a cold Docker Desktop. 30s proved
+            // too tight on dev machines — keep a generous window; the poll
+            // returns as soon as a login succeeds.
+            await WaitForFtpReadyAsync(timeout: TimeSpan.FromSeconds(90));
+
+            Hub = await FtpFileHub.CreateAsync(FtpHubOptions.FromCredentials(Host, Port, User, Password, rootPath: "/"));
         }
         catch (Exception ex)
         {
@@ -103,6 +126,7 @@ public sealed class FtpServerFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        Hub?.Dispose();
         if (_container != null)
             await _container.DisposeAsync();
     }

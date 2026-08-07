@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class LocalDirectoryTests
 {
-    private static FileDirectory NewRoot(TempDirectory temp) =>
+    private static DirectoryEntry NewRoot(TempDirectory temp) =>
         new LocalFileHub(temp.Path).Root;
 
     // === CreateFile / CreateDirectory ===
@@ -39,6 +39,17 @@ public class LocalDirectoryTests
         var file = root.CreateFile("a.txt", overwrite: true);
 
         Assert.Equal(0, file.Length);
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("a.txt"));
+        Assert.Equal("keep", root.OpenFile("a.txt").ReadAllText());
     }
 
     [Fact]
@@ -283,17 +294,29 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("nested.txt");
 
-        root.Delete("sub");
+        root.Delete("sub", recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_ByName_NonEmptyDirectoryWithoutRecursive_Throws()
     {
         using var temp = new TempDirectory();
         var root = NewRoot(temp);
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("nested.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(Directory.Exists(Path.Combine(temp.Path, "sub")));
+    }
+
+    [Fact]
+    public void Delete_Missing_IsSilent()
+    {
+        using var temp = new TempDirectory();
+        var root = NewRoot(temp);
+        root.Delete("ghost");
     }
 
     [Fact]
@@ -304,7 +327,7 @@ public class LocalDirectoryTests
         var sub = root.CreateDirectory("sub");
         sub.CreateFile("a.txt");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(Directory.Exists(Path.Combine(temp.Path, "sub")));
     }
@@ -595,13 +618,13 @@ public class LocalDirectoryTests
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
 
-    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+    // === Nested path resolution (whole path in one op) ===
 
     [Fact]
-    public void CreateDirectory_DirectMode_CreatesFullTreeInSingleCall()
+    public void CreateDirectory_CreatesFullTreeInSingleCall()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         var leaf = root.CreateDirectory("a/b/c");
 
@@ -611,22 +634,46 @@ public class LocalDirectoryTests
     }
 
     [Fact]
-    public void CreateDirectory_DirectMode_ParentTraversal_Throws()
+    public void CreateDirectory_NestedParentTraversal_Throws()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
     }
 
     [Fact]
-    public void TryOpenDirectory_DirectMode_Missing_ReturnsFalse()
+    public void TryOpenDirectory_MissingNestedPath_ReturnsFalse()
     {
         using var temp = new TempDirectory();
-        var root = new LocalFileHub(temp.Path, DirectoryPathMode.Direct).Root;
+        var root = new LocalFileHub(temp.Path).Root;
 
         Assert.False(root.TryOpenDirectory("x/y/z", out var dir));
         Assert.Null(dir);
+    }
+
+    // === File/directory name collision ===
+
+    [Fact]
+    public void CreateDirectory_NameTakenByFile_ThrowsFileAlreadyExists()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path).Root;
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken"));
+    }
+
+    [Fact]
+    public void CreateDirectory_IntermediateTakenByFile_ThrowsFileHubException()
+    {
+        using var temp = new TempDirectory();
+        var root = new LocalFileHub(temp.Path).Root;
+        root.CreateFile("taken");
+
+        // The file occupies an intermediate segment, not the leaf, so the
+        // failure surfaces as a wrapped FileHubException.
+        Assert.Throws<FileHubException>(() => root.CreateDirectory("taken/child"));
     }
 }

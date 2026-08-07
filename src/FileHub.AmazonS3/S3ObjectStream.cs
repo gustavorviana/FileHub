@@ -2,147 +2,147 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
     /// <summary>
-    /// Stream backed by an S3 object. Supports chunked reads (10 MB per
-    /// range request). Writes are buffered locally and committed to the
-    /// backing object on <see cref="Flush"/> / <see cref="FlushAsync"/>;
-    /// disposing a dirty stream also triggers a flush. Suitable for small
-    /// and medium payloads that fit in memory — use
-    /// <see cref="AmazonS3File.GetMultipartWriteStream"/> for large uploads.
+    /// Write stream over an S3 object. Bytes are buffered locally up to the
+    /// configured multipart threshold; beyond that the stream transparently
+    /// spills into a multipart upload and keeps memory usage constant, so
+    /// any payload size is safe through every write path. Small payloads
+    /// commit as a single <c>PutObject</c> on <see cref="Flush"/> /
+    /// <see cref="FlushAsync"/> or dispose; spilled payloads commit on
+    /// dispose (S3 cannot append, so a mid-stream flush cannot materialize
+    /// a partial object). <see cref="WriteStreamPreference"/> overrides the
+    /// strategy: <c>Multipart</c> spills on the first written byte,
+    /// <c>Single</c> never spills.
+    /// <para>
+    /// Dispose contract: like <see cref="FileStream"/>, disposing a dirty
+    /// stream commits the write, and a failed commit propagates out of
+    /// <c>Dispose</c> — swallowing it would silently lose data. Internal
+    /// state is cleaned up regardless, so the parent file is never left
+    /// locked. Callers that need to separate commit errors from disposal
+    /// should call <see cref="Flush"/> / <see cref="FlushAsync"/> first.
+    /// </para>
     /// </summary>
-    internal sealed class S3ObjectStream : Stream
+    internal sealed class S3ObjectStream : S3FileStreamBase
     {
-        internal const int BufferSize = 10 * 1024 * 1024;
-
+        private readonly MultipartStreamOptions _multipartStreamOptions;
+        private readonly WriteStreamPreference _preference;
+        private readonly S3WriteOptions _options;
         private readonly AmazonS3File _file;
-        private readonly MemoryStream _writeBuffer;
-        private readonly bool _isWrite;
-        private long _position;
+        private Stream _writeBuffer;
+
         private bool _hasUnflushedWrites;
+        private bool _multipart;
         private bool _disposed;
 
-        public event EventHandler Disposed;
-
-        public S3ObjectStream(AmazonS3File file, bool isWrite)
+        public S3ObjectStream(AmazonS3File file, S3WriteOptions options, MultipartStreamOptions multipartStreamOptions)
         {
             _file = file ?? throw new ArgumentNullException(nameof(file));
-            _isWrite = isWrite;
-            _writeBuffer = isWrite ? new MemoryStream() : null;
-            CanRead = !isWrite;
-            CanWrite = isWrite;
+            _options = options;
+            _preference = options?.StreamPreference ?? WriteStreamPreference.Auto;
+            _multipartStreamOptions = multipartStreamOptions;
+
+            if (_preference != WriteStreamPreference.Multipart)
+                _writeBuffer = new MemoryStream();
         }
 
-        public override bool CanRead { get; }
-        public override bool CanSeek => CanRead;
-        public override bool CanWrite { get; }
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
 
-        public override long Length => _isWrite ? _writeBuffer.Length : _file.LengthInternal;
+        public override long Length => _writeBuffer.Length;
 
         public override long Position
         {
-            get => _isWrite ? _writeBuffer.Position : _position;
+            get => _writeBuffer.Position;
             set
             {
-                if (_isWrite) { _writeBuffer.Position = value; return; }
-                Seek(value, SeekOrigin.Begin);
+                if (_multipart)
+                    throw new NotSupportedException("Seeking is not supported after the stream spilled to multipart.");
+
+                _writeBuffer.Position = value;
             }
         }
 
-        public override void Flush() => SyncBridge.Run(ct => FlushAsync(ct));
+        public override void Flush() => SyncBridge.Run(FlushAsync);
 
         public override async Task FlushAsync(CancellationToken cancellationToken)
         {
-            if (!CanWrite || !_hasUnflushedWrites) return;
+            ThrowIfDisposed();
+            if (!_hasUnflushedWrites || _multipart) return;
+
             await UploadBufferAsync(cancellationToken).ConfigureAwait(false);
             _hasUnflushedWrites = false;
         }
 
-        public override int Read(byte[] buffer, int offset, int count)
-            => SyncBridge.Run(ct => ReadAsync(buffer, offset, count, ct));
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
-        public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            ThrowIfDisposed();
-            if (!CanRead) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
-            if (count == 0 || _position >= Length) return 0;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new NotSupportedException();
 
-            int bytesRead = 0;
-            var client = _file.SessionInternal.Client;
-
-            while (bytesRead < count && _position < Length && !_disposed)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int chunkLen = (int)Math.Min(
-                    Math.Min(BufferSize, Length - _position),
-                    count - bytesRead);
-                long endByte = _position + chunkLen - 1;
-
-                var getResult = await client.GetObjectAsync(_file.ObjectKey, _position, endByte, cancellationToken).ConfigureAwait(false);
-
-                using (var source = getResult.InputStream)
-                {
-                    int inChunk = await FillFromSourceAsync(source, buffer, offset + bytesRead, chunkLen, cancellationToken).ConfigureAwait(false);
-                    if (inChunk == 0) break;
-                    _position += inChunk;
-                    bytesRead += inChunk;
-                }
-            }
-
-            return bytesRead;
-        }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            ThrowIfDisposed();
-            if (!CanSeek) throw new NotSupportedException();
-
-            long newPosition = origin switch
-            {
-                SeekOrigin.Begin => offset,
-                SeekOrigin.Current => _position + offset,
-                SeekOrigin.End => Length + offset,
-                _ => throw new ArgumentException("Invalid seek origin.", nameof(origin)),
-            };
-
-            if (newPosition < 0)
-                throw new IOException("Seek resulted in a negative position.");
-            if (newPosition > Length)
-                throw new IOException("Seek past end of stream.");
-
-            _position = newPosition;
-            return _position;
-        }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
         public override void SetLength(long value) => throw new NotSupportedException();
 
         public override void Write(byte[] buffer, int offset, int count)
+            => SyncBridge.Run(ct => WriteAsync(buffer, offset, count, ct));
+
+        public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            if (!CanWrite) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
 
-            _writeBuffer.Write(buffer, offset, count);
-            _file.LengthInternal = _writeBuffer.Length;
-            _hasUnflushedWrites = true;
+            if (NeedsSpill(count))
+                await SpillToMultipartAsync(cancellationToken).ConfigureAwait(false);
+
+            if (_multipart)
+            {
+                await _writeBuffer.WriteAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                ValidateWriteArgs(buffer, offset, count);
+                _writeBuffer.Write(buffer, offset, count);
+                _file.LengthInternal = _writeBuffer.Length;
+                _hasUnflushedWrites = true;
+            }
         }
 
-        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        private bool NeedsSpill(int count)
         {
-            ThrowIfDisposed();
-            if (!CanWrite) throw new NotSupportedException();
-            ValidateReadWriteArgs(buffer, offset, count);
-            cancellationToken.ThrowIfCancellationRequested();
+            if (_multipart || _preference == WriteStreamPreference.Single)
+                return false;
 
-            _writeBuffer.Write(buffer, offset, count);
-            _file.LengthInternal = _writeBuffer.Length;
-            _hasUnflushedWrites = true;
-            return Task.CompletedTask;
+            return _preference == WriteStreamPreference.Multipart ||
+                _writeBuffer.Length + count > _multipartStreamOptions.Threshold;
+        }
+
+        /// <summary>
+        /// Switches from the in-memory buffer to a multipart upload: replays
+        /// the bytes buffered so far into the multipart stream and truncates
+        /// the local buffer. A failure inside the multipart stream aborts the
+        /// upload server-side (its own write path guarantees that).
+        /// </summary>
+        private async Task SpillToMultipartAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var client = _file.SessionInternal.Client;
+            var uploadId = await client.BeginMultipartUploadAsync(_file.ObjectKey, _options, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                _writeBuffer = new S3MultipartWriteStream(_file, uploadId, _options, (MemoryStream)_writeBuffer, _multipartStreamOptions.PartSize);
+                _multipart = true;
+            }
+            catch
+            {
+                // The multipart stream never took ownership of the upload, so
+                // nothing downstream will abort it — clean up the just-opened
+                // upload here so a failed spill doesn't orphan parts server-side.
+                try { await client.AbortMultipartUploadAsync(_file.ObjectKey, uploadId, CancellationToken.None).ConfigureAwait(false); }
+                catch { /* best effort — the original failure is what the caller needs */ }
+                throw;
+            }
         }
 
         protected override void Dispose(bool disposing)
@@ -157,28 +157,26 @@ namespace FileHub.AmazonS3
             {
                 try
                 {
-                    Flush();
+                    if (!_multipart && _preference == WriteStreamPreference.Multipart)
+                    {
+                        SyncBridge.Run(UploadBufferAsync);
+                    }
+                    else
+                    {
+                        Flush();
+                    }
                 }
                 finally
                 {
-                    // Mark disposed and notify the parent file BEFORE touching
-                    // _writeBuffer. If the buffer's Dispose ever throws, we
-                    // still want _lastOpenStream on the parent to be cleared
-                    // — otherwise the file is permanently locked from
-                    // opening another stream.
                     _disposed = true;
-                    Disposed?.Invoke(this, EventArgs.Empty);
-                    try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                    RaiseDisposed();
+                    try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
                 }
             }
             else
             {
-                // Finalizer path: we can't do async I/O, but we must still
-                // notify the parent file so its "a stream is already open"
-                // latch clears. Any unflushed writes in _writeBuffer are lost
-                // (documented: callers must Dispose explicitly to flush).
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
+                RaiseDisposed();
             }
 
             base.Dispose(disposing);
@@ -195,13 +193,24 @@ namespace FileHub.AmazonS3
 
             try
             {
-                await FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                if (_multipart)
+                {
+                    await _writeBuffer.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (_preference == WriteStreamPreference.Multipart)
+                {
+                    await UploadBufferAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                else
+                {
+                    await FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                }
             }
             finally
             {
                 _disposed = true;
-                Disposed?.Invoke(this, EventArgs.Empty);
-                try { _writeBuffer?.Dispose(); } catch { /* swallow — best effort */ }
+                RaiseDisposed();
+                try { _writeBuffer.Dispose(); } catch { /* swallow — best effort */ }
             }
 
             await base.DisposeAsync().ConfigureAwait(false);
@@ -210,37 +219,21 @@ namespace FileHub.AmazonS3
 
         private async Task UploadBufferAsync(CancellationToken cancellationToken)
         {
-            _writeBuffer.Seek(0, SeekOrigin.Begin);
+            var writeBuffer = _writeBuffer ?? new MemoryStream();
+            writeBuffer.Seek(0, SeekOrigin.Begin);
             var client = _file.SessionInternal.Client;
-            var md = _file.Metadata;
-            var dirty = md.IsModified;
 
             await client.PutObjectAsync(
                 _file.ObjectKey,
-                _writeBuffer,
-                _writeBuffer.Length,
-                contentType: dirty ? md.ContentType : null,
-                userMetadata: dirty && md.Tags.Count > 0 ? (System.Collections.Generic.IReadOnlyDictionary<string, string>)md.Tags : null,
-                storageClass: dirty ? md.StorageClass : null,
-                serverSideEncryption: dirty ? md.ServerSideEncryption : null,
+                writeBuffer,
+                writeBuffer.Length,
+                _options,
                 cancellationToken).ConfigureAwait(false);
 
-            _file.OnWriteCommitted(_writeBuffer.Length);
+            _file.OnWriteCommitted(writeBuffer.Length, _options);
         }
 
-        private static async Task<int> FillFromSourceAsync(Stream source, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-        {
-            int total = 0;
-            while (total < count)
-            {
-                int got = await source.ReadAsync(buffer, offset + total, count - total, cancellationToken).ConfigureAwait(false);
-                if (got == 0) break;
-                total += got;
-            }
-            return total;
-        }
-
-        private static void ValidateReadWriteArgs(byte[] buffer, int offset, int count)
+        private static void ValidateWriteArgs(byte[] buffer, int offset, int count)
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
             if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));

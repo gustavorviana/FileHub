@@ -6,8 +6,8 @@ namespace FileHub
 {
     /// <summary>
     /// Indicates that a file system item can be accessed through a URL.
-    /// Implemented by drivers that expose items over HTTP (S3, Oracle OCI,
-    /// local public directories, etc).
+    /// Implemented by drivers backed by storage that exposes items over HTTP
+    /// (object storage with signed URLs, public file servers, CDNs, etc).
     /// </summary>
     public interface IUrlAccessible
     {
@@ -26,6 +26,15 @@ namespace FileHub
         /// Thrown when the item is not public.
         /// </exception>
         Uri GetPublicUrl();
+
+        /// <summary>
+        /// Async version of <see cref="GetPublicUrl"/>. Drivers that probe the
+        /// backing store to resolve public access should override this.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">
+        /// Thrown when the item is not public.
+        /// </exception>
+        Task<Uri> GetPublicUrlAsync(CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Returns a time-limited pre-signed URL that grants temporary access to this item.

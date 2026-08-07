@@ -24,7 +24,7 @@
   </PropertyGroup>
 
   <PropertyGroup Label="Versioning">
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>2.0.0</VersionPrefix>
     <!-- Bump VersionSuffix to e.g. "preview.1" for pre-releases; leave empty
          for stable. The release workflow may override this from a git tag. -->
     <VersionSuffix></VersionSuffix>
@@ -50,7 +50,6 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)icon.png" Pack="true" PackagePath="\" Visible="false" />
   </ItemGroup>
 

@@ -34,6 +34,7 @@ internal sealed class InMemoryS3StoredObject
 {
     public byte[] Body { get; set; } = System.Array.Empty<byte>();
     public string? ContentType { get; set; }
+    public string? CacheControl { get; set; }
     public System.Collections.Generic.Dictionary<string, string>? UserMetadata { get; set; }
     public System.DateTime LastModified { get; set; }
     public string? StorageClass { get; set; }
@@ -45,6 +46,7 @@ internal sealed class InMemoryS3MultipartUpload
     public string UploadId { get; init; } = "";
     public string Key { get; init; } = "";
     public string? ContentType { get; init; }
+    public string? CacheControl { get; init; }
     public System.Collections.Generic.Dictionary<string, string>? UserMetadata { get; init; }
     public string? StorageClass { get; init; }
     public string? ServerSideEncryption { get; init; }

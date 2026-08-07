@@ -2,6 +2,7 @@ namespace FileHub
 {
     public interface IFileHub
     {
-        FileDirectory Root { get; }
+        /// <summary>Root directory — the sandbox. Every path resolves under here.</summary>
+        DirectoryEntry Root { get; }
     }
 }

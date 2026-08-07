@@ -1,7 +1,3 @@
-using System;
-using System.IO;
-using System.Linq;
-using FileHub.OracleObjectStorage.Internal;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 
 namespace FileHub.OracleObjectStorage.Tests;
@@ -9,11 +5,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageDirectoryTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void CreateDirectory_CreatesMarkerObject()
@@ -72,6 +68,76 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void ItemExists_File_ReturnsTrue()
+    {
+        var scope = Scope(nameof(ItemExists_File_ReturnsTrue));
+        scope.CreateFile("f.txt").SetText(".");
+
+        Assert.True(scope.FileExists("f.txt"));
+        Assert.False(scope.FileExists("g.txt"));
+    }
+
+    [Fact]
+    public void Exists_DetectsFileAndDirectory()
+    {
+        var scope = Scope(nameof(Exists_DetectsFileAndDirectory));
+        scope.CreateFile("report.txt").SetText("x");
+        scope.CreateDirectory("logs").CreateFile("app.log").SetText("y");
+
+        Assert.True(scope.Exists("report.txt"));
+        Assert.True(scope.Exists("logs"));
+        Assert.False(scope.Exists("missing"));
+        Assert.False(scope.Exists("rep"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_ExistingFile_RemovesIt()
+    {
+        var scope = Scope(nameof(DeleteIfExists_ExistingFile_RemovesIt));
+        scope.CreateFile("a.txt").SetBytes(new byte[] { 1 });
+
+        scope.DeleteIfExists("a.txt");
+
+        Assert.False(scope.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_MissingFile_DoesNotThrow()
+    {
+        var scope = Scope(nameof(DeleteIfExists_MissingFile_DoesNotThrow));
+
+        scope.DeleteIfExists("missing.txt");
+
+        Assert.False(scope.FileExists("missing.txt"));
+    }
+
+    [Fact]
+    public void Delete_DirectoryName_DeletesAllChildren()
+    {
+        var scope = Scope(nameof(Delete_DirectoryName_DeletesAllChildren));
+        scope.CreateFile("sub/a.txt").SetBytes(new byte[] { 1 });
+        scope.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
+        scope.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
+
+        scope.Delete("sub", recursive: true);
+
+        Assert.False(scope.FileExists("sub/a.txt"));
+        Assert.False(scope.FileExists("sub/b.txt"));
+        Assert.True(scope.FileExists("sibling.txt"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var scope = Scope(nameof(Delete_NonEmptyDirectoryWithoutRecursive_Throws));
+        var sub = scope.CreateDirectory("to-delete");
+        sub.CreateFile("a.txt").SetText("A");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => sub.Delete());
+        Assert.True(scope.DirectoryExists("to-delete"));
+    }
+
+    [Fact]
     public void Delete_Recursive_DeletesAllObjects()
     {
         var scope = Scope(nameof(Delete_Recursive_DeletesAllObjects));
@@ -79,16 +145,26 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         sub.CreateFile("a.txt").SetText("A");
         sub.CreateDirectory("nested").CreateFile("b.txt").SetText("B");
 
-        sub.Delete();
+        sub.Delete(recursive: true);
 
         Assert.False(scope.DirectoryExists("to-delete"));
-        Assert.Empty(_fixture.Client.Keys.Where(k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/")));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/"));
     }
 
     [Fact]
     public void Delete_Root_ThrowsNotSupported()
     {
         Assert.Throws<NotSupportedException>(() => Root.Delete());
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        var scope = Scope(nameof(CreateFile_SingleArg_ExistingFile_Throws));
+        scope.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => scope.CreateFile("a.txt"));
+        Assert.Equal("keep", scope.OpenFile("a.txt").ReadAllText());
     }
 
     [Fact]
@@ -206,6 +282,34 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash()
+    {
+        var name = nameof(CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash);
+        var scope = Scope(name);
+
+        // Input mixes both a backslash and a forward slash — OCI object names
+        // only use "/", so the marker key must be normalized before the PUT.
+        scope.CreateDirectory("x\\y/z");
+
+        Assert.True(_fixture.Client.TryGetBody($"{name}/x/y/z/", out _));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.Contains('\\'));
+        Assert.True(scope.TryOpenDirectory("x/y/z", out _));
+    }
+
+    [Fact]
+    public void CreateFile_MixedSeparators_NormalizesKeyToForwardSlash()
+    {
+        var name = nameof(CreateFile_MixedSeparators_NormalizesKeyToForwardSlash);
+        var scope = Scope(name);
+
+        scope.CreateFile("a\\b/c\\d.txt").SetText("x");
+
+        Assert.True(_fixture.Client.TryGetBody($"{name}/a/b/c/d.txt", out _));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.Contains('\\'));
+        Assert.True(scope.FileExists("a/b/c/d.txt"));
+    }
+
+    [Fact]
     public void CreateDirectory_Nested_ReusesExistingIntermediate()
     {
         var scope = Scope(nameof(CreateDirectory_Nested_ReusesExistingIntermediate));
@@ -243,12 +347,13 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         Assert.Throws<FileHubException>(() => scope.CreateDirectory("a/../escape"));
     }
 
-    // === DirectoryPathMode: Direct vs OpenIntermediates ===
+    // === Nested path resolution (whole path in one op) ===
 
     [Fact]
-    public void CreateDirectory_DirectMode_CreatesOnlyLeafMarker()
+    public void CreateDirectory_CreatesOnlyLeafMarker()
     {
-        // Default for OCI is Direct — only the leaf prefix is PUT.
+        // The whole nested path is one PUT — only the leaf prefix marker,
+        // no per-segment "a/" / "a/b/" junk objects.
         using var client = new InMemoryOciClient();
         using var hub = OracleObjectStorageFileHub.FromOciClient(client);
 
@@ -261,21 +366,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
-    public void CreateDirectory_OpenIntermediatesMode_CreatesEachMarker()
-    {
-        using var client = new InMemoryOciClient();
-        using var hub = OracleObjectStorageFileHub.FromOciClient(client, "", DirectoryPathMode.OpenIntermediates);
-
-        hub.Root.CreateDirectory("a/b/c");
-
-        Assert.Equal(3, client.ObjectCount);
-        Assert.Contains("a/", client.Keys);
-        Assert.Contains("a/b/", client.Keys);
-        Assert.Contains("a/b/c/", client.Keys);
-    }
-
-    [Fact]
-    public void TryOpenDirectory_DirectMode_ResolvesExistingNestedPath()
+    public void TryOpenDirectory_ResolvesExistingNestedPath()
     {
         using var client = new InMemoryOciClient();
         using var hub = OracleObjectStorageFileHub.FromOciClient(client);

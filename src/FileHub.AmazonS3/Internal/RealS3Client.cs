@@ -1,11 +1,11 @@
+using Amazon.S3;
+using Amazon.S3.Model;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using Amazon.S3;
-using Amazon.S3.Model;
 
 namespace FileHub.AmazonS3.Internal
 {
@@ -61,6 +61,7 @@ namespace FileHub.AmazonS3.Internal
                     ContentLength = resp.ContentLength,
                     LastModified = resp.LastModified,
                     ContentType = resp.Headers.ContentType,
+                    CacheControl = resp.Headers.CacheControl,
                     UserMetadata = meta,
                     StorageClass = resp.StorageClass?.Value,
                     ServerSideEncryption = resp.ServerSideEncryptionMethod?.Value
@@ -92,10 +93,7 @@ namespace FileHub.AmazonS3.Internal
 
         public async Task PutObjectAsync(
             string key, Stream body, long contentLength,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -110,22 +108,29 @@ namespace FileHub.AmazonS3.Internal
                     AutoResetStreamPosition = false
                 };
                 if (contentLength >= 0) req.Headers.ContentLength = contentLength;
-                if (!string.IsNullOrEmpty(contentType)) req.ContentType = contentType;
-                if (userMetadata != null)
-                {
-                    foreach (var kv in userMetadata)
-                        req.Metadata.Add(kv.Key, kv.Value);
-                }
-                if (!string.IsNullOrEmpty(storageClass))
-                    req.StorageClass = S3StorageClass.FindValue(storageClass);
-                if (!string.IsNullOrEmpty(serverSideEncryption))
-                    req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(serverSideEncryption);
+                ApplyOptions(req, options);
                 await _client.PutObjectAsync(req, cancellationToken).ConfigureAwait(false);
             }
             catch (AmazonS3Exception ex)
             {
                 throw TranslateException(ex, key);
             }
+        }
+
+        private static void ApplyOptions(PutObjectRequest req, S3WriteOptions options)
+        {
+            if (options == null) return;
+            if (!string.IsNullOrEmpty(options.ContentType)) req.ContentType = options.ContentType;
+            if (!string.IsNullOrEmpty(options.CacheControl)) req.Headers.CacheControl = options.CacheControl;
+            if (options.Metadata != null)
+            {
+                foreach (var kv in options.Metadata)
+                    req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
+            }
+            if (!string.IsNullOrEmpty(options.StorageClass))
+                req.StorageClass = S3StorageClass.FindValue(options.StorageClass);
+            if (!string.IsNullOrEmpty(options.ServerSideEncryption))
+                req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(options.ServerSideEncryption);
         }
 
         public async Task DeleteObjectAsync(string key, CancellationToken cancellationToken = default)
@@ -141,13 +146,42 @@ namespace FileHub.AmazonS3.Internal
             }
         }
 
+        public async Task<IReadOnlyList<S3DeleteError>> DeleteObjectsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            if (keys == null) throw new ArgumentNullException(nameof(keys));
+            if (keys.Count == 0) return System.Array.Empty<S3DeleteError>();
+            if (keys.Count > 1000)
+                throw new ArgumentException("S3 DeleteObjects accepts at most 1000 keys per call.", nameof(keys));
+
+            try
+            {
+                var req = new DeleteObjectsRequest { BucketName = Bucket };
+                foreach (var k in keys)
+                    req.Objects.Add(new KeyVersion { Key = k });
+                // Quiet mode: response only contains errors, not successful keys —
+                // smaller payload, cheaper to parse for our use case.
+                req.Quiet = true;
+
+                var resp = await _client.DeleteObjectsAsync(req, cancellationToken).ConfigureAwait(false);
+                if (resp.DeleteErrors == null || resp.DeleteErrors.Count == 0)
+                    return System.Array.Empty<S3DeleteError>();
+
+                var errors = new List<S3DeleteError>(resp.DeleteErrors.Count);
+                foreach (var e in resp.DeleteErrors)
+                    errors.Add(new S3DeleteError { Key = e.Key, Code = e.Code, Message = e.Message });
+                return errors;
+            }
+            catch (AmazonS3Exception ex)
+            {
+                throw TranslateException(ex, keys.Count > 0 ? keys[0] : string.Empty);
+            }
+        }
+
         public async Task CopyFromBucketAsync(
             string sourceBucket, string sourceKey, string destinationKey,
             bool metadataReplace,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
@@ -162,22 +196,29 @@ namespace FileHub.AmazonS3.Internal
                     DestinationBucket = Bucket,
                     DestinationKey = destinationKey
                 };
-                if (metadataReplace)
+                if (metadataReplace && options != null)
                 {
                     req.MetadataDirective = S3MetadataDirective.REPLACE;
-                    if (!string.IsNullOrEmpty(contentType)) req.ContentType = contentType;
-                    if (userMetadata != null)
+                    if (!string.IsNullOrEmpty(options.ContentType)) req.ContentType = options.ContentType;
+                    if (options.Metadata != null)
                     {
-                        foreach (var kv in userMetadata)
-                            req.Metadata.Add(kv.Key, kv.Value);
+                        foreach (var kv in options.Metadata)
+                            req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
                     }
+                }
+                else if (metadataReplace)
+                {
+                    req.MetadataDirective = S3MetadataDirective.REPLACE;
                 }
                 // Storage class + SSE are independent of MetadataDirective in S3;
                 // applied on the destination regardless of REPLACE vs COPY.
-                if (!string.IsNullOrEmpty(storageClass))
-                    req.StorageClass = S3StorageClass.FindValue(storageClass);
-                if (!string.IsNullOrEmpty(serverSideEncryption))
-                    req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(serverSideEncryption);
+                if (options != null)
+                {
+                    if (!string.IsNullOrEmpty(options.StorageClass))
+                        req.StorageClass = S3StorageClass.FindValue(options.StorageClass);
+                    if (!string.IsNullOrEmpty(options.ServerSideEncryption))
+                        req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(options.ServerSideEncryption);
+                }
 
                 await _client.CopyObjectAsync(req, cancellationToken).ConfigureAwait(false);
             }
@@ -264,28 +305,64 @@ namespace FileHub.AmazonS3.Internal
             return Task.FromResult(url);
         }
 
+        public Task<string> GetPreSignedUploadUrlAsync(
+            string key,
+            DateTime timeExpiresUtc,
+            S3WriteOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            var req = new GetPreSignedUrlRequest
+            {
+                BucketName = Bucket,
+                Key = key,
+                Expires = timeExpiresUtc,
+                Verb = HttpVerb.PUT,
+            };
+            // Each populated option is folded into the signature; the client
+            // must send the matching header on PUT or S3 returns
+            // SignatureDoesNotMatch.
+            if (options != null)
+            {
+                if (!string.IsNullOrEmpty(options.ContentType)) req.ContentType = options.ContentType;
+                if (!string.IsNullOrEmpty(options.CacheControl)) req.Headers.CacheControl = options.CacheControl;
+                if (options.Metadata != null)
+                {
+                    foreach (var kv in options.Metadata)
+                        req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
+                }
+                if (!string.IsNullOrEmpty(options.StorageClass)) req.Headers["x-amz-storage-class"] = options.StorageClass;
+                if (!string.IsNullOrEmpty(options.ServerSideEncryption))
+                    req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(options.ServerSideEncryption);
+            }
+
+            var url = _client.GetPreSignedURL(req);
+            return Task.FromResult(url);
+        }
+
         public async Task<string> BeginMultipartUploadAsync(
             string key,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             try
             {
                 var req = new InitiateMultipartUploadRequest { BucketName = Bucket, Key = key };
-                if (!string.IsNullOrEmpty(contentType)) req.ContentType = contentType;
-                if (userMetadata != null)
+                if (options != null)
                 {
-                    foreach (var kv in userMetadata)
-                        req.Metadata.Add(kv.Key, kv.Value);
+                    if (!string.IsNullOrEmpty(options.ContentType)) req.ContentType = options.ContentType;
+                    if (!string.IsNullOrEmpty(options.CacheControl)) req.Headers.CacheControl = options.CacheControl;
+                    if (options.Metadata != null)
+                    {
+                        foreach (var kv in options.Metadata)
+                            req.Metadata.Add(kv.Key, kv.Value ?? string.Empty);
+                    }
+                    if (!string.IsNullOrEmpty(options.StorageClass))
+                        req.StorageClass = S3StorageClass.FindValue(options.StorageClass);
+                    if (!string.IsNullOrEmpty(options.ServerSideEncryption))
+                        req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(options.ServerSideEncryption);
                 }
-                if (!string.IsNullOrEmpty(storageClass))
-                    req.StorageClass = S3StorageClass.FindValue(storageClass);
-                if (!string.IsNullOrEmpty(serverSideEncryption))
-                    req.ServerSideEncryptionMethod = ServerSideEncryptionMethod.FindValue(serverSideEncryption);
                 var resp = await _client.InitiateMultipartUploadAsync(req, cancellationToken).ConfigureAwait(false);
                 return resp.UploadId;
             }
@@ -393,7 +470,7 @@ namespace FileHub.AmazonS3.Internal
 
             var requestId = string.IsNullOrEmpty(ex.RequestId) ? "" : $" (request-id={ex.RequestId})";
             var status = ex.StatusCode == 0 ? (HttpStatusCode?)null : ex.StatusCode;
-            return new S3DriverException(
+            return new AmazonS3DriverException(
                 $"S3 request failed for \"{context}\": [{(string.IsNullOrEmpty(code) ? "unknown" : code)}] {ex.Message}{requestId}",
                 status,
                 string.IsNullOrEmpty(code) ? null : code,

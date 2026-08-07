@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-
 namespace FileHub.AmazonS3.Tests;
 
 internal static class AwsEnvironment

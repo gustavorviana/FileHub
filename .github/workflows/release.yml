@@ -6,13 +6,21 @@ on:
       - "v*.*.*"
       - "v*.*.*-*"
 
+# id-token: write — required to request the OIDC token from GitHub that
+# NuGet/login@v1 exchanges for a short-lived NuGet API key under the
+# Trusted Publishing policy. contents: write — GitHub release upload.
 permissions:
+  id-token: write
   contents: write
 
 jobs:
   publish:
     name: Pack & publish to NuGet
     runs-on: ubuntu-latest
+    # Bind to a GitHub environment so the Trusted Publishing policy on
+    # NuGet.org can pin against it. Optional protection rules (required
+    # reviewers, wait timer) apply once configured in repo Settings → Environments.
+    environment: release
 
     steps:
       - uses: actions/checkout@v4
@@ -68,14 +76,19 @@ jobs:
           name: nupkg
           path: artifacts/*.*nupkg
 
+      # Exchange the workflow's GitHub OIDC token for a short-lived NuGet
+      # API key. Requires a Trusted Publishing policy on NuGet.org matching
+      # this repo + workflow file + environment. No long-lived secret stored.
+      - name: NuGet login (Trusted Publishing)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Push to NuGet.org
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NUGET_API_KEY secret is not set; aborting publish."
-            exit 1
-          fi
           dotnet nuget push "artifacts/*.nupkg" \
             --api-key "$NUGET_API_KEY" \
             --source https://api.nuget.org/v3/index.json \

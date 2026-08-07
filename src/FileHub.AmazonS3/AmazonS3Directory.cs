@@ -1,14 +1,14 @@
+using FileHub.AmazonS3.Internal;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3
 {
-    public class AmazonS3Directory : FileDirectory, IRefreshable
+    public class AmazonS3Directory : DirectoryEntry, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -16,12 +16,11 @@ namespace FileHub.AmazonS3
         private readonly AmazonS3Directory _parent;
         private readonly string _prefix;
         private readonly string _rootPrefix;
-        private readonly DirectoryPathMode _pathMode;
         private DateTime _creationTimeUtc;
         private DateTime _lastWriteTimeUtc;
 
-        public override string Path => S3PathUtil.DisplayPath(_prefix);
-        public override FileDirectory Parent => _parent;
+        public override string Path => PathUtil.DisplayPath(_prefix);
+        public override DirectoryEntry Parent => _parent;
 
         public override DateTime CreationTimeUtc => _creationTimeUtc;
         public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc;
@@ -31,16 +30,12 @@ namespace FileHub.AmazonS3
         internal string RootPrefixInternal => _rootPrefix;
 
         internal AmazonS3Directory(IS3Session session, string rootPrefix)
-            : this(session, rootPrefix, DirectoryPathMode.Direct) { }
-
-        internal AmazonS3Directory(IS3Session session, string rootPrefix, DirectoryPathMode pathMode)
             : base(GetDisplayName(rootPrefix), rootPath: rootPrefix)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _prefix = rootPrefix ?? string.Empty;
             _rootPrefix = _prefix;
             _parent = null;
-            _pathMode = pathMode;
         }
 
         internal AmazonS3Directory(AmazonS3Directory parent, string name)
@@ -49,15 +44,14 @@ namespace FileHub.AmazonS3
             _parent = parent ?? throw new ArgumentNullException(nameof(parent));
             _session = parent._session;
             _rootPrefix = parent._rootPrefix;
-            _prefix = S3PathUtil.CombinePrefix(parent._prefix, name);
-            _pathMode = parent._pathMode;
+            _prefix = PathUtil.CombinePrefix(parent._prefix, name);
         }
 
         private static string GetDisplayName(string rootPrefix)
         {
             if (string.IsNullOrEmpty(rootPrefix))
                 return "/";
-            return S3PathUtil.GetLeafName(rootPrefix);
+            return PathUtil.GetLeafName(rootPrefix);
         }
 
         // === IRefreshable ===
@@ -101,8 +95,8 @@ namespace FileHub.AmazonS3
         {
             using var empty = new MemoryStream();
             await _session.Client.PutObjectAsync(
-                _prefix, empty, contentLength: 0, contentType: DirectoryContentType,
-                userMetadata: null, storageClass: null, serverSideEncryption: null,
+                _prefix, empty, contentLength: 0,
+                options: new S3WriteOptions { ContentType = DirectoryContentType },
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -129,15 +123,16 @@ namespace FileHub.AmazonS3
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return await dir.CreateFileAsync(rest, cancellationToken).ConfigureAwait(false);
             }
-            var key = S3PathUtil.ResolveSafeObjectKey(_rootPrefix, _prefix, head);
+            
+            if (await ExistsAsync(head, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(CombineChildPath(head));
+
+            var key = PathUtil.ResolveSafeKey(_rootPrefix, _prefix, head);
             using (var empty = new MemoryStream())
             {
                 await _session.Client.PutObjectAsync(
                     key, empty, 0,
-                    contentType: null,
-                    userMetadata: null,
-                    storageClass: null,
-                    serverSideEncryption: null,
+                    options: null,
                     cancellationToken).ConfigureAwait(false);
             }
             var file = new AmazonS3File(this, head, 0, DateTime.UtcNow);
@@ -166,14 +161,6 @@ namespace FileHub.AmazonS3
             return (file, file != null);
         }
 
-        // Strict (createIfNotExists == false): fall through to base, which
-        // calls TryOpenFile → 1 × HEAD → loaded file or FileNotFoundException.
-        //
-        // createIfNotExists == true: RETURN STUB. No HEAD, no PutObject.
-        // S3 is pay-per-request; deferring creation to the first write saves
-        // round-trips. Caller's responsibility: write to materialize, read
-        // fails with FileNotFoundException if the object doesn't exist.
-
         public override FileEntry OpenFile(string name, bool createIfNotExists)
         {
             if (!createIfNotExists) return base.OpenFile(name, createIfNotExists);
@@ -186,7 +173,7 @@ namespace FileHub.AmazonS3
                 var dir = OpenOrCreateChildDirectory(head, createIfNotExists: true);
                 return dir.OpenFile(rest, createIfNotExists: true);
             }
-            S3PathUtil.ValidateName(head);
+            PathUtil.ValidateName(head);
             return new AmazonS3File(this, head);   // stub, IsLoaded = false
         }
 
@@ -197,34 +184,40 @@ namespace FileHub.AmazonS3
             return Task.FromResult(OpenFile(name, createIfNotExists: true));
         }
 
-        // S3 "directories" are only key prefixes — there is no real container
-        // entity. When the caller signals `createIfNotExists: true` we don't
-        // need to HEAD the marker, LIST children, nor PUT an empty marker:
-        // the prefix is implicitly usable the moment a child key is written.
-        // Strict (false) keeps the base semantics so missing paths still
-        // throw DirectoryNotFoundException.
-        protected override FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
+        protected override DirectoryEntry OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
         {
             if (createIfNotExists)
             {
-                S3PathUtil.ValidateName(segment);
+                PathUtil.ValidateName(segment);
                 return new AmazonS3Directory(this, segment);
             }
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
+        }
+
+        protected override Task<DirectoryEntry> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
+        {
+            // Zero-call branch is pure in-process construction — delegate to
+            // the sync hook; strict (false) keeps the base async probe.
+            if (createIfNotExists)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return Task.FromResult(OpenOrCreateChildDirectory(segment, createIfNotExists: true));
+            }
+            return base.OpenOrCreateChildDirectoryAsync(segment, createIfNotExists, cancellationToken);
         }
 
         private async Task<FileEntry> TryOpenFileCoreAsync(string name, CancellationToken cancellationToken = default)
         {
             try
             {
-                S3PathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
             }
             catch (ArgumentException)
             {
                 return null;
             }
 
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var key = PathUtil.CombineKey(_prefix, name);
             try
             {
                 var head = await _session.Client.HeadObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -269,7 +262,7 @@ namespace FileHub.AmazonS3
 
         private IEnumerable<FileEntry> GetFilesIterator(string searchPattern, FileListOffset offset, int? limit)
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string continuationToken = null;
             // S3 StartAfter is an exclusive cursor. Build it from the current
@@ -311,7 +304,7 @@ namespace FileHub.AmazonS3
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             ValidatePaging(limit);
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             int? backendLimit = ResolveBackendLimit(offset, limit);
             string continuationToken = null;
             string startAfter = offset.IsNamed ? _prefix + offset.Name : null;
@@ -346,114 +339,41 @@ namespace FileHub.AmazonS3
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name) => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
+        // === Directory resolution (whole path in one request) ===
 
-        public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        // Nullable handle for the internal callers (FileExists / Delete / ...).
+        private async Task<DirectoryEntry> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+            => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
+
+        // One PUT creates the whole path's marker.
+        public override async Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await CreateDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var existing = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                var intermediate = existing
-                    ?? await CreateDirectoryAsync(head, cancellationToken).ConfigureAwait(false);
-                return await intermediate.CreateDirectoryAsync(rest, cancellationToken).ConfigureAwait(false);
-            }
-
-            var childPrefix = S3PathUtil.ResolveSafeChildPrefix(_rootPrefix, _prefix, name);
-
-            using (var empty = new MemoryStream())
-            {
-                await _session.Client.PutObjectAsync(childPrefix, empty, 0, DirectoryContentType, null, null, null, cancellationToken).ConfigureAwait(false);
-            }
-            return new AmazonS3Directory(this, name);
-        }
-
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
-        {
-            directory = SyncBridge.Run(ct => TryOpenDirectoryCoreAsync(name, ct));
-            return directory != null;
-        }
-
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
-        {
-            var dir = await TryOpenDirectoryCoreAsync(name, cancellationToken).ConfigureAwait(false);
-            return (dir, dir != null);
-        }
-
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
-        {
-            if (NestedPath.TrySplit(name, out var head, out var rest))
-            {
-                if (_pathMode == DirectoryPathMode.Direct)
-                    return await TryOpenDirectoryDirectAsync(name, cancellationToken).ConfigureAwait(false);
-
-                var childResult = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
-                if (childResult is AmazonS3Directory s3Child)
-                    return await s3Child.TryOpenDirectoryCoreAsync(rest, cancellationToken).ConfigureAwait(false);
-                return null;
-            }
-
-            try
-            {
-                S3PathUtil.ValidateName(name);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
-
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
-            if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-                return new AmazonS3Directory(this, name);
-            return null;
-        }
-
-        private async Task<FileDirectory> CreateDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
-        {
-            var segments = ValidateAndSplitNestedSegments(nestedName);
+            var segments = PathUtil.SplitAndValidateSegments(name);
             var fullPrefix = BuildNestedPrefix(segments);
-            S3PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
             using (var empty = new MemoryStream())
             {
-                await _session.Client.PutObjectAsync(fullPrefix, empty, 0, DirectoryContentType, null, null, null, cancellationToken).ConfigureAwait(false);
+                await _session.Client.PutObjectAsync(fullPrefix, empty, 0,
+                    new S3WriteOptions { ContentType = DirectoryContentType }, cancellationToken).ConfigureAwait(false);
             }
             return BuildDirectoryChain(segments);
         }
 
-        private async Task<FileDirectory> TryOpenDirectoryDirectAsync(string nestedName, CancellationToken cancellationToken)
+        // One LIST proves the whole path exists.
+        public override async Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
-            try
-            {
-                segments = ValidateAndSplitNestedSegments(nestedName);
-            }
-            catch (ArgumentException)
-            {
-                return null;
-            }
+            try { segments = PathUtil.SplitAndValidateSegments(name); }
+            catch (ArgumentException) { return (null, false); }
+
             var fullPrefix = BuildNestedPrefix(segments);
-            S3PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
+            PathUtil.EnsureWithinRootPrefix(_rootPrefix, fullPrefix);
 
-            if (await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false))
-                return BuildDirectoryChain(segments);
-            return null;
-        }
-
-        private static string[] ValidateAndSplitNestedSegments(string nestedName)
-        {
-            var normalized = nestedName.Replace('\\', '/').Trim('/');
-            var segments = normalized.Split(new[] { '/' }, StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                if (seg == "." || seg == "..")
-                    throw new FileHubException($"Path \"{nestedName}\" contains invalid segment \"{seg}\".");
-                S3PathUtil.ValidateName(seg);
-            }
-            return segments;
+            return await AnyObjectUnderPrefixAsync(fullPrefix, cancellationToken).ConfigureAwait(false)
+                ? (BuildDirectoryChain(segments), true)
+                : (null, false);
         }
 
         private string BuildNestedPrefix(string[] segments)
@@ -472,16 +392,16 @@ namespace FileHub.AmazonS3
             return current;
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string continuationToken = null;
             do
             {
                 var page = SyncBridge.Run(ct => _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, continuationToken: continuationToken, startAfter: null, ct));
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = S3PathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new AmazonS3Directory(this, leaf);
                 }
@@ -490,11 +410,11 @@ namespace FileHub.AmazonS3
         }
 
 #if NET8_0_OR_GREATER
-        public override async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+        public override async IAsyncEnumerable<DirectoryEntry> GetDirectoriesAsync(
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            var regex = S3PathUtil.BuildSearchPatternRegex(searchPattern);
+            var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string continuationToken = null;
             do
             {
@@ -502,7 +422,7 @@ namespace FileHub.AmazonS3
                 var page = await _session.Client.ListObjectsAsync(_prefix, delimiter: "/", limit: null, continuationToken: continuationToken, startAfter: null, cancellationToken).ConfigureAwait(false);
                 foreach (var childPrefix in page.Prefixes)
                 {
-                    var leaf = S3PathUtil.GetLeafName(childPrefix);
+                    var leaf = PathUtil.GetLeafName(childPrefix);
                     if (!regex.IsMatch(leaf)) continue;
                     yield return new AmazonS3Directory(this, leaf);
                 }
@@ -515,8 +435,16 @@ namespace FileHub.AmazonS3
 
         public override async Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { S3PathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.FileExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var key = PathUtil.CombineKey(_prefix, head);
             try
             {
                 await _session.Client.HeadObjectAsync(key, cancellationToken).ConfigureAwait(false);
@@ -537,72 +465,197 @@ namespace FileHub.AmazonS3
         // the only probe we need.
         public override async Task<bool> DirectoryExistsAsync(string name, CancellationToken cancellationToken = default)
         {
-            try { S3PathUtil.ValidateName(name); } catch (ArgumentException) { return false; }
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.DirectoryExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+            var childPrefix = PathUtil.CombinePrefix(_prefix, head);
             return await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete() => SyncBridge.Run(ct => DeleteAsync(ct));
+        public override bool Exists(string name) => SyncBridge.Run(ct => ExistsAsync(name, ct));
 
-        public override async Task DeleteAsync(CancellationToken cancellationToken = default)
+        // File-or-directory in ONE request. A delimited LIST on the key groups
+        // everything sharing the "<prefix>/name" prefix: the exact object (a
+        // file) lands in Objects, while any deeper "<prefix>/name/..." collapses
+        // into the "<prefix>/name/" common prefix (a directory). Siblings like
+        // "name-x" or "namebaz" appear too but under different keys/prefixes, so
+        // we match exactly and never false-positive. Beats HEAD-then-LIST, which
+        // costs two round-trips on a billed backend.
+        public override async Task<bool> ExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    return await s3Dir.ExistsAsync(rest, cancellationToken).ConfigureAwait(false);
+                return false;
+            }
+            try { PathUtil.ValidateName(head); } catch (ArgumentException) { return false; }
+
+            var key = PathUtil.CombineKey(_prefix, head);
+            var dirPrefix = key + "/";
+            var page = await _session.Client.ListObjectsAsync(
+                key, delimiter: "/", limit: null, continuationToken: null, startAfter: null, cancellationToken).ConfigureAwait(false);
+
+            foreach (var obj in page.Objects)
+                if (string.Equals(obj.Key, key, StringComparison.Ordinal))
+                    return true; // exact object → a file
+            foreach (var p in page.Prefixes)
+                if (string.Equals(p, dirPrefix, StringComparison.Ordinal))
+                    return true; // "<key>/" common prefix → a directory
+            return false;
+        }
+
+        public override void Delete(bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(recursive, ct));
+
+        public override async Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_prefix == _rootPrefix)
                 throw new NotSupportedException("Cannot delete the root directory of the FileHub.");
 
+            if (!recursive && await AnyChildUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false))
+                throw new DirectoryNotEmptyException(Path);
+
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
         }
 
-        public override void Delete(string name) => SyncBridge.Run(ct => DeleteAsync(name, ct));
+        public override void Delete(string name, bool recursive = false) => SyncBridge.Run(ct => DeleteAsync(name, recursive, ct));
 
-        public override async Task DeleteAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            S3PathUtil.ValidateName(name);
+            var (head, rest) = SplitPath(name);
+            if (rest != null)
+            {
+                var dir = await TryOpenDirectoryCoreAsync(head, cancellationToken).ConfigureAwait(false);
+                if (dir is AmazonS3Directory s3Dir)
+                    await s3Dir.DeleteAsync(rest, recursive, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            PathUtil.ValidateName(head);
 
-            var key = S3PathUtil.CombineObjectKey(_prefix, name);
+            var fileKey = PathUtil.CombineKey(_prefix, head);
+            var dirPrefix = PathUtil.CombinePrefix(_prefix, head);
+
+            // S3's DeleteObject is idempotent — it returns 204 whether or not
+            // the key existed, so we can't infer "is this a file or a directory?"
+            // from a DELETE alone. Probe with a single LIST(limit=1): if any
+            // object lives under the dir-prefix, delete the tree; otherwise
+            // issue an idempotent DELETE on the file key.
+            if (await AnyObjectUnderPrefixAsync(dirPrefix, cancellationToken).ConfigureAwait(false))
+            {
+                if (!recursive && await AnyChildUnderPrefixAsync(dirPrefix, cancellationToken).ConfigureAwait(false))
+                    throw new DirectoryNotEmptyException(CombineChildPath(head));
+
+                await DeleteAllUnderPrefixAsync(dirPrefix, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            // Plain file delete — idempotent (no throw if missing) to match S3.
+            await _session.Client.DeleteObjectAsync(fileKey, cancellationToken).ConfigureAwait(false);
+        }
+
+        // === ISignedUploadable ===
+
+        public Uri GetSignedUploadUrl(string name, TimeSpan expiresIn, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetSignedUploadUrlAsync(name, expiresIn, options, ct));
+
+        public async Task<Uri> GetSignedUploadUrlAsync(string name, TimeSpan expiresIn, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name cannot be null or empty.", nameof(name));
+            if (expiresIn <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
+
+            // Resolve to a full key under this prefix. Accepts nested paths and
+            // rejects sandbox escapes via the same SplitPath used by CreateFile.
+            var key = ResolveLeafKey(name);
+            var expiresUtc = DateTime.UtcNow.Add(expiresIn);
+            var url = await _session.Client.GetPreSignedUploadUrlAsync(
+                key,
+                expiresUtc,
+                AmazonS3File.NormalizeOptions(options),
+                cancellationToken).ConfigureAwait(false);
+            return new Uri(url);
+        }
+
+        private string ResolveLeafKey(string name)
+        {
+            // Walk the path through SplitPath to validate each segment (rejects
+            // "..", absolute paths, etc) without actually opening any directories.
+            var prefix = _prefix;
+            var remaining = name;
+            while (true)
+            {
+                var (head, rest) = SplitPath(remaining);
+                if (rest == null)
+                {
+                    PathUtil.ValidateName(head);
+                    return PathUtil.CombineKey(prefix, head);
+                }
+                PathUtil.ValidateName(head);
+                prefix = PathUtil.CombinePrefix(prefix, head);
+                remaining = rest;
+            }
+        }
+
+        public override void DeleteIfExists(string name) => SyncBridge.Run(ct => DeleteIfExistsAsync(name, ct));
+
+        /// <summary>
+        /// Single-call delete on S3. <c>DeleteObject</c> is idempotent — returns
+        /// <c>204</c> whether the object existed or not — so skipping the base
+        /// implementation's <c>FileExists</c> + <c>DirectoryExists</c> probe
+        /// saves up to one HEAD and one LIST per call. If <paramref name="name"/>
+        /// resolves only as a directory, the LIST/DELETE cascade in
+        /// <see cref="DeleteAsync(string, bool, CancellationToken)"/> still runs.
+        /// </summary>
+        public override async Task DeleteIfExistsAsync(string name, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
             try
             {
-                await _session.Client.DeleteObjectAsync(key, cancellationToken).ConfigureAwait(false);
-                return;
+                await DeleteAsync(name, recursive: false, cancellationToken).ConfigureAwait(false);
             }
             catch (FileNotFoundException)
             {
-                // fall through to directory delete attempt
+                // DeleteIfExists swallows the "nothing to delete" case.
             }
-
-            var childPrefix = S3PathUtil.CombinePrefix(_prefix, name);
-            if (await AnyObjectUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false))
-            {
-                await DeleteAllUnderPrefixAsync(childPrefix, cancellationToken).ConfigureAwait(false);
-                return;
-            }
-
-            throw new FileNotFoundException($"The item \"{name}\" was not found under \"{Path}\".");
         }
 
-        public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
+        public override DirectoryEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
-        public override async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_parent == null)
                 throw new NotSupportedException("Cannot rename the root directory.");
+            NestedPath.EnsureLeaf(newName);
 
-            S3PathUtil.ValidateName(newName);
-            var destinationPrefix = S3PathUtil.CombinePrefix(_parent._prefix, newName);
+            PathUtil.ValidateName(newName);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
+
+            var destinationPrefix = PathUtil.CombinePrefix(_parent._prefix, newName);
             await CopyAllObjectsAsync(_prefix, _session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
             await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
             return new AmazonS3Directory(_parent, newName);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            var newDir = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAllUnderPrefixAsync(_prefix, cancellationToken).ConfigureAwait(false);
@@ -619,25 +672,69 @@ namespace FileHub.AmazonS3
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory under the destination and
+            // recurse with the single leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is AmazonS3Directory s3Dir
                 && S3SessionTarget.SameCredentials(s3Dir._session.Client, _session.Client))
             {
-                var destinationPrefix = S3PathUtil.ResolveSafeChildPrefix(s3Dir._rootPrefix, s3Dir._prefix, name);
+                var destinationPrefix = PathUtil.ResolveSafeChildPrefix(s3Dir._rootPrefix, s3Dir._prefix, name);
+                if (IsSameBucket(s3Dir))
+                {
+                    // Same prefix = onto itself; a prefix under the source = into a
+                    // descendant, which would recurse (copied objects reappear
+                    // under the source prefix).
+                    if (string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal))
+                        throw new FileAlreadyExistsException($"Cannot copy directory \"{Path}\" onto itself.", Path);
+                    if (IsDescendantPath(destinationPrefix))
+                        throw new FileHubException($"Cannot copy directory \"{Path}\" into one of its descendants.");
+                }
+                // overwrite: false must not clobber an existing destination. The
+                // server-side CopyObject loop below always overwrites colliding
+                // keys, so guard with a LIST up-front.
+                if (!overwrite && await s3Dir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(s3Dir.Path, name));
                 await CopyAllObjectsAsync(_prefix, s3Dir._session.Client, destinationPrefix, cancellationToken).ConfigureAwait(false);
                 return new AmazonS3Directory(s3Dir, name);
             }
 
+            if (!overwrite && await directory.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(directory.Path, name));
+
             var newDir = await directory.CreateDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
-            CopyContentsGeneric(this, newDir);
+            CopyContentsGeneric(this, newDir, overwrite);
             return newDir;
         }
 
         // === Helpers ===
+
+        // True when the other directory resolves to the same physical bucket —
+        // the precondition for a server-side copy and for the self/descendant
+        // guards (a matching prefix in a different bucket is a different object).
+        private bool IsSameBucket(AmazonS3Directory other)
+            => string.Equals(other._session.Client.Bucket, _session.Client.Bucket, StringComparison.Ordinal);
+
+        // True when destinationPrefix lives strictly beneath this directory's own
+        // prefix — used to reject move/copy of a directory into its own subtree.
+        private bool IsDescendantPath(string destinationPrefix)
+            => !string.IsNullOrEmpty(_prefix)
+               && !string.Equals(destinationPrefix, _prefix, StringComparison.Ordinal)
+               && destinationPrefix.StartsWith(_prefix, StringComparison.Ordinal);
 
         private bool IsChildFile(string key, out string leaf)
         {
@@ -657,52 +754,78 @@ namespace FileHub.AmazonS3
             return page.Objects.Count > 0;
         }
 
+        // "Empty directory" test: any object under the prefix other than the
+        // directory's own marker key (whose key equals the prefix). LIST 2 so a
+        // page returning only the marker still lets us see whether a child
+        // follows it.
+        private async Task<bool> AnyChildUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
+        {
+            var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: 2, continuationToken: null, startAfter: null, cancellationToken).ConfigureAwait(false);
+            foreach (var obj in page.Objects)
+                if (!string.Equals(obj.Key, prefix, StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
+
         private async Task DeleteAllUnderPrefixAsync(string prefix, CancellationToken cancellationToken)
         {
-            // Collect per-object failures instead of aborting on the first
-            // one. A single 403 from a granular IAM rule, or a transient
-            // throttle, would otherwise leave the rest of the directory
-            // intact and force the caller to retry from a half-deleted state.
-            List<Exception> failures = null;
+            // Batch deletes in chunks of S3's per-request maximum (1000 keys
+            // per DeleteObjects call). Each chunk is one round-trip instead
+            // of N individual DELETE calls — for a 10k-object prefix this
+            // collapses 10 000 requests into 10. Collect per-key errors S3
+            // reports so callers see the full picture instead of aborting
+            // on the first granular IAM rule or transient throttle.
+            const int BatchSize = 1000;
+            var failures = new List<Exception>();
+            var pending = new List<string>(BatchSize);
             string continuationToken = null;
             do
             {
                 var page = await _session.Client.ListObjectsAsync(prefix, delimiter: null, limit: null, continuationToken: continuationToken, startAfter: null, cancellationToken).ConfigureAwait(false);
                 foreach (var obj in page.Objects)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
+                    pending.Add(obj.Key);
+                    if (pending.Count >= BatchSize)
                     {
-                        await _session.Client.DeleteObjectAsync(obj.Key, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (!(ex is OperationCanceledException))
-                    {
-                        (failures ??= new List<Exception>()).Add(ex);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await FlushDeleteBatchAsync(pending, failures, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 continuationToken = page.NextContinuationToken;
             } while (!string.IsNullOrEmpty(continuationToken));
 
+            // Also include the prefix marker key in the trailing batch when
+            // present. S3 treats it as just another object — same DeleteObjects
+            // call deletes it. If the marker doesn't exist, S3 silently ignores
+            // it (idempotent).
             if (!string.IsNullOrEmpty(prefix))
+                pending.Add(prefix);
+
+            if (pending.Count > 0)
             {
-                try
-                {
-                    await _session.Client.DeleteObjectAsync(prefix, cancellationToken).ConfigureAwait(false);
-                }
-                catch (FileNotFoundException)
-                {
-                    // no marker to delete
-                }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
-                {
-                    (failures ??= new List<Exception>()).Add(ex);
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                await FlushDeleteBatchAsync(pending, failures, cancellationToken).ConfigureAwait(false);
             }
 
-            if (failures != null)
+            if (failures.Count > 0)
                 throw new AggregateException(
                     $"One or more objects under \"{prefix}\" could not be deleted ({failures.Count} failure(s)). The directory is partially deleted.",
                     failures);
+        }
+
+        private async Task FlushDeleteBatchAsync(List<string> keys, List<Exception> failures, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var errors = await _session.Client.DeleteObjectsAsync(keys, cancellationToken).ConfigureAwait(false);
+                foreach (var e in errors)
+                    failures.Add(new FileHubException($"S3 DeleteObjects failed for key \"{e.Key}\" ({e.Code}): {e.Message}"));
+            }
+            catch (Exception ex) when (!(ex is OperationCanceledException))
+            {
+                failures.Add(ex);
+            }
+            keys.Clear();
         }
 
         private async Task CopyAllObjectsAsync(string sourcePrefix, IS3Client destinationClient, string destinationPrefix, CancellationToken cancellationToken)
@@ -723,10 +846,7 @@ namespace FileHub.AmazonS3
                         obj.Key,
                         destKey,
                         metadataReplace: false,
-                        contentType: null,
-                        userMetadata: null,
-                        storageClass: null,
-                        serverSideEncryption: null,
+                        options: null,
                         cancellationToken).ConfigureAwait(false);
                 }
                 continuationToken = page.NextContinuationToken;
@@ -737,15 +857,15 @@ namespace FileHub.AmazonS3
             // (same invariant we keep on nested writes).
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination)
+        private static void CopyContentsGeneric(DirectoryEntry source, DirectoryEntry destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
-                file.CopyTo(destination, file.Name);
+                file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);
 
             foreach (var subDir in source.GetDirectories())
             {
                 var newSubDir = destination.CreateDirectory(subDir.Name);
-                CopyContentsGeneric(subDir, newSubDir);
+                CopyContentsGeneric(subDir, newSubDir, overwrite);
             }
         }
     }

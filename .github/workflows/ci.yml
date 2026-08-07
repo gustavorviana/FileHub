@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [development]
   pull_request:
-    branches: [main]
+    branches: [main, development]
 
 permissions:
   contents: read
@@ -13,6 +13,12 @@ jobs:
   build:
     name: Build & test
     runs-on: ubuntu-latest
+
+    # secrets can't be referenced in step-level `if:` expressions — surface the
+    # one the OCI-config step gates on as a job env var so the condition can
+    # read it via `env.`.
+    env:
+      OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +36,25 @@ jobs:
       - name: Build
         run: dotnet build FileHub.slnx --configuration Release --no-restore
 
+      # OCI integration tests read an ~/.oci/config file (the FromConfigFile
+      # auth strategy). Materialise it from repository secrets. When the
+      # secrets are absent (e.g. fork PRs) the private key is empty, the config
+      # file is skipped, and the [RequiresOci*] attributes skip the tests.
+      - name: Write OCI config
+        if: ${{ env.OCI_PRIVATE_KEY != '' }}
+        run: |
+          mkdir -p "$HOME/.oci"
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$HOME/.oci/key.pem"
+          chmod 600 "$HOME/.oci/key.pem"
+          cat > "$HOME/.oci/config" <<EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER_OCID }}
+          tenancy=${{ secrets.OCI_TENANCY_OCID }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          region=${{ secrets.OCI_REGION }}
+          key_file=$HOME/.oci/key.pem
+          EOF
+
       - name: Test
         run: dotnet test FileHub.slnx --configuration Release --no-build --logger "trx" --results-directory TestResults
         env:
@@ -46,6 +71,21 @@ jobs:
           FILEHUB_S3_BUCKET:    ${{ secrets.FILEHUB_S3_BUCKET }}
           FILEHUB_S3_BUCKET_B:  ${{ secrets.FILEHUB_S3_BUCKET_B }}
           AWS_REGION_B:         ${{ secrets.AWS_REGION_B }}
+          # OCI integration tests run only when these are present (the
+          # [RequiresOci*] attributes inspect them and skip otherwise). The
+          # config file is written from secrets in the "Write OCI config" step
+          # above; fork PRs see no secrets, so the file is absent and the
+          # tests skip.
+          FILEHUB_OCI_CONFIG_FILE: /home/runner/.oci/config
+          FILEHUB_OCI_PROFILE:     DEFAULT
+          FILEHUB_OCI_BUCKET:      ${{ secrets.FILEHUB_OCI_BUCKET }}
+          FILEHUB_OCI_NAMESPACE:   ${{ secrets.FILEHUB_OCI_NAMESPACE }}
+          # Second bucket for cross-target copy tests. Must live in the SAME
+          # tenancy/namespace/region as FILEHUB_OCI_BUCKET — OCI routes a
+          # server-side CopyObject through one authenticated client, and that
+          # client is pinned to a single region endpoint. Cross-region copy is
+          # not verifiable here, so there is no _REGION_B counterpart.
+          FILEHUB_OCI_BUCKET_B:    ${{ secrets.FILEHUB_OCI_BUCKET_B }}
 
       - name: Upload test results
         if: always()

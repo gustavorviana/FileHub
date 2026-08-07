@@ -1,6 +1,3 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 
@@ -9,7 +6,7 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageUrlAccessTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
@@ -41,6 +38,19 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
     }
 
     [Fact]
+    public void GetPublicUrl_ObjectNameWithPercent_EncodesLiteralPercent()
+    {
+        using var fake = new InMemoryOciClient(bucket: "my-bucket", @namespace: "my-ns", region: "us-phoenix-1");
+        fake.SetBucketAccess(OciBucketAccessType.ObjectRead);
+        using var hub = OracleObjectStorageFileHub.FromOciClient(fake);
+        hub.Root.CreateFile("docs/report%2Fdate.csv").SetText("x");
+
+        var url = ((IUrlAccessible)hub.Root.OpenFile("docs/report%2Fdate.csv")).GetPublicUrl();
+
+        Assert.Contains("docs%2Freport%252Fdate.csv", url.OriginalString);
+    }
+
+    [Fact]
     public void GetPublicUrl_OnPrivateBucket_Throws()
     {
         // default fixture fake is NoPublicAccess
@@ -57,10 +67,10 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         var url = await file.GetSignedUrlAsync(TimeSpan.FromMinutes(5));
 
         // The fake produces /p/{parName}/n/{ns}/b/{bucket}/o/{encoded}
-        Assert.Contains("/p/filehub-", url.ToString());
+        Assert.Contains("/p/signed.txt", url.ToString());
         Assert.Contains("/n/test-ns/", url.ToString());
         Assert.Contains("/b/test-bucket/", url.ToString());
-        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "signed.txt"));
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "signed.txt");
     }
 
     [Fact]
@@ -82,5 +92,68 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => file.GetSignedUrlAsync(TimeSpan.FromMinutes(1), cts.Token));
+    }
+
+    [Fact]
+    public async Task GetSignedUploadUrlAsync_OnDirectory_CreatesWritePar_NoObjectNeeded()
+    {
+        // The directory mints the URL; the target object never has to exist
+        // (no CreateFile call below). Caller PUTs straight to the access URI.
+        var dir = (ISignedUploadable)Root;
+
+        var url = await dir.GetSignedUploadUrlAsync("upload.bin", TimeSpan.FromMinutes(5));
+
+        Assert.Contains("/p/filehub-upload-", url.ToString());
+        Assert.Contains("/n/test-ns/", url.ToString());
+        Assert.Contains("/b/test-bucket/", url.ToString());
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "upload.bin" && p.Name.StartsWith("filehub-upload-"));
+        Assert.False(Root.FileExists("upload.bin"));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_ExpiresInMustBePositive()
+    {
+        var dir = (ISignedUploadable)Root;
+        Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.Zero));
+        Assert.Throws<ArgumentOutOfRangeException>(() => dir.GetSignedUploadUrl("bad-upload.bin", TimeSpan.FromMinutes(-1)));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_NullName_Throws()
+    {
+        var dir = (ISignedUploadable)Root;
+
+        Assert.Throws<ArgumentException>(() => dir.GetSignedUploadUrl("", TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_WithHeaderBindingOptions_Throws()
+    {
+        // OCI PARs can't bind headers; refuse rather than hand back an
+        // unconstrained URL the caller would believe is constrained.
+        var dir = (ISignedUploadable)Root;
+        var options = new FileWriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "max-age=3600",
+            Metadata = new Dictionary<string, string> { ["owner"] = "alice" },
+        };
+
+        Assert.Throws<NotSupportedException>(
+            () => dir.GetSignedUploadUrl("uploads/bound.png", TimeSpan.FromMinutes(15), options));
+        Assert.DoesNotContain(_fixture.Client.Pars, p => p.ObjectName == "uploads/bound.png");
+    }
+
+    [Fact]
+    public void GetSignedUploadUrl_WithEmptyOptions_CreatesWritePar()
+    {
+        // An options object with no header-binding fields carries no constraint
+        // to drop, so it is honored like the no-options overload.
+        var dir = (ISignedUploadable)Root;
+
+        var url = dir.GetSignedUploadUrl("uploads/empty.png", TimeSpan.FromMinutes(15), new FileWriteOptions());
+
+        Assert.Contains("/p/filehub-upload-", url.ToString());
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "uploads/empty.png");
     }
 }

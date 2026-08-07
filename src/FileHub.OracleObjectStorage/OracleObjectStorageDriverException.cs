@@ -1,6 +1,5 @@
 using System;
 using System.Net;
-using FileHub;
 #if !NET8_0_OR_GREATER
 using System.Runtime.Serialization;
 #endif
@@ -17,13 +16,13 @@ namespace FileHub.OracleObjectStorage
 #if !NET8_0_OR_GREATER
     [Serializable]
 #endif
-    public sealed class OciDriverException : FileHubException
+    public sealed class OracleObjectStorageDriverException : FileHubException
     {
         public HttpStatusCode? StatusCode { get; }
         public string ServiceCode { get; }
         public string OpcRequestId { get; }
 
-        public OciDriverException(string message, HttpStatusCode? statusCode, string serviceCode, string opcRequestId, Exception innerException)
+        public OracleObjectStorageDriverException(string message, HttpStatusCode? statusCode, string serviceCode, string opcRequestId, Exception innerException)
             : base(message, innerException)
         {
             StatusCode = statusCode;
@@ -32,7 +31,7 @@ namespace FileHub.OracleObjectStorage
         }
 
 #if !NET8_0_OR_GREATER
-        private OciDriverException(SerializationInfo info, StreamingContext context)
+        private OracleObjectStorageDriverException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
             var status = info.GetInt32(nameof(StatusCode));

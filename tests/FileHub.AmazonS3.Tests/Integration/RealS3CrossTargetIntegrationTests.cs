@@ -1,4 +1,3 @@
-using System;
 using System.Text;
 
 namespace FileHub.AmazonS3.Tests.Integration;
@@ -13,66 +12,39 @@ namespace FileHub.AmazonS3.Tests.Integration;
 /// The cross-region test only runs when AWS_REGION_B != AWS_REGION; the
 /// cross-bucket test runs regardless.
 /// </summary>
-public class RealS3CrossTargetIntegrationTests
+public class RealS3CrossTargetIntegrationTests : RealS3IntegrationTestBase
 {
-    private const string Prefix = "filehub-integration";
-
-    private static AmazonS3FileHub CreateHub(string bucket, string region)
-    {
-        var key = Environment.GetEnvironmentVariable("AWS_ACCESS_KEY_ID")!;
-        var secret = Environment.GetEnvironmentVariable("AWS_SECRET_ACCESS_KEY")!;
-        var credentials = new Amazon.Runtime.BasicAWSCredentials(key, secret);
-        return AmazonS3FileHub.FromCredentials(
-            rootPath: Prefix,
-            bucketName: bucket,
-            credentials: credentials,
-            region: region);
-    }
-
-    private static (AmazonS3FileHub a, AmazonS3FileHub b) CreateHubs()
-    {
-        var bucketA = Environment.GetEnvironmentVariable("FILEHUB_S3_BUCKET")!;
-        var regionA = Environment.GetEnvironmentVariable("AWS_REGION")!;
-        var bucketB = Environment.GetEnvironmentVariable("FILEHUB_S3_BUCKET_B")!;
-        var regionB = Environment.GetEnvironmentVariable("AWS_REGION_B")!;
-        return (CreateHub(bucketA, regionA), CreateHub(bucketB, regionB));
-    }
-
     [RequiresAwsSecondBucket]
-    public void CrossBucket_CopyTo_ServerSide()
+    public async Task CrossBucket_CopyTo_ServerSide()
     {
-        var (hubA, hubB) = CreateHubs();
-        using var _a = hubA;
-        using var _b = hubB;
+        var rootA = await GetRootDirAsync(BucketName.A, "cross-bucket");
+        var rootB = await GetRootDirAsync(BucketName.B, "cross-bucket");
 
-        var name = $"cross-bucket-{Guid.NewGuid():N}.txt";
         var payload = Encoding.UTF8.GetBytes("cross-bucket server-side");
-        hubA.Root.CreateFile(name).SetBytes(payload);
+        rootA.CreateFile("copy.txt").SetBytes(payload);
 
         try
         {
-            hubA.Root.OpenFile(name).CopyTo(hubB.Root, name);
+            rootA.OpenFile("copy.txt").CopyTo(rootB, "copy.txt");
 
-            var downloaded = hubB.Root.OpenFile(name).ReadAllBytes();
+            var downloaded = rootB.OpenFile("copy.txt").ReadAllBytes();
             Assert.Equal(payload, downloaded);
         }
         finally
         {
-            TryDelete(() => hubA.Root.OpenFile(name).Delete());
-            TryDelete(() => hubB.Root.OpenFile(name).Delete());
+            TryDelete(() => rootA.Delete(recursive: true));
+            TryDelete(() => rootB.Delete(recursive: true));
         }
     }
 
     [RequiresAwsCrossRegion]
-    public void CrossRegion_CopyTo_ServerSide()
+    public async Task CrossRegion_CopyTo_ServerSide()
     {
-        var (hubA, hubB) = CreateHubs();
-        using var _a = hubA;
-        using var _b = hubB;
+        var rootA = await GetRootDirAsync(BucketName.A, "cross-region");
+        var rootB = await GetRootDirAsync(BucketName.B, "cross-region");
 
-        var name = $"cross-region-{Guid.NewGuid():N}.txt";
         var payload = Encoding.UTF8.GetBytes($"cross-region @ {DateTime.UtcNow:O}");
-        hubA.Root.CreateFile(name).SetBytes(payload);
+        rootA.CreateFile("copy.txt").SetBytes(payload);
 
         try
         {
@@ -80,15 +52,15 @@ public class RealS3CrossTargetIntegrationTests
             // client (region B), which is the only endpoint that routes a
             // cross-region CopyObject correctly. If the implementation ever
             // regresses to source-client, S3 will reject here.
-            hubA.Root.OpenFile(name).CopyTo(hubB.Root, name);
+            rootA.OpenFile("copy.txt").CopyTo(rootB, "copy.txt");
 
-            var downloaded = hubB.Root.OpenFile(name).ReadAllBytes();
+            var downloaded = rootB.OpenFile("copy.txt").ReadAllBytes();
             Assert.Equal(payload, downloaded);
         }
         finally
         {
-            TryDelete(() => hubA.Root.OpenFile(name).Delete());
-            TryDelete(() => hubB.Root.OpenFile(name).Delete());
+            TryDelete(() => rootA.Delete(recursive: true));
+            TryDelete(() => rootB.Delete(recursive: true));
         }
     }
 

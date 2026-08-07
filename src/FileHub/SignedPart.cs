@@ -9,7 +9,7 @@ namespace FileHub
     /// </summary>
     public sealed class SignedPart
     {
-        /// <summary>1-based part number — S3 requires parts numbered 1..N.</summary>
+        /// <summary>1-based part number — backends require parts numbered 1..N.</summary>
         public int PartNumber { get; }
 
         /// <summary>Pre-signed PUT URL. The remote client uploads bytes directly to this URL.</summary>

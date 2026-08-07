@@ -1,5 +1,3 @@
-using System;
-using FileHub.OracleObjectStorage.Internal;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 
 namespace FileHub.OracleObjectStorage.Tests;
@@ -26,6 +24,69 @@ public class OracleObjectStorageFileHubTests
         Assert.Equal("/uploads/2026", hub.Root.Path);
         // Marker object was created under the normalized prefix.
         Assert.True(fake.TryGetBody("uploads/2026/", out _));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CreateAsync_ClientWithRetryConfiguration_Throws()
+    {
+        var provider = new Oci.Common.Auth.SimpleAuthenticationDetailsProvider
+        {
+            TenantId = "ocid1.tenancy.oc1..fake",
+            UserId = "ocid1.user.oc1..fake",
+            Fingerprint = "aa:bb",
+            Region = Oci.Common.Region.SA_SAOPAULO_1,
+        };
+        using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
+        var options = new OracleObjectStorageHubOptions
+        {
+            BucketName = "bucket",
+            Client = sdkClient,
+            RegionId = "sa-saopaulo-1",
+            Namespace = "ns",
+            RetryConfiguration = new Oci.Common.Retry.RetryConfiguration(),
+        };
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(
+            () => OracleObjectStorageFileHub.CreateAsync(options));
+        Assert.Contains("RetryConfiguration", ex.Message);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task FromClient_ObjectStorageClient_Async_Works()
+    {
+        var provider = new Oci.Common.Auth.SimpleAuthenticationDetailsProvider
+        {
+            TenantId = "ocid1.tenancy.oc1..fake",
+            UserId = "ocid1.user.oc1..fake",
+            Fingerprint = "aa:bb",
+            Region = Oci.Common.Region.SA_SAOPAULO_1,
+        };
+        using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
+
+        using var hub = await OracleObjectStorageFileHub.CreateAsync(
+            OracleObjectStorageHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
+
+        Assert.NotNull(hub.Root);
+        Assert.Equal("/", hub.Root.Path);
+    }
+
+    [Fact]
+    public void FromClient_ObjectStorageClient_Sync_Works()
+    {
+        var provider = new Oci.Common.Auth.SimpleAuthenticationDetailsProvider
+        {
+            TenantId = "ocid1.tenancy.oc1..fake",
+            UserId = "ocid1.user.oc1..fake",
+            Fingerprint = "aa:bb",
+            Region = Oci.Common.Region.SA_SAOPAULO_1,
+        };
+        using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
+
+        using var hub = OracleObjectStorageFileHub.Create(
+            OracleObjectStorageHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
+
+        Assert.NotNull(hub.Root);
+        Assert.Equal("/", hub.Root.Path);
     }
 
     [Fact]

@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.OracleObjectStorage.Internal;
+using Oci.ObjectstorageService.Models;
 
 namespace FileHub.OracleObjectStorage.Tests.Fakes;
 
@@ -38,6 +33,7 @@ internal sealed class InMemoryOciClient : IOciClient
     private int _renameInvocationCount;
     private int _headInvocationCount;
     private int _putInvocationCount;
+    private int _uploadCounter;
 
     public string Namespace { get; }
     public string Bucket { get; }
@@ -53,6 +49,8 @@ internal sealed class InMemoryOciClient : IOciClient
 
     public int HeadInvocationCount => _headInvocationCount;
     public int PutInvocationCount => _putInvocationCount;
+
+    private InMemoryOciWorkRequestHandle? _workRequestHandle = null;
 
     /// <summary>
     /// Optional hook to inject a failure into <see cref="DeleteObjectAsync"/>.
@@ -115,6 +113,7 @@ internal sealed class InMemoryOciClient : IOciClient
             ContentLength = obj.Body.LongLength,
             LastModified = obj.LastModified,
             ContentType = obj.ContentType,
+            CacheControl = obj.CacheControl,
             OpcMeta = obj.OpcMeta is null
                 ? null
                 : new Dictionary<string, string>(obj.OpcMeta, StringComparer.OrdinalIgnoreCase)
@@ -152,8 +151,7 @@ internal sealed class InMemoryOciClient : IOciClient
         string objectName,
         Stream body,
         long contentLength,
-        string contentType,
-        IReadOnlyDictionary<string, string> opcMeta,
+        OciWriteOptions options,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -178,10 +176,11 @@ internal sealed class InMemoryOciClient : IOciClient
         var stored = new InMemoryStoredObject
         {
             Body = bytes,
-            ContentType = contentType,
-            OpcMeta = opcMeta is null
+            ContentType = options?.ContentType,
+            CacheControl = options?.CacheControl,
+            OpcMeta = options?.Metadata is null
                 ? null
-                : new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase),
+                : new Dictionary<string, string>(options.Metadata, StringComparer.OrdinalIgnoreCase),
             LastModified = DateTime.UtcNow
         };
 
@@ -212,7 +211,7 @@ internal sealed class InMemoryOciClient : IOciClient
         return Task.CompletedTask;
     }
 
-    public Task CopyObjectAsync(
+    public Task<IOciWorkRequestHandle> CopyObjectAsync(
         string sourceObjectName,
         string destinationNamespace,
         string destinationBucket,
@@ -254,7 +253,23 @@ internal sealed class InMemoryOciClient : IOciClient
             OpcMeta = obj.OpcMeta is null ? null : new Dictionary<string, string>(obj.OpcMeta, StringComparer.OrdinalIgnoreCase),
             LastModified = DateTime.UtcNow
         };
-        return Task.CompletedTask;
+
+        return Task.FromResult(GetMockWorkRequestHandle());
+    }
+
+    internal IOciWorkRequestHandle GetMockWorkRequestHandle()
+    {
+        return _workRequestHandle ??= NewWorkRequestHandle();
+    }
+
+    public InMemoryOciWorkRequestHandle NewWorkRequestHandle(WorkRequest.StatusEnum initialStatus = WorkRequest.StatusEnum.Completed, float? initialPercentComplete = 100)
+    {
+        return _workRequestHandle = new InMemoryOciWorkRequestHandle(id: "work-request",
+            @namespace: Namespace,
+            bucket: Bucket,
+            region: Region,
+            initialStatus: initialStatus,
+            initialPercentComplete: initialPercentComplete);
     }
 
     public Task<OciListPage> ListObjectsAsync(string prefix, string delimiter, int? limit, string start, CancellationToken cancellationToken = default)
@@ -334,6 +349,97 @@ internal sealed class InMemoryOciClient : IOciClient
         return Task.FromResult(accessUri);
     }
 
+    public Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        // Write PAR doesn't require the object to exist yet — it's the URL
+        // the caller PUTs bytes to.
+        var accessUri = $"/p/{parName}/n/{Namespace}/b/{Bucket}/o/{Uri.EscapeDataString(objectName)}";
+        _store.Pars[parName] = new ParRecord(parName, objectName, timeExpiresUtc, accessUri);
+        return Task.FromResult(accessUri);
+    }
+
+    public Task<string> CreateMultipartUploadAsync(string objectName, OciWriteOptions options, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        var uploadId = $"upload-{Interlocked.Increment(ref _uploadCounter)}";
+        _store.Uploads[uploadId] = new InMemoryOciMultipartUpload
+        {
+            UploadId = uploadId,
+            ObjectName = objectName,
+            ContentType = options?.ContentType,
+            CacheControl = options?.CacheControl,
+            OpcMeta = options?.Metadata is null
+                ? null
+                : new Dictionary<string, string>(options.Metadata, StringComparer.OrdinalIgnoreCase)
+        };
+        return Task.FromResult(uploadId);
+    }
+
+    public async Task<string> UploadPartAsync(string objectName, string uploadId, int partNumber, Stream body, long contentLength, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_store.Uploads.TryGetValue(uploadId, out var upload))
+            throw new InvalidOperationException($"No multipart upload with id \"{uploadId}\".");
+        if (!string.Equals(upload.ObjectName, objectName, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Upload \"{uploadId}\" is for object \"{upload.ObjectName}\", not \"{objectName}\".");
+
+        using var ms = new MemoryStream();
+        await body.CopyToAsync(ms, 81920, cancellationToken).ConfigureAwait(false);
+        var bytes = ms.ToArray();
+        if (contentLength >= 0 && bytes.LongLength > contentLength)
+            bytes = bytes.Take(checked((int)contentLength)).ToArray();
+
+        var etag = $"\"etag-{uploadId}-{partNumber}\"";
+        upload.Parts[partNumber] = new InMemoryOciUploadedPart { Body = bytes, ETag = etag };
+        return etag;
+    }
+
+    public Task CommitMultipartUploadAsync(string objectName, string uploadId, IReadOnlyList<OciCompletedPart> parts, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_store.Uploads.TryRemove(uploadId, out var upload))
+            throw new InvalidOperationException($"No multipart upload with id \"{uploadId}\".");
+        if (!string.Equals(upload.ObjectName, objectName, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Upload \"{uploadId}\" is for object \"{upload.ObjectName}\", not \"{objectName}\".");
+
+        using var assembled = new MemoryStream();
+        foreach (var part in parts.OrderBy(p => p.PartNumber))
+        {
+            if (!upload.Parts.TryGetValue(part.PartNumber, out var stored))
+                throw new InvalidOperationException($"Part {part.PartNumber} was never uploaded for \"{uploadId}\".");
+            if (!string.Equals(stored.ETag, part.ETag, StringComparison.Ordinal))
+                throw new InvalidOperationException($"ETag mismatch on part {part.PartNumber} of \"{uploadId}\".");
+            assembled.Write(stored.Body, 0, stored.Body.Length);
+        }
+
+        _store.Objects[objectName] = new InMemoryStoredObject
+        {
+            Body = assembled.ToArray(),
+            ContentType = upload.ContentType,
+            CacheControl = upload.CacheControl,
+            OpcMeta = upload.OpcMeta is null
+                ? null
+                : new Dictionary<string, string>(upload.OpcMeta, StringComparer.OrdinalIgnoreCase),
+            LastModified = DateTime.UtcNow
+        };
+        return Task.CompletedTask;
+    }
+
+    public Task AbortMultipartUploadAsync(string objectName, string uploadId, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        _store.Uploads.TryRemove(uploadId, out _);
+        return Task.CompletedTask;
+    }
+
+    public int ActiveMultipartUploadCount => _store.Uploads.Count;
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -343,6 +449,7 @@ internal sealed class InMemoryOciClient : IOciClient
         {
             _store.Objects.Clear();
             _store.Pars.Clear();
+            _store.Uploads.Clear();
         }
     }
 

@@ -1,4 +1,3 @@
-using System.Linq;
 using FileHub.Ftp.Tests.Fakes;
 
 namespace FileHub.Ftp.Tests;
@@ -27,9 +26,55 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
+    public void CreateFile_MixedSeparators_NormalizesPathToForwardSlash()
+    {
+        // Input mixes both a backslash and a forward slash — the FTP wire
+        // protocol only understands "/", so the driver must normalize before
+        // issuing MKD/STOR. Real nesting must appear, and no node may carry a
+        // literal backslash in its name.
+        var file = Root.CreateFile("a\\b/c\\d.txt");
+
+        Assert.Equal("/a/b/c/d.txt", file.Path);
+        Assert.NotNull(Client.Server.Find("/a/b/c/d.txt"));
+        Assert.Null(Client.Server.Find("/a\\b/c\\d.txt"));
+        Assert.DoesNotContain(Client.Server.Root.Children.Keys, k => k.Contains('\\'));
+    }
+
+    [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesPathToForwardSlash()
+    {
+        var dir = Root.CreateDirectory("x\\y/z");
+
+        Assert.Equal("/x/y/z", dir.Path);
+        Assert.NotNull(Client.Server.Find("/x/y/z"));
+        Assert.DoesNotContain(Client.Server.Root.Children.Keys, k => k.Contains('\\'));
+        Assert.True(Root.TryOpenDirectory("x/y/z", out _));
+    }
+
+    [Fact]
     public void TryOpenFile_ReturnsFalseWhenMissing()
     {
         Assert.False(Root.TryOpenFile("missing.txt", out _));
+    }
+
+    [Fact]
+    public void Exists_DetectsFileAndDirectory_InOneStatCall()
+    {
+        Root.CreateFile("report.txt").SetText("x");
+        Root.CreateDirectory("logs");
+
+        var statsBefore = Client.StatInvocationCount;
+        var fileProbesBefore = Client.FileExistsInvocationCount;
+        var dirProbesBefore = Client.DirectoryExistsInvocationCount;
+
+        Assert.True(Root.Exists("report.txt"));   // file
+        Assert.True(Root.Exists("logs"));         // directory
+        Assert.False(Root.Exists("missing"));     // neither
+
+        // One STAT per probe — no separate file + directory round-trips.
+        Assert.Equal(statsBefore + 3, Client.StatInvocationCount);
+        Assert.Equal(fileProbesBefore, Client.FileExistsInvocationCount);
+        Assert.Equal(dirProbesBefore, Client.DirectoryExistsInvocationCount);
     }
 
     [Fact]
@@ -52,7 +97,7 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void CreateDirectory_NestedOpenIntermediates_CreatesEachSegment()
+    public void CreateDirectory_Nested_CreatesEachSegment()
     {
         var deep = Root.CreateDirectory("a/b/c");
 
@@ -63,10 +108,10 @@ public class FtpDirectoryTests : FtpTestBase
     }
 
     [Fact]
-    public void CreateDirectory_NestedDirect_CreatesInOneRecursiveCall()
+    public void CreateDirectory_Nested_CreatesInOneRecursiveCall()
     {
         using var client = new InMemoryFtpClient();
-        using var hub = FtpFileHub.FromFtpClient(client, "/", DirectoryPathMode.Direct);
+        using var hub = FtpFileHub.FromFtpClient(client, "/");
 
         var deep = hub.Root.CreateDirectory("x/y/z");
 
@@ -182,15 +227,34 @@ public class FtpDirectoryTests : FtpTestBase
         var sub = Root.CreateDirectory("sub");
         sub.CreateFile("inner.txt");
 
-        Root.Delete("sub");
+        Root.Delete("sub", recursive: true);
 
         Assert.Null(Client.Server.Find("/sub"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var sub = Root.CreateDirectory("sub");
+        sub.CreateFile("inner.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => Root.Delete("sub"));
+        Assert.NotNull(Client.Server.Find("/sub"));
     }
 
     [Fact]
     public void Delete_Self_AtRoot_Throws()
     {
         Assert.Throws<NotSupportedException>(() => Root.Delete());
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        Root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => Root.CreateFile("a.txt"));
+        Assert.Equal("keep", Root.OpenFile("a.txt").ReadAllText());
     }
 
     [Fact]

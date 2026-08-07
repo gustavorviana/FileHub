@@ -1,4 +1,3 @@
-using System.Linq;
 using FileHub.AmazonS3.Tests.Fakes;
 
 namespace FileHub.AmazonS3.Tests;
@@ -28,6 +27,35 @@ public class AmazonS3DirectoryTests
 
         Assert.Equal("/a/b/c", deep.Path);
         Assert.True(hub.Root.TryOpenDirectory("a/b/c", out _));
+    }
+
+    [Fact]
+    public void CreateFile_MixedSeparators_NormalizesKeyToForwardSlash()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        // Input mixes both a backslash and a forward slash — S3 keys only
+        // ever use "/", so the driver must normalize before the PUT.
+        hub.Root.CreateFile("a\\b/c\\d.txt").SetText("x");
+
+        Assert.Contains("a/b/c/d.txt", client.Keys);
+        Assert.DoesNotContain(client.Keys, k => k.Contains('\\'));
+        Assert.True(hub.Root.FileExists("a/b/c/d.txt"));
+    }
+
+    [Fact]
+    public void CreateDirectory_MixedSeparators_NormalizesMarkerKeyToForwardSlash()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        var dir = hub.Root.CreateDirectory("x\\y/z");
+
+        Assert.Equal("/x/y/z", dir.Path);
+        Assert.Contains("x/y/z/", client.Keys);
+        Assert.DoesNotContain(client.Keys, k => k.Contains('\\'));
+        Assert.True(hub.Root.TryOpenDirectory("x/y/z", out _));
     }
 
     [Fact]
@@ -64,9 +92,20 @@ public class AmazonS3DirectoryTests
         dir.CreateFile("x.txt").SetText("1");
         dir.CreateDirectory("sub").CreateFile("y.txt").SetText("2");
 
-        dir.Delete();
+        dir.Delete(recursive: true);
 
         Assert.False(hub.Root.TryOpenDirectory("deleteme", out _));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        using var hub = NewHub();
+        var dir = hub.Root.CreateDirectory("deleteme");
+        dir.CreateFile("x.txt").SetText("1");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => dir.Delete());
+        Assert.True(hub.Root.TryOpenDirectory("deleteme", out _));
     }
 
     [Fact]
@@ -84,5 +123,89 @@ public class AmazonS3DirectoryTests
     {
         using var hub = NewHub();
         Assert.Throws<System.NotSupportedException>(() => hub.Root.Delete());
+    }
+
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        using var hub = NewHub();
+        hub.Root.CreateFile("a.txt").SetText("keep");
+
+        Assert.Throws<FileAlreadyExistsException>(() => hub.Root.CreateFile("a.txt"));
+        Assert.Equal("keep", hub.Root.OpenFile("a.txt").ReadAllText());
+    }
+
+    [Fact]
+    public void DeleteIfExists_ExistingFile_NoHeadProbe()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        hub.Root.CreateFile("a.txt").SetBytes(new byte[] { 1 });
+
+        var headBefore = client.HeadInvocationCount;
+        var listBefore = client.ListInvocationCount;
+        var deleteBefore = client.DeleteInvocationCount;
+
+        hub.Root.DeleteIfExists("a.txt");
+
+        // Base impl's FileExists probe (HEAD) is skipped. One LIST is needed to
+        // decide between file-leaf and directory-prefix (S3 DeleteObject is
+        // idempotent — we can't infer "what was it" from a DELETE alone).
+        Assert.Equal(headBefore, client.HeadInvocationCount);
+        Assert.Equal(listBefore + 1, client.ListInvocationCount);
+        Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
+        Assert.False(hub.Root.FileExists("a.txt"));
+    }
+
+    [Fact]
+    public void DeleteIfExists_MissingFile_DoesNotThrow()
+    {
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+
+        // No throw even though target never existed — S3 DeleteObject is
+        // idempotent and DeleteIfExists swallows any residual FileNotFoundException.
+        hub.Root.DeleteIfExists("missing.txt");
+
+        Assert.False(hub.Root.FileExists("missing.txt"));
+    }
+
+    [Fact]
+    public void Delete_DirectoryWithManyChildren_UsesBatchDeleteObjects()
+    {
+        // Regression: dir.Delete() used to issue one DeleteObject per child.
+        // Now it batches up to 1000 keys per DeleteObjects call — 50 children
+        // collapse into 1 round-trip instead of 50.
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        for (int i = 0; i < 50; i++)
+            hub.Root.CreateFile($"bulk/{i:D3}.bin").SetBytes(new byte[] { (byte)i });
+
+        var deleteBefore = client.DeleteInvocationCount;
+        hub.Root.Delete("bulk", recursive: true);
+
+        // 1 batch delete covers all 50 children + the prefix marker.
+        Assert.Equal(deleteBefore + 1, client.DeleteInvocationCount);
+        Assert.Equal(0, hub.Root.GetDirectories().Count(d => d.Name == "bulk"));
+    }
+
+    [Fact]
+    public void Delete_DirectoryName_DeletesAllChildren()
+    {
+        // Regression: before the fix, S3 DeleteObject's idempotency meant the
+        // try/catch FileNotFoundException + directory-fallback was dead code in
+        // production, so dir.Delete("sub") silently no-op'd when "sub" was a
+        // prefix with children. Now the LIST probe runs first.
+        var client = new InMemoryS3Client();
+        using var hub = AmazonS3FileHub.FromS3Client(client);
+        hub.Root.CreateFile("sub/a.txt").SetBytes(new byte[] { 1 });
+        hub.Root.CreateFile("sub/b.txt").SetBytes(new byte[] { 2 });
+        hub.Root.CreateFile("sibling.txt").SetBytes(new byte[] { 3 });
+
+        hub.Root.Delete("sub", recursive: true);
+
+        Assert.False(hub.Root.FileExists("sub/a.txt"));
+        Assert.False(hub.Root.FileExists("sub/b.txt"));
+        Assert.True(hub.Root.FileExists("sibling.txt"));
     }
 }

@@ -6,8 +6,12 @@
 
   <PropertyGroup Label="Package">
     <PackageId>FileHub</PackageId>
-    <Description>Storage abstraction for .NET — one API (IFileHub → FileDirectory → FileEntry) for files and directories, with built-in Local and in-memory drivers.</Description>
+    <Description>Storage abstraction for .NET — one API (IFileHub → DirectoryEntry → FileEntry) for files and directories, with built-in Local and in-memory drivers.</Description>
     <PackageTags>$(PackageTags);local;memory</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
 </Project>

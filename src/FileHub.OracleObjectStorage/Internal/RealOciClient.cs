@@ -1,12 +1,10 @@
+using Oci.ObjectstorageService;
+using Oci.ObjectstorageService.Requests;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
-using Oci.Common.Model;
-using Oci.ObjectstorageService;
-using Oci.ObjectstorageService.Requests;
 using static Oci.ObjectstorageService.Models.Bucket;
 using static Oci.ObjectstorageService.Models.CreatePreauthenticatedRequestDetails;
 
@@ -57,6 +55,7 @@ namespace FileHub.OracleObjectStorage.Internal
                     ContentLength = resp.ContentLength,
                     LastModified = resp.LastModified,
                     ContentType = resp.ContentType,
+                    CacheControl = resp.CacheControl,
                     OpcMeta = resp.OpcMeta != null ? new Dictionary<string, string>(resp.OpcMeta) : null
                 };
             }, cancellationToken).ConfigureAwait(false);
@@ -83,13 +82,7 @@ namespace FileHub.OracleObjectStorage.Internal
             }, cancellationToken).ConfigureAwait(false);
         }
 
-        public Task PutObjectAsync(
-            string objectName,
-            Stream body,
-            long contentLength,
-            string contentType,
-            IReadOnlyDictionary<string, string> opcMeta,
-            CancellationToken cancellationToken = default)
+        public Task PutObjectAsync(string objectName, Stream body, long contentLength, OciWriteOptions options, CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
             return TranslateAsync(objectName, async ct =>
@@ -101,8 +94,9 @@ namespace FileHub.OracleObjectStorage.Internal
                     ObjectName = objectName,
                     PutObjectBody = body,
                     ContentLength = contentLength,
-                    ContentType = contentType,
-                    OpcMeta = CopyMeta(opcMeta)
+                    ContentType = options?.ContentType,
+                    CacheControl = options?.CacheControl,
+                    OpcMeta = CopyMeta(options?.Metadata)
                 };
                 await _client.PutObject(request, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
             }, cancellationToken);
@@ -140,7 +134,7 @@ namespace FileHub.OracleObjectStorage.Internal
             }, cancellationToken);
         }
 
-        public Task CopyObjectAsync(
+        public async Task<IOciWorkRequestHandle> CopyObjectAsync(
             string sourceObjectName,
             string destinationNamespace,
             string destinationBucket,
@@ -149,9 +143,9 @@ namespace FileHub.OracleObjectStorage.Internal
             CancellationToken cancellationToken = default)
         {
             ThrowIfDisposed();
-            return TranslateAsync(sourceObjectName, async ct =>
+            return await TranslateAsync(sourceObjectName, async ct =>
             {
-                await _client.CopyObject(new CopyObjectRequest
+                var resp = await _client.CopyObject(new CopyObjectRequest
                 {
                     NamespaceName = Namespace,
                     BucketName = Bucket,
@@ -164,7 +158,9 @@ namespace FileHub.OracleObjectStorage.Internal
                         DestinationObjectName = destinationObjectName
                     }
                 }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
-            }, cancellationToken);
+
+                return new OciWorkRequestHandle(_client, resp.OpcWorkRequestId, Namespace, Bucket, Region);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         public async Task<OciListPage> ListObjectsAsync(string prefix, string delimiter, int? limit, string start, CancellationToken cancellationToken = default)
@@ -227,6 +223,12 @@ namespace FileHub.OracleObjectStorage.Internal
         }
 
         public async Task<string> CreatePreauthenticatedReadRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+            => await CreatePreauthenticatedRequestAsync(objectName, parName, timeExpiresUtc, AccessTypeEnum.ObjectRead, cancellationToken).ConfigureAwait(false);
+
+        public async Task<string> CreatePreauthenticatedWriteRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, CancellationToken cancellationToken = default)
+            => await CreatePreauthenticatedRequestAsync(objectName, parName, timeExpiresUtc, AccessTypeEnum.ObjectWrite, cancellationToken).ConfigureAwait(false);
+
+        private async Task<string> CreatePreauthenticatedRequestAsync(string objectName, string parName, DateTime timeExpiresUtc, AccessTypeEnum accessType, CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             return await TranslateAsync(objectName, async ct =>
@@ -239,12 +241,96 @@ namespace FileHub.OracleObjectStorage.Internal
                     {
                         Name = parName,
                         ObjectName = objectName,
-                        AccessType = AccessTypeEnum.ObjectRead,
+                        AccessType = accessType,
                         TimeExpires = timeExpiresUtc
                     }
                 }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
                 return resp.PreauthenticatedRequest.AccessUri;
             }, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<string> CreateMultipartUploadAsync(string objectName, OciWriteOptions options, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return await TranslateAsync(objectName, async ct =>
+            {
+                var resp = await _client.CreateMultipartUpload(new CreateMultipartUploadRequest
+                {
+                    NamespaceName = Namespace,
+                    BucketName = Bucket,
+                    CreateMultipartUploadDetails = new Oci.ObjectstorageService.Models.CreateMultipartUploadDetails
+                    {
+                        Object = objectName,
+                        ContentType = options?.ContentType,
+                        CacheControl = options?.CacheControl,
+                        Metadata = CopyMeta(options?.Metadata)
+                    }
+                }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
+                return resp.MultipartUpload.UploadId;
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<string> UploadPartAsync(string objectName, string uploadId, int partNumber, Stream body, long contentLength, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return await TranslateAsync(objectName, async ct =>
+            {
+                var resp = await _client.UploadPart(new UploadPartRequest
+                {
+                    NamespaceName = Namespace,
+                    BucketName = Bucket,
+                    ObjectName = objectName,
+                    UploadId = uploadId,
+                    UploadPartNum = partNumber,
+                    UploadPartBody = body,
+                    ContentLength = contentLength
+                }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
+                return resp.ETag;
+            }, cancellationToken).ConfigureAwait(false);
+        }
+
+        public Task CommitMultipartUploadAsync(string objectName, string uploadId, IReadOnlyList<OciCompletedPart> parts, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return TranslateAsync(objectName, async ct =>
+            {
+                var partsToCommit = new List<Oci.ObjectstorageService.Models.CommitMultipartUploadPartDetails>(parts.Count);
+                foreach (var p in parts)
+                {
+                    partsToCommit.Add(new Oci.ObjectstorageService.Models.CommitMultipartUploadPartDetails
+                    {
+                        PartNum = p.PartNumber,
+                        Etag = p.ETag
+                    });
+                }
+
+                await _client.CommitMultipartUpload(new CommitMultipartUploadRequest
+                {
+                    NamespaceName = Namespace,
+                    BucketName = Bucket,
+                    ObjectName = objectName,
+                    UploadId = uploadId,
+                    CommitMultipartUploadDetails = new Oci.ObjectstorageService.Models.CommitMultipartUploadDetails
+                    {
+                        PartsToCommit = partsToCommit
+                    }
+                }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
+            }, cancellationToken);
+        }
+
+        public Task AbortMultipartUploadAsync(string objectName, string uploadId, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return TranslateAsync(objectName, async ct =>
+            {
+                await _client.AbortMultipartUpload(new AbortMultipartUploadRequest
+                {
+                    NamespaceName = Namespace,
+                    BucketName = Bucket,
+                    ObjectName = objectName,
+                    UploadId = uploadId
+                }, retryConfiguration: null, cancellationToken: ct).ConfigureAwait(false);
+            }, cancellationToken);
         }
 
         public void Dispose()
@@ -262,9 +348,9 @@ namespace FileHub.OracleObjectStorage.Internal
             {
                 return await work(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ShouldTranslate(ex))
+            catch (Exception ex) when (OciExceptionTranslator.ShouldTranslate(ex))
             {
-                throw Translate(ex, contextObject);
+                throw OciExceptionTranslator.TranslateObject(ex, contextObject, Bucket, Namespace);
             }
         }
 
@@ -274,72 +360,20 @@ namespace FileHub.OracleObjectStorage.Internal
             {
                 await work(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception ex) when (ShouldTranslate(ex))
+            catch (Exception ex) when (OciExceptionTranslator.ShouldTranslate(ex))
             {
-                throw Translate(ex, contextObject);
+                throw OciExceptionTranslator.TranslateObject(ex, contextObject, Bucket, Namespace);
             }
-        }
-
-        private static bool ShouldTranslate(Exception ex)
-        {
-            // Let cancellation and programmer errors bubble through untouched;
-            // translate everything else at the SDK boundary so no OCI type
-            // leaks out of this class.
-            return !(ex is OperationCanceledException)
-                && !(ex is ArgumentException)
-                && !(ex is ObjectDisposedException);
-        }
-
-        private Exception Translate(Exception raw, string contextObject)
-        {
-            var oe = raw as OciException;
-            var status = oe?.StatusCode;
-            var serviceCode = oe?.ServiceCode;
-            var opcRequestId = oe?.OpcRequestId;
-
-            if (status == HttpStatusCode.NotFound
-                || string.Equals(serviceCode, "BucketNotFound", StringComparison.Ordinal)
-                || string.Equals(serviceCode, "NamespaceNotFound", StringComparison.Ordinal)
-                || string.Equals(serviceCode, "ObjectNotFound", StringComparison.Ordinal)
-                || MessageIndicatesNotFound(raw.Message))
-                return new FileNotFoundException(
-                    $"Object \"{contextObject}\" not found in bucket \"{Bucket}\" (namespace \"{Namespace}\").",
-                    raw);
-
-            if (status == HttpStatusCode.Unauthorized
-                || status == HttpStatusCode.Forbidden
-                || string.Equals(serviceCode, "NotAuthenticated", StringComparison.Ordinal)
-                || string.Equals(serviceCode, "NotAuthorized", StringComparison.Ordinal)
-                || string.Equals(serviceCode, "NotAuthorizedOrNotFound", StringComparison.Ordinal)
-                || string.Equals(serviceCode, "SignatureDoesNotMatch", StringComparison.Ordinal))
-                return new UnauthorizedAccessException(
-                    $"Access denied for \"{contextObject}\" in bucket \"{Bucket}\": {raw.Message}",
-                    raw);
-
-            var requestIdSuffix = string.IsNullOrEmpty(opcRequestId) ? "" : $" (opc-request-id={opcRequestId})";
-            var codeSuffix = string.IsNullOrEmpty(serviceCode) ? "" : $"[{serviceCode}] ";
-            return new OciDriverException(
-                $"OCI request failed for \"{contextObject}\" in bucket \"{Bucket}\": {codeSuffix}{raw.Message}{requestIdSuffix}",
-                status,
-                serviceCode,
-                opcRequestId,
-                raw);
         }
 
         private static Dictionary<string, string> CopyMeta(IReadOnlyDictionary<string, string> source)
         {
             if (source == null) return null;
+            // Normalize null values to empty strings — OCI headers reject null
+            // and the SDK serialization behavior is undefined for null values.
             var copy = new Dictionary<string, string>(source.Count);
-            foreach (var kvp in source) copy[kvp.Key] = kvp.Value;
+            foreach (var kvp in source) copy[kvp.Key] = kvp.Value ?? string.Empty;
             return copy;
-        }
-
-        private static bool MessageIndicatesNotFound(string message)
-        {
-            if (string.IsNullOrEmpty(message)) return false;
-            return message.IndexOf("was not found", StringComparison.OrdinalIgnoreCase) >= 0
-                || message.IndexOf("does not exist in the namespace", StringComparison.OrdinalIgnoreCase) >= 0
-                || message.IndexOf("Not Found", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         private void ThrowIfDisposed()

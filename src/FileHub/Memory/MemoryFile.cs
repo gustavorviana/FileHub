@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FileHub.Memory
 {
@@ -8,11 +10,12 @@ namespace FileHub.Memory
         internal MemoryFileData Data { get; }
         private readonly MemoryDirectory _parent;
 
+        // Driver-neutral "/" separator — see MemoryDirectory's Path note.
         public override string Path => _parent != null
-            ? System.IO.Path.Combine(_parent.Path, Name)
+            ? PathUtil.JoinDisplay(_parent.Path, Name)
             : Name;
 
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override long Length => Data.Stream.Length;
         public override DateTime CreationTimeUtc => Data.CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => Data.LastWriteTimeUtc;
@@ -46,9 +49,12 @@ namespace FileHub.Memory
             }
         }
 
-        public override Stream GetWriteStream()
+        // StreamPreference is ignored: the payload lives in process memory either
+        // way, so there is no single-request vs multipart distinction.
+        public override Stream GetWriteStream(FileWriteOptions options = null)
         {
             ThrowIfReadOnly();
+            Data.ApplyOptions(options);
             Data.AcquireWrite();
             try
             {
@@ -66,7 +72,14 @@ namespace FileHub.Memory
         public override FileEntry Rename(string newName)
         {
             ThrowIfReadOnly();
+            NestedPath.EnsureLeaf(newName);
+
             ValidateName(newName);
+
+            // Rename never overwrites — a name already taken is an error.
+            if (_parent != null && _parent.Exists(newName))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
+
             _parent?.RemoveFile(Name);
             Name = newName;
             Data.Name = newName;
@@ -74,12 +87,100 @@ namespace FileHub.Memory
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
-            var newFile = CopyTo(directory, name);
-            Delete();
+
+            // A separator means the tail is the real name and the rest is a path —
+            // resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                    return MoveTo(directory.CreateDirectory(subPath), leaf, progress, overwrite);
+                name = leaf;
+            }
+
+            // Same-store move: re-link the backing data instead of cloning the
+            // bytes. The payload is a process object, so handing over the
+            // reference is O(1) regardless of file size (works across Memory hubs).
+            if (directory is MemoryDirectory memDir)
+            {
+                ValidateName(name);
+                // Same directory instance + same name means moving onto itself.
+                if (ReferenceEquals(memDir, _parent) && string.Equals(name, Name, StringComparison.OrdinalIgnoreCase))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", Path);
+                if (!overwrite && memDir.Exists(name))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(memDir.Path, name));
+
+                var length = Length;
+                _parent?.RemoveFile(Name);
+                Data.Name = name;
+                memDir.AddFile(Data);
+                progress?.Report(new TransferStatus(length, length));
+                return new MemoryFile(memDir, Data);
+            }
+
+            // Cross-driver: copy the bytes, then delete the source, guarding the
+            // delete so a post-copy failure surfaces as a partial move.
+            var newFile = CopyTo(directory, name, progress, overwrite);
+            try
+            {
+                Delete();
+            }
+            catch (FileNotFoundException)
+            {
+                // Source already gone — move is effectively complete.
+            }
+            catch (Exception ex)
+            {
+                throw new PartialMoveException(
+                    $"File was copied to \"{newFile.Path}\" but the original at \"{Path}\" could not be deleted. " +
+                    "The move is partial — remove the source manually.",
+                    sourcePath: Path,
+                    destinationPath: newFile.Path,
+                    innerException: ex);
+            }
             return newFile;
+        }
+
+        public override Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(MoveTo(directory, name, progress, overwrite));
+        }
+
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        {
+            ThrowIfCopyOntoSelf(directory, name);
+            return base.CopyTo(directory, name, progress, overwrite);
+        }
+
+        public override Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        {
+            ThrowIfCopyOntoSelf(directory, name);
+            return base.CopyToAsync(directory, name, progress, overwrite, cancellationToken);
+        }
+
+        // Same directory instance + same leaf name resolves to this very file —
+        // a copy onto itself. A separator means a nested target, never self.
+        private void ThrowIfCopyOntoSelf(DirectoryEntry directory, string name)
+        {
+            if (directory is MemoryDirectory memDir
+                && ReferenceEquals(memDir, _parent)
+                && !NestedPath.HasSeparator(name)
+                && string.Equals(name, Name, StringComparison.OrdinalIgnoreCase))
+                throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
+        }
+
+        // === FileWriteOptions / metadata support ===
+
+        public override Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new FileMetadata(
+                contentType: Data.ContentType,
+                cacheControl: Data.CacheControl,
+                tags: Data.Metadata));
         }
     }
 }

@@ -34,13 +34,19 @@ namespace FileHub.AmazonS3.Internal
             string key,
             Stream body,
             long contentLength,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default);
 
         Task DeleteObjectAsync(string key, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Batch-delete up to 1000 keys in a single <c>DeleteObjects</c> call.
+        /// Cuts the per-key round-trip cost on large prefix wipes. Returns the
+        /// per-key errors S3 reports (empty list = full success). Throws only
+        /// when the request itself fails (network / IAM on the call), not
+        /// when individual keys can't be deleted.
+        /// </summary>
+        Task<IReadOnlyList<S3DeleteError>> DeleteObjectsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Copies an object FROM <paramref name="sourceBucket"/> TO this
@@ -52,22 +58,17 @@ namespace FileHub.AmazonS3.Internal
         /// </summary>
         /// <summary>
         /// When <paramref name="metadataReplace"/> is <c>true</c> the
-        /// destination object takes the supplied
-        /// <paramref name="contentType"/>/<paramref name="userMetadata"/>/
-        /// <paramref name="storageClass"/>/<paramref name="serverSideEncryption"/>
+        /// destination object takes the supplied <paramref name="options"/>
         /// via <c>MetadataDirective = REPLACE</c>. When <c>false</c>, the
         /// SDK default (<c>COPY</c>) applies and the destination inherits
-        /// the source's metadata; the four fields are ignored.
+        /// the source's metadata; <paramref name="options"/> is ignored.
         /// </summary>
         Task CopyFromBucketAsync(
             string sourceBucket,
             string sourceKey,
             string destinationKey,
             bool metadataReplace,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default);
 
         /// <summary>
@@ -82,12 +83,24 @@ namespace FileHub.AmazonS3.Internal
 
         Task<string> GetPreSignedUrlAsync(string key, DateTime timeExpiresUtc, CancellationToken cancellationToken = default);
 
+        /// <summary>
+        /// Pre-signed URL the caller can <c>PUT</c> bytes to directly. When
+        /// <paramref name="options"/> is non-null the populated fields
+        /// (<c>ContentType</c>/<c>CacheControl</c>/user-metadata/
+        /// <c>StorageClass</c>/<c>ServerSideEncryption</c>) are baked into the
+        /// signature; the caller MUST send the matching headers or S3 rejects
+        /// with <c>SignatureDoesNotMatch</c>. Null = no header restrictions,
+        /// client picks anything.
+        /// </summary>
+        Task<string> GetPreSignedUploadUrlAsync(
+            string key,
+            DateTime timeExpiresUtc,
+            S3WriteOptions options,
+            CancellationToken cancellationToken = default);
+
         Task<string> BeginMultipartUploadAsync(
             string key,
-            string contentType,
-            IReadOnlyDictionary<string, string> userMetadata,
-            string storageClass,
-            string serverSideEncryption,
+            S3WriteOptions options,
             CancellationToken cancellationToken = default);
 
         /// <summary>Uploads one part. Returns the ETag returned by the store.</summary>
@@ -105,6 +118,7 @@ namespace FileHub.AmazonS3.Internal
         public long? ContentLength { get; set; }
         public DateTime? LastModified { get; set; }
         public string ContentType { get; set; }
+        public string CacheControl { get; set; }
         public Dictionary<string, string> UserMetadata { get; set; }
         public string StorageClass { get; set; }
         public string ServerSideEncryption { get; set; }
@@ -138,5 +152,12 @@ namespace FileHub.AmazonS3.Internal
     {
         public int PartNumber { get; set; }
         public string ETag { get; set; }
+    }
+
+    internal sealed class S3DeleteError
+    {
+        public string Key { get; set; }
+        public string Code { get; set; }
+        public string Message { get; set; }
     }
 }

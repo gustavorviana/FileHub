@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using FileHub.OracleObjectStorage.Internal;
+using System.Collections.Concurrent;
 
 namespace FileHub.OracleObjectStorage.Tests.Fakes;
 
@@ -35,13 +35,34 @@ internal sealed class InMemoryBucketStore
     public ConcurrentDictionary<string, InMemoryOciClient.ParRecord> Pars { get; }
         = new(System.StringComparer.Ordinal);
 
+    public ConcurrentDictionary<string, InMemoryOciMultipartUpload> Uploads { get; }
+        = new(System.StringComparer.Ordinal);
+
     public OciBucketAccessType BucketAccess { get; set; } = OciBucketAccessType.NoPublicAccess;
+}
+
+internal sealed class InMemoryOciMultipartUpload
+{
+    public string UploadId { get; set; } = "";
+    public string ObjectName { get; set; } = "";
+    public string? ContentType { get; set; }
+    public string? CacheControl { get; set; }
+    public System.Collections.Generic.Dictionary<string, string>? OpcMeta { get; set; }
+    public ConcurrentDictionary<int, InMemoryOciUploadedPart> Parts { get; }
+        = new();
+}
+
+internal sealed class InMemoryOciUploadedPart
+{
+    public byte[] Body { get; set; } = System.Array.Empty<byte>();
+    public string ETag { get; set; } = "";
 }
 
 internal sealed class InMemoryStoredObject
 {
     public byte[] Body { get; set; } = System.Array.Empty<byte>();
     public string? ContentType { get; set; }
+    public string? CacheControl { get; set; }
     public System.Collections.Generic.Dictionary<string, string>? OpcMeta { get; set; }
     public System.DateTime LastModified { get; set; }
 }

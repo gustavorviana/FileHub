@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.Ftp.Internal;
 
 namespace FileHub.Ftp.Tests.Fakes;
@@ -33,10 +27,23 @@ internal sealed class InMemoryFtpClient : IFtpClient
     private bool _disposed;
     private bool _connected;
     private int _connectInvocationCount;
+    private int _statInvocationCount;
+    private int _fileExistsInvocationCount;
+    private int _directoryExistsInvocationCount;
 
     public object ConnectionScope => _server;
 
+    /// <summary>
+    /// Test hook: when set and it returns a non-null exception for a given path,
+    /// <see cref="DeleteFileAsync"/> throws it instead of removing the file.
+    /// Used to exercise the partial-move path (copy succeeds, delete fails).
+    /// </summary>
+    public Func<string, Exception?>? DeleteFailureInjector { get; set; }
+
     public int ConnectInvocationCount => _connectInvocationCount;
+    public int StatInvocationCount => _statInvocationCount;
+    public int FileExistsInvocationCount => _fileExistsInvocationCount;
+    public int DirectoryExistsInvocationCount => _directoryExistsInvocationCount;
     public bool IsConnected => _connected;
 
     public InMemoryFtpClient()
@@ -66,6 +73,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<FtpItemInfo> StatAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _statInvocationCount);
         var node = _server.Find(path);
         if (node == null) return Task.FromResult<FtpItemInfo?>(null)!;
         return Task.FromResult<FtpItemInfo?>(node.ToInfo(path))!;
@@ -74,6 +82,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<bool> FileExistsAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _fileExistsInvocationCount);
         var node = _server.Find(path);
         return Task.FromResult(node is { IsDirectory: false });
     }
@@ -81,6 +90,7 @@ internal sealed class InMemoryFtpClient : IFtpClient
     public Task<bool> DirectoryExistsAsync(string path, CancellationToken cancellationToken = default)
     {
         ThrowIfReady(cancellationToken);
+        Interlocked.Increment(ref _directoryExistsInvocationCount);
         if (path == "/") return Task.FromResult(true);
         var node = _server.Find(path);
         return Task.FromResult(node is { IsDirectory: true });
@@ -124,6 +134,10 @@ internal sealed class InMemoryFtpClient : IFtpClient
         var name = LeafName(path);
         if (parent == null || !parent.Children.TryGetValue(name, out var node) || node.IsDirectory)
             throw new FileNotFoundException($"FTP file \"{path}\" was not found.");
+
+        var injected = DeleteFailureInjector?.Invoke(path);
+        if (injected is not null)
+            throw injected;
 
         parent.Children.Remove(name);
         return Task.CompletedTask;

@@ -4,21 +4,6 @@ using System.Threading.Tasks;
 
 namespace FileHub.AmazonS3.Internal
 {
-    /// <summary>
-    /// Per-FileHub shared state. Owns the <see cref="IS3Client"/> and
-    /// memoizes the "is bucket public" probe so every file in the tree
-    /// answers <c>IsPublic</c> without round-tripping to S3 after the
-    /// first call.
-    /// </summary>
-    internal interface IS3Session : IDisposable
-    {
-        IS3Client Client { get; }
-
-        bool GetIsPublic();
-
-        Task<bool> GetIsPublicAsync(CancellationToken cancellationToken = default);
-    }
-
     internal static class S3SessionTarget
     {
         /// <summary>
@@ -44,10 +29,12 @@ namespace FileHub.AmazonS3.Internal
         private bool _disposed;
 
         public IS3Client Client { get; }
+        public MultipartStreamOptions Multipart { get; }
 
-        public S3Session(IS3Client client)
+        public S3Session(IS3Client client, MultipartStreamOptions multipart)
         {
             Client = client ?? throw new ArgumentNullException(nameof(client));
+            Multipart = multipart ?? throw new ArgumentNullException(nameof(multipart));
         }
 
         public bool GetIsPublic() => SyncBridge.Run(ct => GetIsPublicAsync(ct));

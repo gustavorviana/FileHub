@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using FileHub.AmazonS3.Internal;
 
 namespace FileHub.AmazonS3.Tests.Fakes;
@@ -33,6 +27,8 @@ internal sealed class InMemoryS3Client : IS3Client
     private int _copyInvocationCount;
     private int _headInvocationCount;
     private int _putInvocationCount;
+    private int _deleteInvocationCount;
+    private int _listInvocationCount;
     private long _uploadCounter;
 
     public string Bucket { get; }
@@ -43,6 +39,8 @@ internal sealed class InMemoryS3Client : IS3Client
     public int CopyInvocationCount => _copyInvocationCount;
     public int HeadInvocationCount => _headInvocationCount;
     public int PutInvocationCount => _putInvocationCount;
+    public int DeleteInvocationCount => _deleteInvocationCount;
+    public int ListInvocationCount => _listInvocationCount;
 
     public Func<string, Exception?>? DeleteFailureInjector { get; set; }
 
@@ -96,6 +94,7 @@ internal sealed class InMemoryS3Client : IS3Client
             ContentLength = obj.Body.LongLength,
             LastModified = obj.LastModified,
             ContentType = obj.ContentType,
+            CacheControl = obj.CacheControl,
             UserMetadata = obj.UserMetadata is null
                 ? null
                 : new Dictionary<string, string>(obj.UserMetadata, StringComparer.OrdinalIgnoreCase),
@@ -135,10 +134,7 @@ internal sealed class InMemoryS3Client : IS3Client
         string key,
         Stream body,
         long contentLength,
-        string contentType,
-        IReadOnlyDictionary<string, string> userMetadata,
-        string storageClass,
-        string serverSideEncryption,
+        S3WriteOptions options,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -163,13 +159,14 @@ internal sealed class InMemoryS3Client : IS3Client
         _store.Objects[key] = new InMemoryS3StoredObject
         {
             Body = bytes,
-            ContentType = contentType,
-            UserMetadata = userMetadata is null
+            ContentType = options?.ContentType,
+            CacheControl = options?.CacheControl,
+            UserMetadata = options?.Metadata is null
                 ? null
-                : new Dictionary<string, string>(userMetadata, StringComparer.OrdinalIgnoreCase),
+                : new Dictionary<string, string>(options.Metadata, StringComparer.OrdinalIgnoreCase),
             LastModified = DateTime.UtcNow,
-            StorageClass = storageClass,
-            ServerSideEncryption = serverSideEncryption
+            StorageClass = options?.StorageClass,
+            ServerSideEncryption = options?.ServerSideEncryption
         };
     }
 
@@ -177,12 +174,42 @@ internal sealed class InMemoryS3Client : IS3Client
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _deleteInvocationCount);
         var injected = DeleteFailureInjector?.Invoke(key);
         if (injected is not null)
             throw injected;
-        if (!_store.Objects.TryRemove(key, out _))
-            throw new FileNotFoundException($"Object \"{key}\" not found.");
+        _store.Objects.TryRemove(key, out _);
         return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<S3DeleteError>> DeleteObjectsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (keys == null) throw new ArgumentNullException(nameof(keys));
+        if (keys.Count > 1000)
+            throw new ArgumentException("S3 DeleteObjects accepts at most 1000 keys per call.", nameof(keys));
+        Interlocked.Increment(ref _deleteInvocationCount);
+        if (keys.Count == 0) return Task.FromResult<IReadOnlyList<S3DeleteError>>(Array.Empty<S3DeleteError>());
+
+        List<S3DeleteError>? errors = null;
+        foreach (var key in keys)
+        {
+            var injected = DeleteFailureInjector?.Invoke(key);
+            if (injected is not null)
+            {
+                (errors ??= new List<S3DeleteError>()).Add(new S3DeleteError
+                {
+                    Key = key,
+                    Code = "InjectedError",
+                    Message = injected.Message
+                });
+                continue;
+            }
+            _store.Objects.TryRemove(key, out _);
+        }
+        return Task.FromResult<IReadOnlyList<S3DeleteError>>(
+            errors ?? (IReadOnlyList<S3DeleteError>)Array.Empty<S3DeleteError>());
     }
 
     public Task CopyFromBucketAsync(
@@ -190,10 +217,7 @@ internal sealed class InMemoryS3Client : IS3Client
         string sourceKey,
         string destinationKey,
         bool metadataReplace,
-        string contentType,
-        IReadOnlyDictionary<string, string> userMetadata,
-        string storageClass,
-        string serverSideEncryption,
+        S3WriteOptions options,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -221,24 +245,26 @@ internal sealed class InMemoryS3Client : IS3Client
             throw new FileNotFoundException($"Object \"{sourceKey}\" not found in bucket \"{sourceBucket}\".");
 
         // MetadataDirective = REPLACE → use supplied fields; otherwise inherit from source.
-        var destContentType = metadataReplace ? contentType : obj.ContentType;
-        Dictionary<string, string> destMeta;
+        var destContentType = metadataReplace ? options?.ContentType : obj.ContentType;
+        Dictionary<string, string>? destMeta;
         if (metadataReplace)
         {
-            destMeta = userMetadata is null
+            var metaSrc = options?.Metadata;
+            destMeta = metaSrc is null
                 ? null
-                : new Dictionary<string, string>(userMetadata, StringComparer.OrdinalIgnoreCase);
+                : new Dictionary<string, string>(metaSrc, StringComparer.OrdinalIgnoreCase);
         }
         else
         {
-            destMeta = obj.UserMetadata is null
+            var metaSrc = obj.UserMetadata;
+            destMeta = metaSrc is null
                 ? null
-                : new Dictionary<string, string>(obj.UserMetadata, StringComparer.OrdinalIgnoreCase);
+                : new Dictionary<string, string>(metaSrc, StringComparer.OrdinalIgnoreCase);
         }
         // StorageClass / SSE are independent of MetadataDirective in real S3.
         // If caller specified values, use them; otherwise inherit from source.
-        var destStorage = string.IsNullOrEmpty(storageClass) ? obj.StorageClass : storageClass;
-        var destSse = string.IsNullOrEmpty(serverSideEncryption) ? obj.ServerSideEncryption : serverSideEncryption;
+        var destStorage = string.IsNullOrEmpty(options?.StorageClass) ? obj.StorageClass : options?.StorageClass;
+        var destSse = string.IsNullOrEmpty(options?.ServerSideEncryption) ? obj.ServerSideEncryption : options?.ServerSideEncryption;
 
         _store.Objects[destinationKey] = new InMemoryS3StoredObject
         {
@@ -256,6 +282,7 @@ internal sealed class InMemoryS3Client : IS3Client
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _listInvocationCount);
 
         prefix ??= string.Empty;
         // Mirrors S3: StartAfter is exclusive and only honored on page 1.
@@ -323,12 +350,37 @@ internal sealed class InMemoryS3Client : IS3Client
         return Task.FromResult($"https://{Bucket}.s3.{Region}.amazonaws.com/{encoded}?X-Amz-Expires={expires}&X-Amz-Signature=test");
     }
 
+    public Task<string> GetPreSignedUploadUrlAsync(
+        string key,
+        DateTime timeExpiresUtc,
+        S3WriteOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        var encoded = Uri.EscapeDataString(key).Replace("%2F", "/");
+        var expires = ((DateTimeOffset)timeExpiresUtc).ToUnixTimeSeconds();
+        // Reflect the signed-headers contract in the dummy URL so tests can assert.
+        var sb = new System.Text.StringBuilder($"https://{Bucket}.s3.{Region}.amazonaws.com/{encoded}?X-Amz-Expires={expires}&X-Amz-Method=PUT");
+        if (options != null)
+        {
+            if (!string.IsNullOrEmpty(options.ContentType)) sb.Append("&X-Amz-SignedHeader-ContentType=").Append(Uri.EscapeDataString(options.ContentType));
+            if (!string.IsNullOrEmpty(options.CacheControl)) sb.Append("&X-Amz-SignedHeader-CacheControl=").Append(Uri.EscapeDataString(options.CacheControl));
+            if (!string.IsNullOrEmpty(options.StorageClass)) sb.Append("&X-Amz-SignedHeader-StorageClass=").Append(Uri.EscapeDataString(options.StorageClass));
+            if (!string.IsNullOrEmpty(options.ServerSideEncryption)) sb.Append("&X-Amz-SignedHeader-SSE=").Append(Uri.EscapeDataString(options.ServerSideEncryption));
+            if (options.Metadata != null)
+            {
+                foreach (var kv in options.Metadata)
+                    sb.Append("&X-Amz-SignedHeader-Meta-").Append(Uri.EscapeDataString(kv.Key)).Append('=').Append(Uri.EscapeDataString(kv.Value ?? string.Empty));
+            }
+        }
+        sb.Append("&X-Amz-Signature=test");
+        return Task.FromResult(sb.ToString());
+    }
+
     public Task<string> BeginMultipartUploadAsync(
         string key,
-        string contentType,
-        IReadOnlyDictionary<string, string> userMetadata,
-        string storageClass,
-        string serverSideEncryption,
+        S3WriteOptions options,
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -338,12 +390,13 @@ internal sealed class InMemoryS3Client : IS3Client
         {
             UploadId = uploadId,
             Key = key,
-            ContentType = contentType,
-            UserMetadata = userMetadata is null
+            ContentType = options?.ContentType,
+            CacheControl = options?.CacheControl,
+            UserMetadata = options?.Metadata is null
                 ? null
-                : new Dictionary<string, string>(userMetadata, StringComparer.OrdinalIgnoreCase),
-            StorageClass = storageClass,
-            ServerSideEncryption = serverSideEncryption
+                : new Dictionary<string, string>(options.Metadata, StringComparer.OrdinalIgnoreCase),
+            StorageClass = options?.StorageClass,
+            ServerSideEncryption = options?.ServerSideEncryption
         };
         return Task.FromResult(uploadId);
     }
@@ -395,6 +448,7 @@ internal sealed class InMemoryS3Client : IS3Client
             Body = ms.ToArray(),
             LastModified = DateTime.UtcNow,
             ContentType = upload.ContentType,
+            CacheControl = upload.CacheControl,
             UserMetadata = upload.UserMetadata is null
                 ? null
                 : new Dictionary<string, string>(upload.UserMetadata, StringComparer.OrdinalIgnoreCase),

@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class MemoryDirectoryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     // === CreateFile ===
 
@@ -24,7 +24,7 @@ public class MemoryDirectoryTests
     {
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
     }
 
     [Fact]
@@ -41,14 +41,23 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
-    public void CreateFile_OverwriteFalse_KeepsFirstDeletedNothing()
+    public void CreateFile_OverwriteFalse_ExistingFile_Throws()
     {
         var root = NewRoot();
         root.CreateFile("x.txt").SetText("hello");
 
-        var again = root.CreateFile("x.txt", overwrite: false);
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("x.txt", overwrite: false));
+        Assert.Equal("hello", root.OpenFile("x.txt").ReadAllText());
+    }
 
-        Assert.Equal("x.txt", again.Name);
+    [Fact]
+    public void CreateFile_SingleArg_ExistingFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("x.txt").SetText("hello");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("x.txt"));
+        Assert.Equal("hello", root.OpenFile("x.txt").ReadAllText());
     }
 
     // === TryOpenFile / OpenFile ===
@@ -125,14 +134,10 @@ public class MemoryDirectoryTests
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
 
-        // ValidateName uses System.IO.Path.GetInvalidFileNameChars(), whose
-        // set varies by OS — pick the first char from that set that isn't a
-        // path separator (those route to nested-directory creation instead).
-        // On Linux the only candidate is NUL ('\0'); on Windows there are
-        // many. The assertion follows the BCL contract per host.
-        var invalid = System.IO.Path.GetInvalidFileNameChars()
-            .First(c => c != '/' && c != '\\');
-        Assert.Throws<ArgumentException>(() => root.CreateDirectory($"bad{invalid}name"));
+        // ValidateName applies the portable rule set (PathUtil): control
+        // characters are rejected on every OS, so the memory driver behaves
+        // the same on Windows and Linux.
+        Assert.Throws<ArgumentException>(() => root.CreateDirectory("bad\tname"));
     }
 
     [Fact]
@@ -430,10 +435,34 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
-    public void Delete_Missing_ThrowsFileNotFound()
+    public void Delete_Missing_IsSilent()
     {
         var root = NewRoot();
-        Assert.Throws<FileNotFoundException>(() => root.Delete("ghost"));
+        root.Delete("ghost");
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryWithoutRecursive_Throws()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        Assert.Throws<DirectoryNotEmptyException>(() => sub.Delete());
+        Assert.Throws<DirectoryNotEmptyException>(() => root.Delete("sub"));
+        Assert.True(root.DirectoryExists("sub"));
+    }
+
+    [Fact]
+    public void Delete_NonEmptyDirectoryRecursive_Removes()
+    {
+        var root = NewRoot();
+        var sub = root.CreateDirectory("sub");
+        sub.CreateFile("a.txt");
+
+        root.Delete("sub", recursive: true);
+
+        Assert.False(root.DirectoryExists("sub"));
     }
 
     [Fact]
@@ -767,6 +796,31 @@ public class MemoryDirectoryTests
     }
 
     [Fact]
+    public void CreateDirectory_MixedSeparators_PathUsesForwardSlashOnly()
+    {
+        var root = NewRoot();
+
+        // Input mixes both a backslash and a forward slash. Memory is a
+        // logical key store, so `.Path` must normalize to "/" regardless of OS
+        // — never echo an OS-native backslash.
+        var leaf = root.CreateDirectory("x\\y/z");
+
+        Assert.Equal($"{root.Path}/x/y/z", leaf.Path);
+        Assert.DoesNotContain('\\', leaf.Path);
+    }
+
+    [Fact]
+    public void CreateFile_MixedSeparators_PathUsesForwardSlashOnly()
+    {
+        var root = NewRoot();
+
+        var file = root.CreateFile("a\\b/c\\d.txt");
+
+        Assert.Equal($"{root.Path}/a/b/c/d.txt", file.Path);
+        Assert.DoesNotContain('\\', file.Path);
+    }
+
+    [Fact]
     public void CreateDirectory_Nested_ReusesExistingIntermediate()
     {
         var root = NewRoot();
@@ -802,5 +856,121 @@ public class MemoryDirectoryTests
         var root = NewRoot();
         Assert.Throws<FileHubException>(() => root.CreateDirectory("../escape"));
         Assert.Throws<FileHubException>(() => root.CreateDirectory("a/../escape"));
+    }
+
+    // === File/directory name collision ===
+
+    [Fact]
+    public void CreateDirectory_NameTakenByFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken"));
+    }
+
+    [Fact]
+    public void CreateDirectory_IntermediateTakenByFile_Throws()
+    {
+        var root = NewRoot();
+        root.CreateFile("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateDirectory("taken/child"));
+    }
+
+    [Fact]
+    public void CreateFile_NameTakenByDirectory_Throws()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("taken");
+
+        Assert.Throws<FileAlreadyExistsException>(() => root.CreateFile("taken"));
+    }
+
+    // === CreateFile(name, bytes, options) ===
+
+    [Fact]
+    public void CreateFile_WithBytesAndOptions_WritesContentAndAppliesMetadata()
+    {
+        var root = NewRoot();
+        var opts = new FileWriteOptions
+        {
+            ContentType = "image/png",
+            CacheControl = "public,max-age=3600",
+            Metadata = new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["uploaded-by"] = "gustavo"
+            }
+        };
+
+        var file = root.CreateFile("img.png", new byte[] { 1, 2, 3, 4 }, opts);
+
+        Assert.Equal(4, file.Length);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, file.ReadAllBytes());
+
+        var md = file.GetMetadata();
+        Assert.Equal("image/png", md.ContentType);
+        Assert.Equal("public,max-age=3600", md.CacheControl);
+        Assert.Equal("gustavo", md.Tags["uploaded-by"]);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task CreateFileAsync_WithBytesAndOptions_WritesContentAndAppliesMetadata()
+    {
+        var root = NewRoot();
+        var opts = new FileWriteOptions { ContentType = "text/plain" };
+
+        var file = await root.CreateFileAsync("a.txt", new byte[] { 0xAA }, opts);
+
+        Assert.Equal(1, file.Length);
+        var md = await file.GetMetadataAsync();
+        Assert.Equal("text/plain", md.ContentType);
+    }
+
+    [Fact]
+    public void CreateFile_BytesNull_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<System.ArgumentNullException>(() => root.CreateFile("x.txt", bytes: null));
+    }
+
+    // === GetDirectories paging ===
+
+    [Fact]
+    public void GetDirectories_IndexOffsetAndLimit_PaginatesSlice()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("a");
+        root.CreateDirectory("b");
+        root.CreateDirectory("c");
+        root.CreateDirectory("d");
+
+        var page = root.GetDirectories("*", offset: FileListOffset.FromIndex(1), limit: 2).ToArray();
+        Assert.Equal(2, page.Length);
+    }
+
+    [Fact]
+    public void GetDirectories_NamedOffset_StartsFromCursorInclusive()
+    {
+        var root = NewRoot();
+        root.CreateDirectory("a");
+        root.CreateDirectory("b");
+        root.CreateDirectory("c");
+        root.CreateDirectory("d");
+
+        var names = root.GetDirectories("*", offset: FileListOffset.FromName("c"))
+            .Select(d => d.Name)
+            .OrderBy(n => n)
+            .ToArray();
+
+        Assert.Equal(new[] { "c", "d" }, names);
+    }
+
+    [Fact]
+    public void GetDirectories_NegativeLimit_Throws()
+    {
+        var root = NewRoot();
+        Assert.Throws<System.ArgumentOutOfRangeException>(
+            () => root.GetDirectories("*", offset: default, limit: -1).ToArray());
     }
 }

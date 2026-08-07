@@ -1,8 +1,9 @@
+using FileHub.Ftp.Internal;
 using System;
 using System.IO;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.Ftp.Internal;
 
 namespace FileHub.Ftp
 {
@@ -14,7 +15,7 @@ namespace FileHub.Ftp
         private DateTime _lastWriteTimeUtc;
         private FtpStream _lastOpenStream;
 
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override string Path => FtpPathUtil.Combine(_parent.Path, Name);
 
         /// <summary>
@@ -53,7 +54,7 @@ namespace FileHub.Ftp
 
         // === IRefreshable ===
 
-        public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+        public void Refresh() => SyncBridge.Run(RefreshAsync);
 
         public async Task RefreshAsync(CancellationToken cancellationToken = default)
         {
@@ -76,7 +77,7 @@ namespace FileHub.Ftp
 
         // === Existence ===
 
-        public override bool Exists() => ExistsAsync().GetAwaiter().GetResult();
+        public override bool Exists() => SyncBridge.Run(ExistsAsync);
 
         public override async Task<bool> ExistsAsync(CancellationToken cancellationToken = default)
         {
@@ -86,7 +87,7 @@ namespace FileHub.Ftp
 
         // === Streams ===
 
-        public override Stream GetReadStream() => GetReadStreamAsync().GetAwaiter().GetResult();
+        public override Stream GetReadStream() => SyncBridge.Run(GetReadStreamAsync);
 
         public override async Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
@@ -94,9 +95,12 @@ namespace FileHub.Ftp
             return await OpenStreamAsync(isWrite: false, cancellationToken).ConfigureAwait(false);
         }
 
-        public override Stream GetWriteStream() => GetWriteStreamAsync().GetAwaiter().GetResult();
+        // StreamPreference is ignored: FTP writes stream straight over the data
+        // connection, so there is no single-request vs multipart distinction.
+        public override Stream GetWriteStream(FileWriteOptions options = null)
+            => SyncBridge.Run(ct => GetWriteStreamAsync(options, ct));
 
-        public override async Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
+        public override async Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
@@ -141,25 +145,99 @@ namespace FileHub.Ftp
                 _creationTimeUtc = _lastWriteTimeUtc;
         }
 
+        // === Buffered writes: verify-and-retry ===
+
+        // A single FTP data transfer can silently drop its tail when the
+        // passive data channel lands on stale port state (observed as a 256 KiB
+        // upload landing as 192 KiB — exactly one 64 KiB socket block short).
+        // The truncation is non-deterministic and hits any transfer regardless
+        // of the write API (raw STOR or FluentFTP's high-level upload). Because
+        // SetBytes/SetText hold the whole payload in memory, the driver can read
+        // the stored size back and replay the STOR until it matches; the
+        // streaming GetWriteStream path cannot, since its source is consumed
+        // once. Constant memory: the caller's buffer is reused, never copied.
+        private const int MaxUploadAttempts = 4;
+
+        public override void SetBytes(byte[] buffer, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => SetBytesAsync(buffer, options, ct));
+
+        public override void SetText(string content, Encoding encoding = null, FileWriteOptions options = null)
+            => SyncBridge.Run(ct => SetTextAsync(content, encoding, options, ct));
+
+        public override async Task SetTextAsync(string content, Encoding encoding = null, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (content == null) throw new ArgumentNullException(nameof(content));
+            var bytes = (encoding ?? Encoding.UTF8).GetBytes(content);
+            await SetBytesAsync(bytes, options, cancellationToken).ConfigureAwait(false);
+        }
+
+        public override async Task SetBytesAsync(byte[] buffer, FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            cancellationToken.ThrowIfCancellationRequested();
+            await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            // The stream verifies the stored size on close and throws
+            // FtpTransferTruncatedException on a silent tail-truncation. Since
+            // the whole payload is in hand, replay the STOR when that happens.
+            // A retry that succeeds is a met guarantee, so it stays quiet — but
+            // if every attempt still loses the tail the exception is rethrown to
+            // the caller. Truncation is never swallowed: the caller either gets
+            // a fully-committed file or an exception, never a short file.
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    using (var stream = await GetWriteStreamAsync(options, cancellationToken: cancellationToken).ConfigureAwait(false))
+                    {
+                        await stream.WriteAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false);
+                    }
+                    return;
+                }
+                catch (FtpTransferTruncatedException)
+                {
+                    // Transient data-channel tail loss. Replay while attempts
+                    // remain; once they are exhausted, surface the failure.
+                    if (attempt >= MaxUploadAttempts) throw;
+                }
+            }
+        }
+
         // === Mutations ===
 
-        public override void Delete() => DeleteAsync().GetAwaiter().GetResult();
+        public override void Delete() => SyncBridge.Run(DeleteAsync);
 
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
-            await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            
+            try
+            {
+                await SessionInternal.Client.DeleteFileAsync(FullPath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+            }
             _length = -1;
         }
 
-        public override FileEntry Rename(string newName) => RenameAsync(newName).GetAwaiter().GetResult();
+        public override FileEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            FtpPathUtil.ValidateName(newName);
+            NestedPath.EnsureLeaf(newName);
+
+            PathUtil.ValidateName(newName);
             await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            // Rename never overwrites — behaviour on an existing target is
+            // server-dependent, so check first and fail with a clear exception.
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
 
             var destination = FtpPathUtil.ResolveSafeChildPath(_parent.RootPathInternal, _parent.PathInternal, newName);
             await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
@@ -168,24 +246,45 @@ namespace FileHub.Ftp
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
-            => MoveToAsync(directory, name).GetAwaiter().GetResult();
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
 
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
             {
-                FtpPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
                 await SessionInternal.EnsureConnectedAsync(cancellationToken).ConfigureAwait(false);
+                // overwrite: false must not clobber an existing entry — many FTP
+                // servers reject RNTO onto an existing path anyway, but check
+                // explicitly so the failure is a clear FileAlreadyExistsException.
+                if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ftpDir.Path, name));
                 var destination = FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name);
+                // Same connection + same resolved path means moving onto itself.
+                if (string.Equals(destination, FullPath, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", Path);
                 await SessionInternal.Client.RenameAsync(FullPath, destination, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new TransferStatus(_length, _length));
                 return new FtpFile(ftpDir, name, _length, _lastWriteTimeUtc, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -206,11 +305,69 @@ namespace FileHub.Ftp
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name)
-            => CopyToAsync(directory, name).GetAwaiter().GetResult();
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        // CopyTo intentionally falls back to the base implementation (stream copy).
-        // FTP has no server-side copy command, even within the same connection.
+        /// <summary>
+        /// FTP has no server-side copy command. When source and destination
+        /// share the same connection, the copy is spilled through a temporary
+        /// file on local disk and runs strictly sequentially (download fully,
+        /// close the data channel, then upload) — a single FTP connection
+        /// supports only one data transfer at a time, so the base
+        /// stream-to-stream copy would require two simultaneous data channels.
+        /// Both legs stream in chunks; memory usage is constant regardless of
+        /// file size. Cross-connection copies still stream directly.
+        /// </summary>
+        public override async Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
+            if (directory is FtpDirectory ftpDir
+                && FtpSessionTarget.SameConnection(ftpDir.SessionInternal.Client, SessionInternal.Client))
+            {
+                PathUtil.ValidateName(name);
+                // Same connection + same resolved path means copying onto itself.
+                if (string.Equals(FtpPathUtil.ResolveSafeChildPath(ftpDir.RootPathInternal, ftpDir.PathInternal, name), FullPath, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
+                // overwrite: false must not clobber the destination — the upload
+                // below (STOR) would replace it. Check before spilling to temp.
+                if (!overwrite && await ftpDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ftpDir.Path, name));
+                var tempPath = System.IO.Path.GetTempFileName();
+                try
+                {
+                    using (var temp = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+                    {
+                        await CopyToStreamAsync(temp, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var newFile = await ftpDir.CreateFileAsync(name, cancellationToken).ConfigureAwait(false);
+                    using (var temp = new FileStream(tempPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+                    {
+                        // Meter progress on the upload leg — it's the transfer the
+                        // caller waits on; the download-to-temp leg is local disk.
+                        await newFile.CopyFromStreamAsync(temp, progress: progress, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    }
+                    return newFile;
+                }
+                finally
+                {
+                    try { File.Delete(tempPath); } catch { /* best effort — temp dir cleanup */ }
+                }
+            }
+
+            return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
+        }
 
         public override void Dispose()
         {

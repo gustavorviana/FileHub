@@ -1,4 +1,3 @@
-using System;
 using FileHub.OracleObjectStorage.Internal;
 using FileHub.OracleObjectStorage.Tests.Fakes;
 

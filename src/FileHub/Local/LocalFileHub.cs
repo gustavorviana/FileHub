@@ -5,15 +5,12 @@ namespace FileHub.Local
 {
     public class LocalFileHub : ILocalFileHub
     {
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         public LocalFileHub(string rootPath)
-            : this(rootPath, DirectoryPathMode.OpenIntermediates) { }
-
-        public LocalFileHub(string rootPath, DirectoryPathMode pathMode)
         {
             var resolved = ResolvePath(rootPath);
-            Root = new LocalDirectory(resolved, rootPath: resolved, parent: null, pathMode: pathMode);
+            Root = new LocalDirectory(resolved, rootPath: resolved, parent: null);
         }
 
         private static string ResolvePath(string path)

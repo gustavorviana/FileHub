@@ -1,15 +1,14 @@
 using System;
-using System.Collections.Concurrent;
-using System.Linq;
-using System.Text.RegularExpressions;
 
 namespace FileHub.Ftp
 {
+    /// <summary>
+    /// Helpers specific to the FTP path model (absolute forward-slash paths).
+    /// Name validation, glob matching and leaf extraction live in
+    /// <see cref="PathUtil"/>, shared with every other driver.
+    /// </summary>
     internal static class FtpPathUtil
     {
-        private static readonly ConcurrentDictionary<string, Regex> _regexCache =
-            new ConcurrentDictionary<string, Regex>(StringComparer.Ordinal);
-
         /// <summary>
         /// Normalises a caller-supplied root path to the FTP convention used
         /// internally: an absolute, forward-slash path with no trailing slash
@@ -39,14 +38,6 @@ namespace FileHub.Ftp
             return parent + "/" + child;
         }
 
-        public static string GetLeafName(string path)
-        {
-            if (string.IsNullOrEmpty(path) || path == "/") return string.Empty;
-            var trimmed = path.TrimEnd('/');
-            var idx = trimmed.LastIndexOf('/');
-            return idx < 0 ? trimmed : trimmed.Substring(idx + 1);
-        }
-
         public static string GetParent(string path)
         {
             if (string.IsNullOrEmpty(path) || path == "/") return "/";
@@ -54,31 +45,6 @@ namespace FileHub.Ftp
             var idx = trimmed.LastIndexOf('/');
             if (idx <= 0) return "/";
             return trimmed.Substring(0, idx);
-        }
-
-        public static Regex BuildSearchPatternRegex(string pattern)
-        {
-            var key = pattern ?? string.Empty;
-            return _regexCache.GetOrAdd(key, static k =>
-            {
-                if (k.Length == 0 || k == "*" || k == "*.*")
-                    return new Regex("^.*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-                var escaped = Regex.Escape(k).Replace("\\*", ".*").Replace("\\?", ".");
-                return new Regex("^" + escaped + "$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-            });
-        }
-
-        public static void ValidateName(string name)
-        {
-            if (string.IsNullOrEmpty(name))
-                throw new ArgumentException("Name cannot be null or empty.", nameof(name));
-            if (name == "." || name == "..")
-                throw new ArgumentException($"Name \"{name}\" is not allowed.", nameof(name));
-            if (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0)
-                throw new ArgumentException($"Name \"{name}\" must not contain path separators.", nameof(name));
-            if (name.Any(c => char.IsControl(c)))
-                throw new ArgumentException($"Name \"{name}\" contains control characters.", nameof(name));
         }
 
         /// <summary>
@@ -94,8 +60,8 @@ namespace FileHub.Ftp
 
             // Collapse runs of `/` so a path like "/root//../etc" cannot pass
             // the StartsWith check by virtue of the duplicated separator
-            // being treated as an opaque byte. ValidateName already rejects
-            // ".." inside individual segments at the entry points, but
+            // being treated as an opaque byte. PathUtil.ValidateName already
+            // rejects ".." inside individual segments at the entry points, but
             // EnsureWithinRoot is the last line of defence and shouldn't
             // depend on what callers did upstream.
             var collapsed = CollapseSlashes(candidate);
@@ -124,7 +90,7 @@ namespace FileHub.Ftp
 
         public static string ResolveSafeChildPath(string rootPath, string currentPath, string relativeName)
         {
-            ValidateName(relativeName);
+            PathUtil.ValidateName(relativeName);
             var candidate = Combine(currentPath, relativeName);
             EnsureWithinRoot(rootPath, candidate);
             return candidate;

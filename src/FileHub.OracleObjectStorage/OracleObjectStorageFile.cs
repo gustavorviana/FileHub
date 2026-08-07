@@ -1,9 +1,9 @@
+using FileHub.OracleObjectStorage.Internal;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using FileHub.OracleObjectStorage.Internal;
 
 namespace FileHub.OracleObjectStorage
 {
@@ -11,12 +11,22 @@ namespace FileHub.OracleObjectStorage
     {
         internal const string ChangedAtTag = "_changedAt";
 
+        /// <summary>
+        /// Portable minimum multipart capability reported by FileHub. OCI does
+        /// not publish an enforced minimum; actual buffering uses the configured
+        /// <see cref="MultipartStreamOptions.PartSize"/>.
+        /// </summary>
+        internal const long OciMinimumPartSize = 5L * 1024 * 1024;
+
         private readonly OracleObjectStorageDirectory _parent;
         private long _length;
         private DateTime _creationTimeUtc;
-        private Dictionary<string, string> _tags;
+        private DateTime _lastWriteTimeUtc;
+        private FileMetadata _metadata = new FileMetadata();
         private bool _isLoaded;
-        private OciObjectStream _lastOpenStream;
+        private OciFileStreamBase _lastOpenStream;
+
+        internal FileMetadata CachedMetadata => _metadata;
 
         /// <summary>
         /// <c>true</c> once the file's state has been loaded from OCI.
@@ -28,7 +38,7 @@ namespace FileHub.OracleObjectStorage
         /// <summary>Driver-internal: flip <see cref="IsLoaded"/> to <c>true</c> without HEAD.</summary>
         internal void MarkLoaded() => _isLoaded = true;
 
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override string Path => ConcatPath(_parent.Path, Name);
 
         /// <summary>
@@ -44,26 +54,15 @@ namespace FileHub.OracleObjectStorage
         public override DateTime CreationTimeUtc => _creationTimeUtc;
 
         /// <summary>
-        /// Cached last-write timestamp. Reads from the object's
-        /// <see cref="ChangedAtTag"/> metadata when present, otherwise falls
-        /// back to <see cref="CreationTimeUtc"/>. Drivers do not do hidden
-        /// I/O in getters.
+        /// Cached last-write timestamp, derived from the object's
+        /// <see cref="ChangedAtTag"/> metadata at load time, falling back to
+        /// <see cref="CreationTimeUtc"/>. Drivers do not do hidden I/O in getters.
         /// </summary>
-        public override DateTime LastWriteTimeUtc
-        {
-            get
-            {
-                if (_tags != null && _tags.TryGetValue(ChangedAtTag, out var value)
-                    && DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
-                    return parsed;
-                return _creationTimeUtc;
-            }
-        }
+        public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc == default ? _creationTimeUtc : _lastWriteTimeUtc;
 
-        internal string ObjectName => OciPathUtil.CombineObjectName(_parent.PrefixInternal, Name);
+        internal string ObjectName => PathUtil.CombineKey(_parent.PrefixInternal, Name);
         internal IOciSession SessionInternal => _parent.SessionInternal;
         internal long LengthInternal { get => _length; set => _length = value; }
-        internal Dictionary<string, string> TagsInternal => _tags;
 
         internal OracleObjectStorageFile(OracleObjectStorageDirectory parent, string name) : base(name)
         {
@@ -87,12 +86,41 @@ namespace FileHub.OracleObjectStorage
         {
             cancellationToken.ThrowIfCancellationRequested();
             var head = await SessionInternal.Client.HeadObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            LoadFromHead(head);
+        }
+
+        /// <summary>
+        /// Driver-internal: populate the cached snapshot (length, timestamp,
+        /// content type, user metadata) from a HEAD result and flip
+        /// <see cref="IsLoaded"/> to <c>true</c> — without paying a second
+        /// HEAD. Used by the strict open path that already issued one.
+        /// </summary>
+        internal void LoadFromHead(OciHeadResult head)
+        {
             _length = head.ContentLength ?? -1;
             _creationTimeUtc = head.LastModified ?? default;
-            _tags = head.OpcMeta != null
-                ? new Dictionary<string, string>(head.OpcMeta, StringComparer.OrdinalIgnoreCase)
-                : null;
+            _lastWriteTimeUtc = ReadChangedAt(head.OpcMeta) ?? _creationTimeUtc;
+            _metadata = BuildSnapshot(head.ContentType, head.CacheControl, head.OpcMeta);
             _isLoaded = true;
+        }
+
+        // Build the user-facing snapshot, stripping the driver-internal
+        // last-write bookkeeping tag so it never surfaces to consumers.
+        private static FileMetadata BuildSnapshot(string contentType, string cacheControl, Dictionary<string, string> opcMeta)
+        {
+            if (opcMeta == null)
+                return new FileMetadata(contentType: contentType, cacheControl: cacheControl);
+            var userTags = new Dictionary<string, string>(opcMeta, StringComparer.OrdinalIgnoreCase);
+            userTags.Remove(ChangedAtTag);
+            return new FileMetadata(contentType: contentType, cacheControl: cacheControl, tags: userTags);
+        }
+
+        private static DateTime? ReadChangedAt(Dictionary<string, string> opcMeta)
+        {
+            if (opcMeta != null && opcMeta.TryGetValue(ChangedAtTag, out var value)
+                && DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                return parsed;
+            return null;
         }
 
         // === Exists (sync delegates to async) ===
@@ -114,38 +142,65 @@ namespace FileHub.OracleObjectStorage
 
         // === Streams ===
 
-        public override Stream GetReadStream() => OpenStream(isWrite: false);
-
-        public override Stream GetWriteStream()
-        {
-            ThrowIfReadOnly();
-            return OpenStream(isWrite: true);
-        }
+        public override Stream GetReadStream() => OpenReadStream();
 
         public override Task<Stream> GetReadStreamAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: false));
+            return Task.FromResult<Stream>(OpenReadStream());
         }
 
-        public override Task<Stream> GetWriteStreamAsync(CancellationToken cancellationToken = default)
+        private OciReadStream OpenReadStream()
         {
-            ThrowIfReadOnly();
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult<Stream>(OpenStream(isWrite: true));
+            ThrowIfStreamOpen();
+            return Track(new OciReadStream(this));
         }
 
-        private OciObjectStream OpenStream(bool isWrite)
+        private OciObjectStream OpenWriteStream(FileWriteOptions options)
+        {
+            ThrowIfStreamOpen();
+
+            var ociWriteOptions = NormalizeOptions(options);
+            var multipart = ociWriteOptions?.Multipart ?? SessionInternal.Multipart;
+            OracleObjectStorageFileHub.ValidateMultipartOptions(multipart, nameof(options));
+
+            return Track(new OciObjectStream(
+                this,
+                ociWriteOptions,
+                multipart));
+        }
+
+        internal static OciWriteOptions NormalizeOptions(FileWriteOptions options)
+        {
+            if (options == null) return null;
+            if (options is OciWriteOptions s3) return s3;
+
+            return new OciWriteOptions
+            {
+                ContentType = options.ContentType,
+                CacheControl = options.CacheControl,
+                Metadata = options.Metadata,
+                StreamPreference = options.StreamPreference,
+            };
+        }
+
+        /// <summary>
+        /// Registers a freshly created stream in the "one stream open per
+        /// file" latch. The latch clears when the stream raises Disposed.
+        /// </summary>
+        private T Track<T>(T stream) where T : OciFileStreamBase
+        {
+            _lastOpenStream = stream;
+            stream.Disposed += OnStreamDisposed;
+            return stream;
+        }
+
+        private void ThrowIfStreamOpen()
         {
             if (Disposed)
                 throw new ObjectDisposedException(nameof(OracleObjectStorageFile));
             if (_lastOpenStream != null)
                 throw new InvalidOperationException("A stream is already open for this file. Dispose it before opening another.");
-
-            var stream = new OciObjectStream(this, isWrite);
-            _lastOpenStream = stream;
-            stream.Disposed += OnStreamDisposed;
-            return stream;
         }
 
         private void OnStreamDisposed(object sender, EventArgs e)
@@ -163,11 +218,11 @@ namespace FileHub.OracleObjectStorage
         /// that need the authoritative server timestamp should call
         /// <see cref="Refresh"/>.
         /// </summary>
-        internal void OnWriteCommitted(long bytesWritten, string timestampTagValue)
+        internal void OnWriteCommitted(long bytesWritten, DateTime lastWriteUtc, FileMetadata snapshot)
         {
             _length = bytesWritten;
-            EnsureTags();
-            _tags[ChangedAtTag] = timestampTagValue;
+            _lastWriteTimeUtc = lastWriteUtc;
+            _metadata = snapshot;
             _isLoaded = true;
         }
 
@@ -178,7 +233,14 @@ namespace FileHub.OracleObjectStorage
         public override async Task DeleteAsync(CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            await SessionInternal.Client.DeleteObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            
+            try
+            {
+                await SessionInternal.Client.DeleteObjectAsync(ObjectName, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FileNotFoundException)
+            {
+            }
             _length = -1;
         }
 
@@ -187,8 +249,16 @@ namespace FileHub.OracleObjectStorage
         public override async Task<FileEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
-            OciPathUtil.ValidateName(newName);
-            var destinationObject = OciPathUtil.CombineObjectName(_parent.PrefixInternal, newName);
+            NestedPath.EnsureLeaf(newName);
+
+            PathUtil.ValidateName(newName);
+
+            // Rename never overwrites — the server-side rename would replace an
+            // existing object silently, so guard with a HEAD. Best-effort.
+            if (await _parent.ExistsAsync(newName, cancellationToken).ConfigureAwait(false))
+                throw new FileAlreadyExistsException(PathUtil.JoinDisplay(_parent.Path, newName));
+
+            var destinationObject = PathUtil.CombineKey(_parent.PrefixInternal, newName);
 
             await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
 
@@ -196,29 +266,52 @@ namespace FileHub.OracleObjectStorage
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => MoveToAsync(directory, name, ct));
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+            => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
+
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await MoveToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
 
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client)
                 && string.Equals(ociDir.SessionInternal.Client.Namespace, SessionInternal.Client.Namespace, StringComparison.Ordinal)
                 && string.Equals(ociDir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal))
             {
-                OciPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
+                // IsSameBucket adds the region check (a bucket name can repeat
+                // across regions) so an identical object name only counts as
+                // moving onto itself when it truly resolves to the same object.
+                if (IsSameBucket(ociDir)
+                    && string.Equals(PathUtil.CombineKey(ociDir.PrefixInternal, name), ObjectName, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot move \"{Path}\" onto itself.", Path);
+                // overwrite: false must not clobber an existing object — the
+                // server-side rename would replace it silently. Best-effort HEAD.
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
                 // Same rationale as CopyToAsync — load the source so the new
                 // file doesn't carry _length = -1.
                 if (!_isLoaded)
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
-                var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
+                var destinationObject = PathUtil.CombineKey(ociDir.PrefixInternal, name);
                 await SessionInternal.Client.RenameObjectAsync(ObjectName, destinationObject, cancellationToken).ConfigureAwait(false);
+                progress?.Report(new TransferStatus(_length, _length));
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
 
-            var newFile = await CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
             {
                 await DeleteAsync(cancellationToken).ConfigureAwait(false);
@@ -239,49 +332,124 @@ namespace FileHub.OracleObjectStorage
             return newFile;
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name)
-            => SyncBridge.Run(ct => CopyToAsync(directory, name, ct));
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+            => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
+            // A separator means the tail is the real name and the rest is a
+            // path — resolve/create that subdirectory and recurse with the leaf.
+            if (NestedPath.HasSeparator(name))
+            {
+                if (NestedPath.TrySplitLeaf(name, out var subPath, out var leaf))
+                {
+                    var deeper = await directory.CreateDirectoryAsync(subPath, cancellationToken).ConfigureAwait(false);
+                    return await CopyToAsync(deeper, leaf, progress, overwrite, cancellationToken).ConfigureAwait(false);
+                }
+                name = leaf;
+            }
+
             if (directory is OracleObjectStorageDirectory ociDir
                 && OciSessionTarget.SameCredentials(ociDir.SessionInternal.Client, SessionInternal.Client))
             {
-                OciPathUtil.ValidateName(name);
+                PathUtil.ValidateName(name);
+
+                // Refuse copy/move onto the exact same object (same bucket + name).
+                if (IsSameBucket(ociDir)
+                    && string.Equals(PathUtil.CombineKey(ociDir.PrefixInternal, name), ObjectName, StringComparison.Ordinal))
+                    throw new FileAlreadyExistsException($"Cannot copy \"{Path}\" onto itself.", Path);
+
+                if (!overwrite && await ociDir.ExistsAsync(name, cancellationToken).ConfigureAwait(false))
+                    throw new FileAlreadyExistsException(PathUtil.JoinDisplay(ociDir.Path, name));
+
                 // Ensure we know the source size — propagating _length = -1
                 // from an unrefreshed stub would make the new file look
-                // missing to any consumer that reads Length.
+                // missing to any consumer that reads Length. 
                 if (!_isLoaded)
                     await RefreshAsync(cancellationToken).ConfigureAwait(false);
-                var destinationObject = OciPathUtil.CombineObjectName(ociDir.PrefixInternal, name);
+
+                var destinationObject = PathUtil.CombineKey(ociDir.PrefixInternal, name);
                 var destClient = ociDir.SessionInternal.Client;
-                await SessionInternal.Client.CopyObjectAsync(
+                var operationHandle = await SessionInternal.Client.CopyObjectAsync(
                     ObjectName,
                     destClient.Namespace,
                     destClient.Bucket,
                     destClient.Region,
                     destinationObject,
                     cancellationToken).ConfigureAwait(false);
-                // Propagate what we know — content is identical, so length matches.
+
+
+                var progressReporter = TransferStatusProgress.FromCallback(_length, progress);
+
+                await operationHandle.WaitAndRequestCancellationAsync(progressReporter, cancellationToken).ConfigureAwait(false);
+
+                progressReporter?.Report(100);
+
                 return new OracleObjectStorageFile(ociDir, name, _length, _creationTimeUtc);
             }
-            return await base.CopyToAsync(directory, name, cancellationToken).ConfigureAwait(false);
+            return await base.CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
+        }
+
+        // === FileWriteOptions / metadata-via-options surface ===
+
+        /// <summary>
+        /// Open a write stream whose commit applies <paramref name="options"/>
+        /// on <c>PutObject</c>. Options live with the stream — no cross-call
+        /// staging on the file. <see cref="FileWriteOptions.StreamPreference"/>
+        /// selects the commit strategy: <see cref="WriteStreamPreference.Multipart"/>
+        /// skips the buffering phase and opens the multipart upload on the
+        /// first written byte; <see cref="WriteStreamPreference.Single"/>
+        /// never spills — the whole payload buffers in memory and commits as
+        /// one <c>PutObject</c>.
+        /// </summary>
+        public override Task<Stream> GetWriteStreamAsync(FileWriteOptions options = null, CancellationToken cancellationToken = default)
+        {
+            ThrowIfReadOnly();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<Stream>(OpenWriteStream(options));
+        }
+
+        public override Stream GetWriteStream(FileWriteOptions options = null)
+        {
+            ThrowIfReadOnly();
+            return OpenWriteStream(options);
+        }
+
+        /// <summary>
+        /// Returns the cached metadata snapshot when the driver already loaded
+        /// it (strict <c>OpenFile</c> / <c>TryOpenFile</c> paid the HEAD); fires
+        /// a single HEAD to populate it otherwise.
+        /// </summary>
+        public override async Task<FileMetadata> GetMetadataAsync(CancellationToken cancellationToken = default)
+        {
+            if (!_isLoaded)
+                await RefreshAsync(cancellationToken).ConfigureAwait(false);
+            // Safe to hand out directly: the snapshot is immutable and replaced
+            // wholesale on refresh / write, never mutated in place.
+            return _metadata;
         }
 
         // === IUrlAccessible ===
 
         public bool IsPublic => SessionInternal.GetIsPublic();
 
-        public Uri GetPublicUrl()
+        public Uri GetPublicUrl() => SyncBridge.Run(GetPublicUrlAsync);
+
+        public async Task<Uri> GetPublicUrlAsync(CancellationToken cancellationToken = default)
         {
-            if (!SessionInternal.GetIsPublic())
+            if (!await SessionInternal.GetIsPublicAsync(cancellationToken).ConfigureAwait(false))
                 throw new InvalidOperationException(
                     $"Bucket \"{SessionInternal.Client.Bucket}\" is not public. Use GetSignedUrl(TimeSpan) instead.");
 
             var client = SessionInternal.Client;
+            // OCI object names are flat: "/" is part of the name, so the whole
+            // name is a single encoded path segment. Namespace and bucket are
+            // caller-supplied — encode them too.
+            var encodedNamespace = Uri.EscapeDataString(client.Namespace);
+            var encodedBucket = Uri.EscapeDataString(client.Bucket);
             var encodedObject = Uri.EscapeDataString(ObjectName);
             return new Uri(
-                $"https://objectstorage.{client.Region}.oraclecloud.com/n/{client.Namespace}/b/{client.Bucket}/o/{encodedObject}");
+                $"https://objectstorage.{client.Region}.oraclecloud.com/n/{encodedNamespace}/b/{encodedBucket}/o/{encodedObject}");
         }
 
         public Uri GetSignedUrl(TimeSpan expiresIn)
@@ -293,19 +461,11 @@ namespace FileHub.OracleObjectStorage
                 throw new ArgumentOutOfRangeException(nameof(expiresIn), "Expiration must be positive.");
 
             var client = SessionInternal.Client;
-            var parName = $"filehub-{Guid.NewGuid():N}";
+            var parName = $"{ObjectName}-{DateTime.UtcNow:yyyyMMdd_HHmmss}";
             var timeExpires = DateTime.UtcNow.Add(expiresIn);
 
             var accessUri = await client.CreatePreauthenticatedReadRequestAsync(ObjectName, parName, timeExpires, cancellationToken).ConfigureAwait(false);
             return new Uri($"https://objectstorage.{client.Region}.oraclecloud.com{accessUri}");
-        }
-
-        // === Internal ===
-
-        internal void EnsureTags()
-        {
-            if (_tags == null)
-                _tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }
 
         public override void Dispose()
@@ -317,6 +477,14 @@ namespace FileHub.OracleObjectStorage
             }
             base.Dispose();
         }
+
+        // True when the target directory resolves to the same physical bucket as
+        // this file. Region is part of identity: a bucket name can repeat across
+        // regions within a namespace, so namespace + region + bucket must match.
+        private bool IsSameBucket(OracleObjectStorageDirectory dir)
+            => string.Equals(dir.SessionInternal.Client.Namespace, SessionInternal.Client.Namespace, StringComparison.Ordinal)
+               && string.Equals(dir.SessionInternal.Client.Region, SessionInternal.Client.Region, StringComparison.Ordinal)
+               && string.Equals(dir.SessionInternal.Client.Bucket, SessionInternal.Client.Bucket, StringComparison.Ordinal);
 
         private static string ConcatPath(string parentPath, string name)
         {

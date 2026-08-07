@@ -1,6 +1,3 @@
-using System;
-using System.Linq;
-
 namespace FileHub.OracleObjectStorage.Tests;
 
 internal static class OciEnvironment
@@ -40,5 +37,24 @@ public sealed class RequiresOciTheoryAttribute : TheoryAttribute
     {
         var reason = OciEnvironment.GetSkipReason();
         if (reason != null) Skip = reason;
+    }
+}
+
+/// <summary>
+/// Requires everything <see cref="RequiresOciAttribute"/> needs PLUS
+/// <c>FILEHUB_OCI_BUCKET_B</c> — a second bucket in the SAME
+/// tenancy/namespace/region, used by cross-bucket copy tests. OCI routes a
+/// server-side <c>CopyObject</c> through one authenticated client pinned to a
+/// single region, so there is no cross-region counterpart to gate on.
+/// </summary>
+public sealed class RequiresOciSecondBucketAttribute : FactAttribute
+{
+    public RequiresOciSecondBucketAttribute()
+    {
+        var primary = OciEnvironment.GetSkipReason();
+        if (primary != null) { Skip = primary; return; }
+
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("FILEHUB_OCI_BUCKET_B")))
+            Skip = "OCI cross-bucket tests skipped. Missing env var: FILEHUB_OCI_BUCKET_B.";
     }
 }
