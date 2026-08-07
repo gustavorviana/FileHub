@@ -12,6 +12,7 @@
 
 [Quick start](#quick-start) ·
 [Drivers](#drivers) ·
+[Packages](#packages) ·
 [Why FileHub?](#why-filehub) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing)
@@ -93,6 +94,20 @@ Full walkthrough: **[Quick Start wiki](FileHub.wiki/Quick-Start.md)**.
 | **Oracle OCI** | `FileHub.OracleObjectStorage` | OCI Object Storage | Cost-optimised: single-request directory ops. |
 | **FTP** | `FileHub.Ftp` | FTP via FluentFTP | Plain FTP server. |
 | **Custom** | your assembly | anything | Implement two abstract classes — see [Custom drivers](FileHub.wiki/Custom-Drivers.md). |
+
+---
+
+## Packages
+
+Every published NuGet package:
+
+| Package | Purpose | Depends on |
+|---|---|---|
+| [`FileHub`](https://www.nuget.org/packages/FileHub) | Core: `IFileHub`, `DirectoryEntry`, `FileEntry` + Local & Memory drivers | — (zero external deps) |
+| [`FileHub.DependencyInjection`](https://www.nuget.org/packages/FileHub.DependencyInjection) | `AddFileHub` / `AddNamedFileHubs` — MS.Extensions.DI integration | `FileHub` |
+| [`FileHub.AmazonS3`](https://www.nuget.org/packages/FileHub.AmazonS3) | Amazon S3 driver | `FileHub` |
+| [`FileHub.OracleObjectStorage`](https://www.nuget.org/packages/FileHub.OracleObjectStorage) | Oracle OCI Object Storage driver | `FileHub` |
+| [`FileHub.Ftp`](https://www.nuget.org/packages/FileHub.Ftp) | FTP driver (FluentFTP) | `FileHub` |
 
 ```bash
 dotnet add package FileHub                        # core: Local + Memory
