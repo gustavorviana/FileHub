@@ -37,7 +37,7 @@ public class FtpDirectoryTests : FtpTestBase
         Assert.Equal("/a/b/c/d.txt", file.Path);
         Assert.NotNull(Client.Server.Find("/a/b/c/d.txt"));
         Assert.Null(Client.Server.Find("/a\\b/c\\d.txt"));
-        Assert.False(Client.Server.Root.Children.Keys.Any(k => k.Contains('\\')));
+        Assert.DoesNotContain(Client.Server.Root.Children.Keys, k => k.Contains('\\'));
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public class FtpDirectoryTests : FtpTestBase
 
         Assert.Equal("/x/y/z", dir.Path);
         Assert.NotNull(Client.Server.Find("/x/y/z"));
-        Assert.False(Client.Server.Root.Children.Keys.Any(k => k.Contains('\\')));
+        Assert.DoesNotContain(Client.Server.Root.Children.Keys, k => k.Contains('\\'));
         Assert.True(Root.TryOpenDirectory("x/y/z", out _));
     }
 

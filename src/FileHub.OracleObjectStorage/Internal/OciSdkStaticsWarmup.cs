@@ -15,7 +15,14 @@ namespace FileHub.OracleObjectStorage.Internal
     /// </summary>
     internal static class OciSdkStaticsWarmup
     {
+        // CA2255: a ModuleInitializer in a library is normally discouraged, but
+        // this one exists precisely to make loading this assembly safe — it
+        // serializes the OCI SDK's deadlock-prone static init before any
+        // consumer touches Region. That is exactly the "library that must run
+        // one-time setup on load" case the rule cannot see as legitimate.
+#pragma warning disable CA2255
         [ModuleInitializer]
+#pragma warning restore CA2255
         internal static void EnsureRegionInitialized()
             => _ = Oci.Common.Region.US_CHICAGO_1;
     }

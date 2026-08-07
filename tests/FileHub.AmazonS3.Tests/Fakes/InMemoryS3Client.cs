@@ -192,7 +192,7 @@ internal sealed class InMemoryS3Client : IS3Client
         Interlocked.Increment(ref _deleteInvocationCount);
         if (keys.Count == 0) return Task.FromResult<IReadOnlyList<S3DeleteError>>(Array.Empty<S3DeleteError>());
 
-        List<S3DeleteError> errors = null;
+        List<S3DeleteError>? errors = null;
         foreach (var key in keys)
         {
             var injected = DeleteFailureInjector?.Invoke(key);
@@ -246,18 +246,20 @@ internal sealed class InMemoryS3Client : IS3Client
 
         // MetadataDirective = REPLACE → use supplied fields; otherwise inherit from source.
         var destContentType = metadataReplace ? options?.ContentType : obj.ContentType;
-        Dictionary<string, string> destMeta;
+        Dictionary<string, string>? destMeta;
         if (metadataReplace)
         {
-            destMeta = options?.Metadata is null
+            var metaSrc = options?.Metadata;
+            destMeta = metaSrc is null
                 ? null
-                : new Dictionary<string, string>(options?.Metadata, StringComparer.OrdinalIgnoreCase);
+                : new Dictionary<string, string>(metaSrc, StringComparer.OrdinalIgnoreCase);
         }
         else
         {
-            destMeta = obj.UserMetadata is null
+            var metaSrc = obj.UserMetadata;
+            destMeta = metaSrc is null
                 ? null
-                : new Dictionary<string, string>(obj.UserMetadata, StringComparer.OrdinalIgnoreCase);
+                : new Dictionary<string, string>(metaSrc, StringComparer.OrdinalIgnoreCase);
         }
         // StorageClass / SSE are independent of MetadataDirective in real S3.
         // If caller specified values, use them; otherwise inherit from source.

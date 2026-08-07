@@ -148,7 +148,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         sub.Delete(recursive: true);
 
         Assert.False(scope.DirectoryExists("to-delete"));
-        Assert.Empty(_fixture.Client.Keys.Where(k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/")));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/"));
     }
 
     [Fact]

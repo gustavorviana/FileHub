@@ -100,7 +100,7 @@ public class PathUtilTests
     [Theory]
     [InlineData("")]
     [InlineData(null)]
-    public void SplitAndValidateSegments_RejectsEmpty(string input)
+    public void SplitAndValidateSegments_RejectsEmpty(string? input)
     {
         // null -> ArgumentNullException (subclass of ArgumentException); "" -> ArgumentException.
         Assert.ThrowsAny<ArgumentException>(() => PathUtil.SplitAndValidateSegments(input));
