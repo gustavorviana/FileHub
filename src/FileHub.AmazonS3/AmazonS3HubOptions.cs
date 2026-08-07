@@ -4,7 +4,7 @@ using Amazon.S3;
 namespace FileHub.AmazonS3
 {
     /// <summary>
-    /// Construction options for <see cref="AmazonS3FileHub.Create(S3HubOptions)"/>.
+    /// Construction options for <see cref="AmazonS3FileHub.Create(AmazonS3HubOptions)"/>.
     /// Set exactly one of <see cref="Client"/>, <see cref="Credentials"/>, or
     /// <see cref="Profile"/> to pick the auth strategy. Region is required when
     /// the chosen strategy does not carry one.
@@ -14,13 +14,13 @@ namespace FileHub.AmazonS3
     /// mixing mutually-exclusive auth strategies:
     /// </para>
     /// <code>
-    /// var hub = AmazonS3FileHub.Create(S3HubOptions.FromCredentials("reports", creds, "us-east-1"));
+    /// var hub = AmazonS3FileHub.Create(AmazonS3HubOptions.FromCredentials("reports", creds, "us-east-1"));
     /// </code>
-    /// The object initializer pattern (<c>new S3HubOptions { ... }</c>) stays
+    /// The object initializer pattern (<c>new AmazonS3HubOptions { ... }</c>) stays
     /// available for advanced scenarios where you need to populate fields the
     /// typed factories don't expose.
     /// </summary>
-    public sealed class S3HubOptions
+    public sealed class AmazonS3HubOptions
     {
         /// <summary>Target bucket. Required.</summary>
         public string BucketName { get; init; }
@@ -67,12 +67,12 @@ namespace FileHub.AmazonS3
         /// <paramref name="region"/> overrides the profile's region when set;
         /// otherwise the profile must carry one. Hub creates and owns the SDK client.
         /// </summary>
-        public static S3HubOptions FromProfile(
+        public static AmazonS3HubOptions FromProfile(
             string bucketName,
             string profile = "default",
             string region = null,
             string rootPath = "")
-            => new S3HubOptions
+            => new AmazonS3HubOptions
             {
                 BucketName = bucketName,
                 Profile = profile,
@@ -83,12 +83,12 @@ namespace FileHub.AmazonS3
         /// <summary>
         /// Options for explicit AWS credentials and region. Hub creates and owns the SDK client.
         /// </summary>
-        public static S3HubOptions FromCredentials(
+        public static AmazonS3HubOptions FromCredentials(
             string bucketName,
             AWSCredentials credentials,
             string region,
             string rootPath = "")
-            => new S3HubOptions
+            => new AmazonS3HubOptions
             {
                 BucketName = bucketName,
                 Credentials = credentials,
@@ -101,12 +101,12 @@ namespace FileHub.AmazonS3
         /// is required because <see cref="IAmazonS3"/> does not expose the region.
         /// Caller retains client ownership; hub disposal is a no-op on it.
         /// </summary>
-        public static S3HubOptions FromClient(
+        public static AmazonS3HubOptions FromClient(
             string bucketName,
             IAmazonS3 client,
             string region,
             string rootPath = "")
-            => new S3HubOptions
+            => new AmazonS3HubOptions
             {
                 BucketName = bucketName,
                 Client = client,
@@ -119,11 +119,11 @@ namespace FileHub.AmazonS3
         /// region is read from <c>client.Config.RegionEndpoint</c>, so callers
         /// don't repeat it. Caller retains client ownership.
         /// </summary>
-        public static S3HubOptions FromClient(
+        public static AmazonS3HubOptions FromClient(
             string bucketName,
             AmazonS3Client client,
             string rootPath = "")
-            => new S3HubOptions
+            => new AmazonS3HubOptions
             {
                 BucketName = bucketName,
                 Client = client,

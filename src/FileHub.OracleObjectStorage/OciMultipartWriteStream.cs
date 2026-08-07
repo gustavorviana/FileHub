@@ -50,9 +50,16 @@ namespace FileHub.OracleObjectStorage
         public override long Length => _totalWritten;
         public override long Position { get => _totalWritten; set => throw new NotSupportedException(); }
 
-        public override void Flush() { /* intentionally no-op: flushing happens on buffer rollover */ }
+        public override void Flush()
+        {
+            ThrowIfUnwritable();
+        }
 
-        public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            ThrowIfUnwritable();
+            return Task.CompletedTask;
+        }
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 
@@ -81,6 +88,7 @@ namespace FileHub.OracleObjectStorage
                 int written = 0;
                 while (written < count)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var space = _partBufferSize - (int)_buffer.Length;
                     var chunk = Math.Min(space, count - written);
                     _buffer.Write(buffer, offset + written, chunk);

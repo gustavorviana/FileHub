@@ -9,15 +9,16 @@ namespace FileHub.Tests;
 /// </summary>
 public class FileSystemEntryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     [Fact]
     public void ValidateName_NullOrEmpty_Throws()
     {
         var root = NewRoot();
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        // null -> ArgumentNullException; empty/whitespace -> ArgumentException.
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateDirectory(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateDirectory(null));
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
     }
 

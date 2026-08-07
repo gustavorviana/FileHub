@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class MemoryDirectoryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     // === CreateFile ===
 
@@ -24,7 +24,7 @@ public class MemoryDirectoryTests
     {
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
     }
 
     [Fact]

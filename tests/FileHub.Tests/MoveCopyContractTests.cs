@@ -13,7 +13,7 @@ namespace FileHub.Tests;
 /// </summary>
 public abstract class MoveCopyContractTests : IDisposable
 {
-    protected abstract FileDirectory Root { get; }
+    protected abstract DirectoryEntry Root { get; }
 
     public virtual void Dispose() { }
 
@@ -347,7 +347,7 @@ public abstract class MoveCopyContractTests : IDisposable
 public sealed class MemoryMoveCopyContractTests : MoveCopyContractTests
 {
     private readonly MemoryFileHub _hub = new();
-    protected override FileDirectory Root => _hub.Root;
+    protected override DirectoryEntry Root => _hub.Root;
 }
 
 public sealed class LocalMoveCopyContractTests : MoveCopyContractTests
@@ -360,7 +360,7 @@ public sealed class LocalMoveCopyContractTests : MoveCopyContractTests
         _hub = new LocalFileHub(_temp.Path);
     }
 
-    protected override FileDirectory Root => _hub.Root;
+    protected override DirectoryEntry Root => _hub.Root;
 
     public override void Dispose() => _temp.Dispose();
 }

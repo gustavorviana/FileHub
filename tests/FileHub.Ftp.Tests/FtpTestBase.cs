@@ -21,7 +21,7 @@ public abstract class FtpTestBase : IDisposable
         Hub = FtpFileHub.FromFtpClient(Client);
     }
 
-    protected FileDirectory Root => Hub.Root;
+    protected DirectoryEntry Root => Hub.Root;
 
     public void Dispose()
     {

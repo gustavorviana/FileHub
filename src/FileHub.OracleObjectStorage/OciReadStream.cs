@@ -92,9 +92,10 @@ namespace FileHub.OracleObjectStorage
 
             if (newPosition < 0)
                 throw new IOException("Seek resulted in a negative position.");
-            if (newPosition > Length)
-                throw new IOException("Seek past end of stream.");
 
+            // Seeking past the end is legal, mirroring FileStream: Position may
+            // exceed Length. A read that starts at/after EOF simply returns 0
+            // (see ReadAsync), so no bytes are fabricated.
             _position = newPosition;
             return _position;
         }

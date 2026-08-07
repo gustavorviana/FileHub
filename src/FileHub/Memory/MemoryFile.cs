@@ -15,7 +15,7 @@ namespace FileHub.Memory
             ? PathUtil.JoinDisplay(_parent.Path, Name)
             : Name;
 
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override long Length => Data.Stream.Length;
         public override DateTime CreationTimeUtc => Data.CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => Data.LastWriteTimeUtc;
@@ -87,7 +87,7 @@ namespace FileHub.Memory
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -143,19 +143,19 @@ namespace FileHub.Memory
             return newFile;
         }
 
-        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(MoveTo(directory, name, progress, overwrite));
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyTo(directory, name, progress, overwrite);
         }
 
-        public override Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfCopyOntoSelf(directory, name);
             return base.CopyToAsync(directory, name, progress, overwrite, cancellationToken);
@@ -163,7 +163,7 @@ namespace FileHub.Memory
 
         // Same directory instance + same leaf name resolves to this very file —
         // a copy onto itself. A separator means a nested target, never self.
-        private void ThrowIfCopyOntoSelf(FileDirectory directory, string name)
+        private void ThrowIfCopyOntoSelf(DirectoryEntry directory, string name)
         {
             if (directory is MemoryDirectory memDir
                 && ReferenceEquals(memDir, _parent)

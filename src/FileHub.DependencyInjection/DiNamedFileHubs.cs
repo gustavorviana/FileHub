@@ -48,7 +48,7 @@ namespace FileHub.DependencyInjection
             }
         }
 
-        public FileDirectory GetRootByName(string name) => GetByName(name)?.Root;
+        public DirectoryEntry GetRootByName(string name) => GetByName(name)?.Root;
 
         private IFileHub ResolveScoped(string name, NamedFileHubEntry entry)
         {

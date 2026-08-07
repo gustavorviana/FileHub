@@ -19,13 +19,16 @@ namespace FileHub
 
         /// <summary>
         /// Validates a single path segment (file or directory name) against
-        /// the portable rule set: not null/empty, not <c>.</c> or <c>..</c>,
-        /// no path separators, no control characters.
+        /// the portable rule set: not null (<see cref="ArgumentNullException"/>),
+        /// not empty or all-whitespace, not <c>.</c> or <c>..</c>, no path
+        /// separators, no control characters (all <see cref="ArgumentException"/>).
         /// </summary>
         public static void ValidateName(string name)
         {
-            if (string.IsNullOrEmpty(name))
-                throw new ArgumentException("Name cannot be null or empty.", nameof(name));
+            if (name is null)
+                throw new ArgumentNullException(nameof(name));
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Name cannot be empty or whitespace.", nameof(name));
             if (name == "." || name == "..")
                 throw new ArgumentException($"Name \"{name}\" is not allowed.", nameof(name));
             if (name.IndexOf('/') >= 0 || name.IndexOf('\\') >= 0)
@@ -63,8 +66,10 @@ namespace FileHub
         /// </summary>
         public static string[] SplitAndValidateSegments(string nestedName, Action<string> validateSegment)
         {
-            if (string.IsNullOrEmpty(nestedName))
-                throw new ArgumentException("Name cannot be null or empty.", nameof(nestedName));
+            if (nestedName is null)
+                throw new ArgumentNullException(nameof(nestedName));
+            if (string.IsNullOrWhiteSpace(nestedName))
+                throw new ArgumentException("Name cannot be empty or whitespace.", nameof(nestedName));
 
             if (nestedName[0] == '/' || nestedName[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed; \"{nestedName}\" must be relative.");

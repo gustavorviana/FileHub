@@ -3,7 +3,7 @@ namespace FileHub
     /// <summary>
     /// Shared helpers for splitting caller-supplied directory names that use
     /// <c>/</c> or <c>\</c> as segment separators. Used by
-    /// <see cref="FileDirectory"/> implementations so that
+    /// <see cref="DirectoryEntry"/> implementations so that
     /// <c>CreateDirectory("a/b/c")</c> and <c>TryOpenDirectory("a/b/c", out _)</c>
     /// descend through intermediate directories uniformly across drivers.
     /// </summary>

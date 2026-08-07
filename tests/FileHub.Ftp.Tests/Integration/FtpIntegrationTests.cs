@@ -17,15 +17,15 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
     public FtpIntegrationTests(FtpServerFixture ftp) => _ftp = ftp;
 
     private Task<FtpFileHub> NewHubAsync() =>
-        FtpFileHub.ConnectAsync(
+        FtpFileHub.CreateAsync(FtpHubOptions.FromCredentials(
             host: _ftp.Host,
             port: _ftp.Port,
             user: FtpServerFixture.User,
             password: FtpServerFixture.Password,
-            rootPath: "/");
+            rootPath: "/"));
 
     /// <summary>Per-test directory scoping so state from one test doesn't leak into the next.</summary>
-    private static async Task<FileDirectory> ScopeAsync(FtpFileHub hub, string name)
+    private static async Task<DirectoryEntry> ScopeAsync(FtpFileHub hub, string name)
     {
         if (hub.Root.TryOpenDirectory(name, out var existing))
         {

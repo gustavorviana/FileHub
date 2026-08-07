@@ -41,7 +41,7 @@ public class AmazonS3FileHubTests
         using var sdkClient = new Amazon.S3.AmazonS3Client(credentials, Amazon.RegionEndpoint.USWest2);
 
         using var hub = await AmazonS3FileHub.CreateAsync(
-            S3HubOptions.FromClient("bucket", sdkClient));
+            AmazonS3HubOptions.FromClient("bucket", sdkClient));
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
@@ -52,7 +52,7 @@ public class AmazonS3FileHubTests
     {
         using var sdkClient = new Amazon.S3.AmazonS3Client(
             new Amazon.Runtime.BasicAWSCredentials("ak", "sk"), Amazon.RegionEndpoint.USWest2);
-        var options = new S3HubOptions
+        var options = new AmazonS3HubOptions
         {
             BucketName = "bucket",
             Client = sdkClient,
@@ -67,7 +67,7 @@ public class AmazonS3FileHubTests
     [Fact]
     public async System.Threading.Tasks.Task CreateAsync_Credentials_RegionComesFromSdkConfig()
     {
-        var options = new S3HubOptions
+        var options = new AmazonS3HubOptions
         {
             BucketName = "bucket",
             Credentials = new Amazon.Runtime.BasicAWSCredentials("ak", "sk"),
@@ -86,7 +86,7 @@ public class AmazonS3FileHubTests
         // unset, so the hub always assigns the resolved Region on top of the
         // supplied config instead of trying to detect "already set".
         var config = new Amazon.S3.AmazonS3Config { RegionEndpoint = Amazon.RegionEndpoint.USWest2 };
-        var options = new S3HubOptions
+        var options = new AmazonS3HubOptions
         {
             BucketName = "bucket",
             Credentials = new Amazon.Runtime.BasicAWSCredentials("ak", "sk"),
@@ -106,7 +106,7 @@ public class AmazonS3FileHubTests
         using var sdkClient = new Amazon.S3.AmazonS3Client(credentials, Amazon.RegionEndpoint.EUWest1);
 
         using var hub = AmazonS3FileHub.Create(
-            S3HubOptions.FromClient("bucket", sdkClient));
+            AmazonS3HubOptions.FromClient("bucket", sdkClient));
 
         Assert.NotNull(hub.Root);
         await System.Threading.Tasks.Task.CompletedTask;

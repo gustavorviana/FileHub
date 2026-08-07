@@ -5,11 +5,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OciObjectStreamTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OciObjectStreamTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void WriteStream_CommitsOnDispose()
@@ -80,16 +80,21 @@ public class OciObjectStreamTests : IClassFixture<InMemoryOciFixture>
     }
 
     [Fact]
-    public void Seek_Beyond_Length_Throws()
+    public void Seek_Beyond_Length_Allowed_NegativeThrows()
     {
-        var scope = Scope(nameof(Seek_Beyond_Length_Throws));
+        var scope = Scope(nameof(Seek_Beyond_Length_Allowed_NegativeThrows));
         var file = scope.CreateFile("seek.bin");
         file.SetBytes(new byte[] { 1, 2, 3, 4, 5 });
 
         var reopened = scope.OpenFile("seek.bin");
         using var stream = reopened.GetReadStream();
 
-        Assert.Throws<IOException>(() => stream.Seek(100, SeekOrigin.Begin));
+        // Seeking past the end is legal (mirrors FileStream): Position may
+        // exceed Length; a read there returns 0.
+        Assert.Equal(100, stream.Seek(100, SeekOrigin.Begin));
+        Assert.Equal(0, stream.Read(new byte[8], 0, 8));
+
+        // A negative position is still an error.
         Assert.Throws<IOException>(() => stream.Seek(-1, SeekOrigin.Begin));
     }
 

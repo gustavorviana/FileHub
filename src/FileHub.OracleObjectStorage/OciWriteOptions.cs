@@ -10,7 +10,7 @@ namespace FileHub.OracleObjectStorage
     {
         /// <summary>
         /// Per-write multipart policy. <c>null</c> inherits
-        /// <see cref="OciHubOptions.Multipart"/> from the hub.
+        /// <see cref="OracleObjectStorageHubOptions.Multipart"/> from the hub.
         /// </summary>
         public MultipartStreamOptions Multipart { get; set; }
     }

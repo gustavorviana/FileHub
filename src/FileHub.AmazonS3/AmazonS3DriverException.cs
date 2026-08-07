@@ -17,13 +17,13 @@ namespace FileHub.AmazonS3
 #if !NET8_0_OR_GREATER
     [Serializable]
 #endif
-    public sealed class S3DriverException : FileHubException
+    public sealed class AmazonS3DriverException : FileHubException
     {
         public HttpStatusCode? StatusCode { get; }
         public string ErrorCode { get; }
         public string RequestId { get; }
 
-        public S3DriverException(string message, HttpStatusCode? statusCode, string errorCode, string requestId, Exception innerException)
+        public AmazonS3DriverException(string message, HttpStatusCode? statusCode, string errorCode, string requestId, Exception innerException)
             : base(message, innerException)
         {
             StatusCode = statusCode;
@@ -32,7 +32,7 @@ namespace FileHub.AmazonS3
         }
 
 #if !NET8_0_OR_GREATER
-        private S3DriverException(SerializationInfo info, StreamingContext context)
+        private AmazonS3DriverException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
             var status = info.GetInt32(nameof(StatusCode));

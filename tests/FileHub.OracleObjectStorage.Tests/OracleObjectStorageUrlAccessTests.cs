@@ -6,7 +6,7 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageUrlAccessTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
@@ -70,7 +70,7 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         Assert.Contains("/p/signed.txt", url.ToString());
         Assert.Contains("/n/test-ns/", url.ToString());
         Assert.Contains("/b/test-bucket/", url.ToString());
-        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "signed.txt"));
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "signed.txt");
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixtur
         Assert.Contains("/p/filehub-upload-", url.ToString());
         Assert.Contains("/n/test-ns/", url.ToString());
         Assert.Contains("/b/test-bucket/", url.ToString());
-        Assert.Single(_fixture.Client.Pars.Where(p => p.ObjectName == "upload.bin" && p.Name.StartsWith("filehub-upload-")));
+        Assert.Single(_fixture.Client.Pars, p => p.ObjectName == "upload.bin" && p.Name.StartsWith("filehub-upload-"));
         Assert.False(Root.FileExists("upload.bin"));
     }
 

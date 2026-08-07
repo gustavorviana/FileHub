@@ -10,12 +10,12 @@ using System.Runtime.CompilerServices;
 
 namespace FileHub
 {
-    public abstract class FileDirectory : FileSystemEntry
+    public abstract class DirectoryEntry : FileSystemEntry
     {
-        public abstract FileDirectory Parent { get; }
+        public abstract DirectoryEntry Parent { get; }
         protected string RootPath { get; }
 
-        protected FileDirectory(string name, string rootPath) : base(name)
+        protected DirectoryEntry(string name, string rootPath) : base(name)
         {
             RootPath = rootPath;
         }
@@ -28,10 +28,10 @@ namespace FileHub
         public abstract Task<(FileEntry File, bool Exists)> TryOpenFileAsync(string name, CancellationToken cancellationToken = default);
 
         /// <summary>Create the directory named <paramref name="name"/> and every missing ancestor.</summary>
-        public abstract Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default);
+        public abstract Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default);
 
         /// <summary>Resolve the whole path; <c>Exists</c> is <c>false</c> and <c>Directory</c> is <c>null</c> when it doesn't exist.</summary>
-        public abstract Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default);
+        public abstract Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default);
 
         public abstract Task<bool> FileExistsAsync(string name, CancellationToken cancellationToken = default);
 
@@ -61,7 +61,7 @@ namespace FileHub
 
         public abstract IEnumerable<FileEntry> GetFiles(string searchPattern = "*", FileListOffset offset = default, int? limit = null);
 
-        public abstract IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*");
+        public abstract IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*");
 
         // === Sync bridges (delegate to the async source of truth) ===
 
@@ -75,10 +75,10 @@ namespace FileHub
             return exists;
         }
 
-        public virtual FileDirectory CreateDirectory(string name)
+        public virtual DirectoryEntry CreateDirectory(string name)
             => SyncBridge.Run(ct => CreateDirectoryAsync(name, ct));
 
-        public virtual bool TryOpenDirectory(string name, out FileDirectory directory)
+        public virtual bool TryOpenDirectory(string name, out DirectoryEntry directory)
         {
             var (dir, exists) = SyncBridge.Run(ct => TryOpenDirectoryAsync(name, ct));
             directory = dir;
@@ -123,10 +123,10 @@ namespace FileHub
         /// store that paginates natively (object storage) may override to push
         /// the slice down to the backend.
         /// </summary>
-        public virtual IEnumerable<FileDirectory> GetDirectories(string searchPattern, FileListOffset offset, int? limit = null)
+        public virtual IEnumerable<DirectoryEntry> GetDirectories(string searchPattern, FileListOffset offset, int? limit = null)
         {
             ValidatePaging(limit);
-            IEnumerable<FileDirectory> seq = GetDirectories(searchPattern);
+            IEnumerable<DirectoryEntry> seq = GetDirectories(searchPattern);
             if (offset.IsNamed)
                 seq = seq.Where(d => string.CompareOrdinal(d.Name, offset.Name) >= 0);
             else if (offset.Index > 0)
@@ -155,13 +155,13 @@ namespace FileHub
         /// <paramref name="newName"/> must be a single name: a value containing
         /// a <c>/</c> or <c>\</c> separator throws
         /// <see cref="ArgumentException"/> — use
-        /// <see cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
+        /// <see cref="MoveToAsync(DirectoryEntry, string, bool, CancellationToken)"/>
         /// to relocate. Base implementation delegates to <c>MoveToAsync</c> with
         /// the same parent — drivers backed by a store that has a native rename
         /// (FTP <c>RNFR/RNTO</c>, OCI same-bucket rename, file-system
         /// <c>Move</c>) override to use it directly.
         /// </summary>
-        public virtual async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public virtual async Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (Parent == null)
@@ -171,7 +171,7 @@ namespace FileHub
         }
 
         /// <inheritdoc cref="RenameAsync(string, CancellationToken)"/>
-        public virtual FileDirectory Rename(string newName)
+        public virtual DirectoryEntry Rename(string newName)
             => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
         /// <summary>
@@ -182,7 +182,7 @@ namespace FileHub
         /// into it. Base implementation = copy then delete. Drivers with an
         /// atomic move primitive override.
         /// </summary>
-        public virtual async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public virtual async Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
@@ -190,8 +190,8 @@ namespace FileHub
             return newDir;
         }
 
-        /// <inheritdoc cref="MoveToAsync(FileDirectory, string, bool, CancellationToken)"/>
-        public virtual FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+        /// <inheritdoc cref="MoveToAsync(DirectoryEntry, string, bool, CancellationToken)"/>
+        public virtual DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
         /// <summary>
@@ -202,7 +202,7 @@ namespace FileHub
         /// backed by a store with server-side copy (S3 <c>CopyObject</c>,
         /// OCI <c>CopyObject</c>) override for cheaper bulk copy.
         /// </summary>
-        public virtual async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public virtual async Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (directory == null) throw new ArgumentNullException(nameof(directory));
@@ -228,8 +228,8 @@ namespace FileHub
             return newDir;
         }
 
-        /// <inheritdoc cref="CopyToAsync(FileDirectory, string, bool, CancellationToken)"/>
-        public virtual FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+        /// <inheritdoc cref="CopyToAsync(DirectoryEntry, string, bool, CancellationToken)"/>
+        public virtual DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
         public virtual async Task<FileEntry> CreateFileAsync(string name, bool overwrite, CancellationToken cancellationToken = default)
@@ -302,7 +302,7 @@ namespace FileHub
         public virtual FileEntry OpenFile(string name, bool createIfNotExists)
             => SyncBridge.Run(ct => OpenFileAsync(name, createIfNotExists, ct));
 
-        public virtual Task<FileDirectory> OpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public virtual Task<DirectoryEntry> OpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
             => OpenDirectoryAsync(name, createIfNotExists: false, cancellationToken);
 
         /// <summary>
@@ -312,7 +312,7 @@ namespace FileHub
         /// are created. When <c>false</c>, a missing segment throws
         /// <see cref="DirectoryNotFoundException"/>.
         /// </summary>
-        public virtual async Task<FileDirectory> OpenDirectoryAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
+        public virtual async Task<DirectoryEntry> OpenDirectoryAsync(string name, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (head, rest) = SplitPath(name);
 
@@ -324,13 +324,13 @@ namespace FileHub
             return await directory.OpenDirectoryAsync(rest, createIfNotExists, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual FileDirectory OpenDirectory(string name)
+        public virtual DirectoryEntry OpenDirectory(string name)
             => OpenDirectory(name, createIfNotExists: false);
 
-        public virtual FileDirectory OpenDirectory(string name, bool createIfNotExists)
+        public virtual DirectoryEntry OpenDirectory(string name, bool createIfNotExists)
             => SyncBridge.Run(ct => OpenDirectoryAsync(name, createIfNotExists, ct));
 
-        protected virtual async Task<FileDirectory> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
+        protected virtual async Task<DirectoryEntry> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             var (directory, exists) = await TryOpenDirectoryAsync(segment, cancellationToken).ConfigureAwait(false);
             if (exists)
@@ -342,7 +342,7 @@ namespace FileHub
             throw new DirectoryNotFoundException($"The directory \"{CombineChildPath(segment)}\" was not found.");
         }
 
-        protected virtual FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
+        protected virtual DirectoryEntry OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
             => SyncBridge.Run(ct => OpenOrCreateChildDirectoryAsync(segment, createIfNotExists, ct));
 
         public virtual async Task DeleteIfExistsAsync(string name, CancellationToken cancellationToken = default)
@@ -357,8 +357,10 @@ namespace FileHub
 
         protected static (string Head, string Remainder) SplitPath(string path)
         {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+            if (path is null)
+                throw new ArgumentNullException(nameof(path));
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Path cannot be empty or whitespace.", nameof(path));
 
             if (path[0] == '/' || path[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed; path \"{path}\" must be relative.");
@@ -408,7 +410,7 @@ namespace FileHub
             await Task.CompletedTask.ConfigureAwait(false);
         }
 
-        public virtual async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+        public virtual async IAsyncEnumerable<DirectoryEntry> GetDirectoriesAsync(
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -424,7 +426,7 @@ namespace FileHub
         /// Paged async enumeration of directories. Drivers backed by a store
         /// that paginates natively may override.
         /// </summary>
-        public virtual async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+        public virtual async IAsyncEnumerable<DirectoryEntry> GetDirectoriesAsync(
             string searchPattern,
             FileListOffset offset,
             int? limit = null,
@@ -444,13 +446,13 @@ namespace FileHub
             return Task.FromResult(GetFiles(searchPattern, offset, limit));
         }
 
-        public virtual Task<IEnumerable<FileDirectory>> GetDirectoriesAsync(string searchPattern = "*", CancellationToken cancellationToken = default)
+        public virtual Task<IEnumerable<DirectoryEntry>> GetDirectoriesAsync(string searchPattern = "*", CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(GetDirectories(searchPattern));
         }
 
-        public virtual Task<IEnumerable<FileDirectory>> GetDirectoriesAsync(string searchPattern, FileListOffset offset, int? limit = null, CancellationToken cancellationToken = default)
+        public virtual Task<IEnumerable<DirectoryEntry>> GetDirectoriesAsync(string searchPattern, FileListOffset offset, int? limit = null, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(GetDirectories(searchPattern, offset, limit));

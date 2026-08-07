@@ -18,7 +18,7 @@ namespace FileHub.AmazonS3
         private readonly S3Session _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private AmazonS3FileHub(S3Session session, string rootPath)
         {
@@ -30,18 +30,18 @@ namespace FileHub.AmazonS3
         // === Canonical factory: options bag ===
 
         /// <summary>
-        /// Build a FileHub from an <see cref="S3HubOptions"/> bag. This is the
+        /// Build a FileHub from an <see cref="AmazonS3HubOptions"/> bag. This is the
         /// only entry point: it covers profile-, credentials-, and client-based
         /// construction in one place. Pick the strategy via a typed factory on
-        /// <see cref="S3HubOptions"/> (<c>FromProfile</c>, <c>FromCredentials</c>,
+        /// <see cref="AmazonS3HubOptions"/> (<c>FromProfile</c>, <c>FromCredentials</c>,
         /// <c>FromClient</c>).
         /// </summary>
-        public static AmazonS3FileHub Create(S3HubOptions options)
+        public static AmazonS3FileHub Create(AmazonS3HubOptions options)
             => SyncBridge.Run(ct => CreateAsync(options, ct));
 
-        /// <inheritdoc cref="Create(S3HubOptions)"/>
+        /// <inheritdoc cref="Create(AmazonS3HubOptions)"/>
         public static Task<AmazonS3FileHub> CreateAsync(
-            S3HubOptions options,
+            AmazonS3HubOptions options,
             CancellationToken cancellationToken = default)
         {
             if (options == null) throw new ArgumentNullException(nameof(options));
@@ -50,7 +50,7 @@ namespace FileHub.AmazonS3
             ValidateMultipartOptions(options.Multipart, nameof(options));
 
             if (options.Client != null && options.Credentials != null && options.Profile != null)
-                throw new ArgumentException("S3HubOptions accepts exactly one of Client, Credentials, or Profile.", nameof(options));
+                throw new ArgumentException("AmazonS3HubOptions accepts exactly one of Client, Credentials, or Profile.", nameof(options));
 
             if (options.Client != null && options.SdkConfig != null)
                 throw new ArgumentException("SdkConfig only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));
@@ -112,7 +112,7 @@ namespace FileHub.AmazonS3
 
         /// <summary>
         /// Config for hub-owned SDK clients: the consumer-supplied
-        /// <see cref="S3HubOptions.SdkConfig"/> taken as-is (the hub pins
+        /// <see cref="AmazonS3HubOptions.SdkConfig"/> taken as-is (the hub pins
         /// nothing — retry, timeouts, proxy all stay whatever the consumer or
         /// the SDK defaults say), or a plain default config when none was
         /// supplied. The resolved region is always assigned on top: the

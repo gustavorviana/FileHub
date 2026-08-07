@@ -5,7 +5,7 @@ using Oci.ObjectstorageService;
 namespace FileHub.OracleObjectStorage
 {
     /// <summary>
-    /// Construction options for <see cref="OracleObjectStorageFileHub.Create(OciHubOptions)"/>.
+    /// Construction options for <see cref="OracleObjectStorageFileHub.Create(OracleObjectStorageHubOptions)"/>.
     /// Set exactly one auth strategy: <see cref="Client"/>, <see cref="Provider"/>,
     /// or the config-file pair (<see cref="ConfigFilePath"/> / <see cref="Profile"/>).
     /// When all three are null, defaults to <c>~/.oci/config</c> with the <c>DEFAULT</c> profile.
@@ -15,13 +15,13 @@ namespace FileHub.OracleObjectStorage
     /// mixing mutually-exclusive auth strategies:
     /// </para>
     /// <code>
-    /// var hub = OracleObjectStorageFileHub.Create(OciHubOptions.FromConfigFile("reports", profile: "prod"));
+    /// var hub = OracleObjectStorageFileHub.Create(OracleObjectStorageHubOptions.FromConfigFile("reports", profile: "prod"));
     /// </code>
-    /// The object initializer pattern (<c>new OciHubOptions { ... }</c>) stays
+    /// The object initializer pattern (<c>new OracleObjectStorageHubOptions { ... }</c>) stays
     /// available for advanced scenarios where you need to populate fields the
     /// typed factories don't expose.
     /// </summary>
-    public sealed class OciHubOptions
+    public sealed class OracleObjectStorageHubOptions
     {
         /// <summary>Target bucket. Required.</summary>
         public string BucketName { get; init; }
@@ -75,12 +75,12 @@ namespace FileHub.OracleObjectStorage
         /// is resolved automatically via <c>GetNamespace</c>. Hub creates and
         /// owns the SDK client.
         /// </summary>
-        public static OciHubOptions FromConfigFile(
+        public static OracleObjectStorageHubOptions FromConfigFile(
             string bucketName,
             string profile = "DEFAULT",
             string configFilePath = null,
             string rootPath = "")
-            => new OciHubOptions
+            => new OracleObjectStorageHubOptions
             {
                 BucketName = bucketName,
                 Profile = profile,
@@ -95,12 +95,12 @@ namespace FileHub.OracleObjectStorage
         /// not expose a region. Namespace is resolved automatically.
         /// Hub creates and owns the SDK client.
         /// </summary>
-        public static OciHubOptions FromProvider(
+        public static OracleObjectStorageHubOptions FromProvider(
             string bucketName,
             IAuthenticationDetailsProvider provider,
             string regionId,
             string rootPath = "")
-            => new OciHubOptions
+            => new OracleObjectStorageHubOptions
             {
                 BucketName = bucketName,
                 Provider = provider,
@@ -113,11 +113,11 @@ namespace FileHub.OracleObjectStorage
         /// region is read from <c>provider.Region.RegionId</c>, so callers don't
         /// repeat it. Namespace is resolved automatically.
         /// </summary>
-        public static OciHubOptions FromProvider(
+        public static OracleObjectStorageHubOptions FromProvider(
             string bucketName,
             ConfigFileAuthenticationDetailsProvider provider,
             string rootPath = "")
-            => new OciHubOptions
+            => new OracleObjectStorageHubOptions
             {
                 BucketName = bucketName,
                 Provider = provider,
@@ -130,13 +130,13 @@ namespace FileHub.OracleObjectStorage
         /// required because no auto-resolution path is available. Caller retains
         /// client ownership; hub disposal is a no-op on it.
         /// </summary>
-        public static OciHubOptions FromClient(
+        public static OracleObjectStorageHubOptions FromClient(
             string bucketName,
             ObjectStorageClient client,
             string regionId,
             string @namespace,
             string rootPath = "")
-            => new OciHubOptions
+            => new OracleObjectStorageHubOptions
             {
                 BucketName = bucketName,
                 Client = client,

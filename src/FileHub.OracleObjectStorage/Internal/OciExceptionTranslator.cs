@@ -23,7 +23,7 @@ internal static class OciExceptionTranslator
 
         return exception is not OperationCanceledException
             && exception is not ArgumentException
-            && exception is not OciDriverException;
+            && exception is not OracleObjectStorageDriverException;
     }
 
     /// <summary>
@@ -98,7 +98,7 @@ internal static class OciExceptionTranslator
             opcRequestId);
     }
 
-    private static OciDriverException CreateDriverException(Exception raw, string message, HttpStatusCode? statusCode, string serviceCode, string opcRequestId)
+    private static OracleObjectStorageDriverException CreateDriverException(Exception raw, string message, HttpStatusCode? statusCode, string serviceCode, string opcRequestId)
     {
         var codePrefix = string.IsNullOrEmpty(serviceCode)
             ? string.Empty
@@ -108,7 +108,7 @@ internal static class OciExceptionTranslator
             ? string.Empty
             : $" (opc-request-id={opcRequestId})";
 
-        return new OciDriverException(
+        return new OracleObjectStorageDriverException(
             $"{message}: {codePrefix}{raw.Message}{requestIdSuffix}",
             statusCode,
             serviceCode,

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace FileHub.AmazonS3
 {
-    public class AmazonS3Directory : FileDirectory, IRefreshable, ISignedUploadable
+    public class AmazonS3Directory : DirectoryEntry, IRefreshable, ISignedUploadable
     {
         private const string DirectoryContentType = "application/x-directory";
 
@@ -20,7 +20,7 @@ namespace FileHub.AmazonS3
         private DateTime _lastWriteTimeUtc;
 
         public override string Path => PathUtil.DisplayPath(_prefix);
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
 
         public override DateTime CreationTimeUtc => _creationTimeUtc;
         public override DateTime LastWriteTimeUtc => _lastWriteTimeUtc;
@@ -184,7 +184,7 @@ namespace FileHub.AmazonS3
             return Task.FromResult(OpenFile(name, createIfNotExists: true));
         }
 
-        protected override FileDirectory OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
+        protected override DirectoryEntry OpenOrCreateChildDirectory(string segment, bool createIfNotExists)
         {
             if (createIfNotExists)
             {
@@ -194,7 +194,7 @@ namespace FileHub.AmazonS3
             return base.OpenOrCreateChildDirectory(segment, createIfNotExists);
         }
 
-        protected override Task<FileDirectory> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
+        protected override Task<DirectoryEntry> OpenOrCreateChildDirectoryAsync(string segment, bool createIfNotExists, CancellationToken cancellationToken = default)
         {
             // Zero-call branch is pure in-process construction — delegate to
             // the sync hook; strict (false) keeps the base async probe.
@@ -342,11 +342,11 @@ namespace FileHub.AmazonS3
         // === Directory resolution (whole path in one request) ===
 
         // Nullable handle for the internal callers (FileExists / Delete / ...).
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+        private async Task<DirectoryEntry> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
             => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
 
         // One PUT creates the whole path's marker.
-        public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var segments = PathUtil.SplitAndValidateSegments(name);
@@ -362,7 +362,7 @@ namespace FileHub.AmazonS3
         }
 
         // One LIST proves the whole path exists.
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
             try { segments = PathUtil.SplitAndValidateSegments(name); }
@@ -392,7 +392,7 @@ namespace FileHub.AmazonS3
             return current;
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
             var regex = PathUtil.BuildSearchPatternRegex(searchPattern);
             string continuationToken = null;
@@ -410,7 +410,7 @@ namespace FileHub.AmazonS3
         }
 
 #if NET8_0_OR_GREATER
-        public override async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+        public override async IAsyncEnumerable<DirectoryEntry> GetDirectoriesAsync(
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -628,9 +628,9 @@ namespace FileHub.AmazonS3
             }
         }
 
-        public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
+        public override DirectoryEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
-        public override async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_parent == null)
@@ -649,10 +649,10 @@ namespace FileHub.AmazonS3
             return new AmazonS3Directory(_parent, newName);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var newDir = await CopyToAsync(directory, name, overwrite, cancellationToken).ConfigureAwait(false);
@@ -672,10 +672,10 @@ namespace FileHub.AmazonS3
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory under the destination and
@@ -857,7 +857,7 @@ namespace FileHub.AmazonS3
             // (same invariant we keep on nested writes).
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination, bool overwrite)
+        private static void CopyContentsGeneric(DirectoryEntry source, DirectoryEntry destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
                 file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);

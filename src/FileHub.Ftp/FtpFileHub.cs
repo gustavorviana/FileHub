@@ -1,7 +1,6 @@
 using FileHub.Ftp.Internal;
 using FluentFTP;
 using System;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,7 +17,7 @@ namespace FileHub.Ftp
         private readonly FtpSession _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private FtpFileHub(FtpSession session, string rootPath)
         {
@@ -27,82 +26,60 @@ namespace FileHub.Ftp
             Root = new FtpDirectory(_session, normalizedRoot);
         }
 
-        // === Public factories: sync delegates to async at the top-level boundary ===
+        // === Public factory: a single options-object entry point (Create) with
+        // its sync sibling. All connection + FTPS configuration lives on
+        // FtpHubOptions, so there is no sync/async factory sprawl. ===
 
         /// <summary>
-        /// Open a fresh FTP connection to <paramref name="host"/>:<paramref name="port"/>
-        /// and build a hub rooted at <paramref name="rootPath"/>. Ensures the
-        /// root directory exists on the server (creating it if needed).
-        /// Blocks the calling thread — prefer <see cref="ConnectAsync"/> under
-        /// a <c>SynchronizationContext</c> (UI, ASP.NET classic).
+        /// Build a hub from <see cref="FtpHubOptions"/> — the single entry point,
+        /// carrying connection, root, and FTPS (TLS) configuration. Prefer the
+        /// typed <c>FtpHubOptions.From*</c> factories. Blocks the calling thread —
+        /// prefer <see cref="CreateAsync"/> under a <c>SynchronizationContext</c>
+        /// (UI, ASP.NET classic).
         /// </summary>
-        public static FtpFileHub Connect(
-            string host,
-            int port = 21,
-            string user = "anonymous",
-            string password = "",
-            string rootPath = "/")
-            => SyncBridge.Run(ct => ConnectAsync(host, port, user, password, rootPath, ct));
+        public static FtpFileHub Create(FtpHubOptions options)
+            => SyncBridge.Run(ct => CreateAsync(options, ct));
 
-        public static async Task<FtpFileHub> ConnectAsync(
-            string host,
-            int port = 21,
-            string user = "anonymous",
-            string password = "",
-            string rootPath = "/",
+        /// <inheritdoc cref="Create(FtpHubOptions)"/>
+        public static Task<FtpFileHub> CreateAsync(
+            FtpHubOptions options,
             CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrEmpty(host))
-                throw new ArgumentException("Host cannot be null or empty.", nameof(host));
-            if (port <= 0 || port > 65535)
-                throw new ArgumentOutOfRangeException(nameof(port), "Port must be in the range 1-65535.");
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
-            var client = new AsyncFtpClient(host, user ?? "anonymous", password ?? string.Empty, port);
-            var real = new RealFtpClient(client, ownsClient: true);
-            return await BuildAsync(real, rootPath, cancellationToken).ConfigureAwait(false);
+            RealFtpClient real;
+            if (options.Client != null)
+            {
+                real = new RealFtpClient(options.Client, options.OwnsClient);
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(options.Host))
+                    throw new ArgumentException("Host cannot be null or empty.", nameof(options));
+                if (options.Port <= 0 || options.Port > 65535)
+                    throw new ArgumentOutOfRangeException(nameof(options), "Port must be in the range 1-65535.");
+
+                real = new RealFtpClient(BuildClient(options), ownsClient: true);
+            }
+
+            return BuildAsync(real, options.RootPath, cancellationToken);
         }
 
-        public static FtpFileHub FromCredentials(
-            string host,
-            int port,
-            NetworkCredential credentials,
-            string rootPath = "/")
-            => SyncBridge.Run(ct => FromCredentialsAsync(host, port, credentials, rootPath, ct));
-
-        public static Task<FtpFileHub> FromCredentialsAsync(
-            string host,
-            int port,
-            NetworkCredential credentials,
-            string rootPath = "/",
-            CancellationToken cancellationToken = default)
+        private static AsyncFtpClient BuildClient(FtpHubOptions o)
         {
-            if (credentials == null) throw new ArgumentNullException(nameof(credentials));
-            return ConnectAsync(host, port, credentials.UserName, credentials.Password, rootPath, cancellationToken);
-        }
+            var client = new AsyncFtpClient(o.Host, o.User ?? "anonymous", o.Password ?? string.Empty, o.Port);
+            if (o.Encryption != FtpEncryptionMode.None)
+            {
+                client.Config.EncryptionMode = o.Encryption;
+                client.Config.DataConnectionEncryption = o.DataConnectionEncryption;
 
-        /// <summary>
-        /// Build a hub around an externally-created <see cref="AsyncFtpClient"/>.
-        /// Set <paramref name="ownsClient"/> to <c>true</c> when the client was
-        /// constructed solely for the hub and the hub should dispose it as part
-        /// of its own disposal. The default is <c>false</c> — the caller keeps
-        /// ownership, and disposing the hub is a no-op on the client so it can
-        /// be shared or reused safely.
-        /// </summary>
-        public static FtpFileHub FromClient(
-            AsyncFtpClient client,
-            bool ownsClient = false,
-            string rootPath = "/")
-            => SyncBridge.Run(ct => FromClientAsync(client, ownsClient, rootPath, ct));
-
-        public static Task<FtpFileHub> FromClientAsync(
-            AsyncFtpClient client,
-            bool ownsClient = false,
-            string rootPath = "/",
-            CancellationToken cancellationToken = default)
-        {
-            if (client == null) throw new ArgumentNullException(nameof(client));
-            var real = new RealFtpClient(client, ownsClient);
-            return BuildAsync(real, rootPath, cancellationToken);
+                var validate = o.CertificateValidation;
+                if (validate != null)
+                    // Adapt FluentFTP's validation event to the BCL callback.
+                    client.ValidateCertificate += (control, e) =>
+                        e.Accept = validate(control, e.Certificate, e.Chain, e.PolicyErrors);
+            }
+            return client;
         }
 
         // === Internal factories (used by tests with an in-memory fake) ===

@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace FileHub.Memory
 {
-    public class MemoryDirectory : FileDirectory
+    public class MemoryDirectory : DirectoryEntry
     {
         private readonly Dictionary<string, MemoryFileData> _files
             = new Dictionary<string, MemoryFileData>(StringComparer.OrdinalIgnoreCase);
@@ -18,7 +18,7 @@ namespace FileHub.Memory
         private readonly MemoryDirectory _parent;
 
         public override string Path { get; }
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override DateTime CreationTimeUtc { get; }
         public override DateTime LastWriteTimeUtc { get; }
 
@@ -97,7 +97,7 @@ namespace FileHub.Memory
 
         // === Directory resolution (whole path; in-process walk, no I/O) ===
 
-        public override FileDirectory CreateDirectory(string name)
+        public override DirectoryEntry CreateDirectory(string name)
         {
             ThrowIfReadOnly();
             var current = this;
@@ -117,7 +117,7 @@ namespace FileHub.Memory
             return current;
         }
 
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
+        public override bool TryOpenDirectory(string name, out DirectoryEntry directory)
         {
             directory = null;
             // Invalid leaf name → not found (false); absolute/traversal are
@@ -151,13 +151,13 @@ namespace FileHub.Memory
             return Task.FromResult((file, exists));
         }
 
-        public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(CreateDirectory(name));
         }
 
-        public override Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var exists = TryOpenDirectory(name, out var directory);
@@ -190,28 +190,28 @@ namespace FileHub.Memory
             return Task.CompletedTask;
         }
 
-        public override Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
-        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(CopyTo(directory, name, overwrite));
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
             return FilterByPattern(_directories.Keys, searchPattern)
-                .Select(name => (FileDirectory)_directories[name]);
+                .Select(name => (DirectoryEntry)_directories[name]);
         }
 
         // === Common operations ===
@@ -273,7 +273,7 @@ namespace FileHub.Memory
             }
         }
 
-        public override FileDirectory Rename(string newName)
+        public override DirectoryEntry Rename(string newName)
         {
             ThrowIfReadOnly();
             NestedPath.EnsureLeaf(newName);
@@ -296,7 +296,7 @@ namespace FileHub.Memory
             return renamed;
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -339,7 +339,7 @@ namespace FileHub.Memory
             return copied;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
         {
             if (directory is MemoryDirectory destParent)
             {
@@ -416,7 +416,7 @@ namespace FileHub.Memory
             }
         }
 
-        private static void CopyContentsGeneric(FileDirectory source, FileDirectory destination, bool overwrite)
+        private static void CopyContentsGeneric(DirectoryEntry source, DirectoryEntry destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
                 file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);

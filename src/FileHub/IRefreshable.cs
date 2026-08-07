@@ -12,7 +12,7 @@ namespace FileHub
     /// <remarks>
     /// Exists so callers can decide, in a context-appropriate way, whether to
     /// block on <see cref="Refresh"/> or await <see cref="RefreshAsync"/>.
-    /// Property getters on <see cref="FileEntry"/> and <see cref="FileDirectory"/>
+    /// Property getters on <see cref="FileEntry"/> and <see cref="DirectoryEntry"/>
     /// are expected to be cheap and non-blocking; performing hidden
     /// async-over-sync I/O inside a getter risks deadlocks under UI or
     /// ASP.NET (classic) <c>SynchronizationContext</c>s, so drivers should

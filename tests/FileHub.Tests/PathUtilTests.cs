@@ -44,7 +44,9 @@ public class PathUtilTests
     [InlineData("a\nb")]
     public void ValidateName_RejectsBadNames(string? name)
     {
-        Assert.Throws<ArgumentException>(() => PathUtil.ValidateName(name));
+        // null -> ArgumentNullException (a subclass of ArgumentException),
+        // everything else -> ArgumentException.
+        Assert.ThrowsAny<ArgumentException>(() => PathUtil.ValidateName(name));
     }
 
     [Theory]
@@ -98,9 +100,10 @@ public class PathUtilTests
     [Theory]
     [InlineData("")]
     [InlineData(null)]
-    public void SplitAndValidateSegments_RejectsEmpty(string input)
+    public void SplitAndValidateSegments_RejectsEmpty(string? input)
     {
-        Assert.Throws<ArgumentException>(() => PathUtil.SplitAndValidateSegments(input));
+        // null -> ArgumentNullException (subclass of ArgumentException); "" -> ArgumentException.
+        Assert.ThrowsAny<ArgumentException>(() => PathUtil.SplitAndValidateSegments(input));
     }
 
     [Fact]

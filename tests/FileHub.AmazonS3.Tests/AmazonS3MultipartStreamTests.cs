@@ -137,7 +137,7 @@ public class AmazonS3MultipartStreamTests
     [Fact]
     public void HubMultipartDefaults_Are32MibThresholdAnd64MibParts()
     {
-        var multipart = new S3HubOptions().Multipart;
+        var multipart = new AmazonS3HubOptions().Multipart;
         Assert.Equal(32L * 1024 * 1024, multipart.Threshold);
         Assert.Equal(64L * 1024 * 1024, multipart.PartSize);
     }

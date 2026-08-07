@@ -12,11 +12,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OciRefreshableTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void OracleObjectStorageFile_ImplementsIRefreshable()
@@ -59,7 +59,7 @@ public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
             objectName,
             new MemoryStream(Encoding.UTF8.GetBytes("completely-new-content")),
             contentLength: 22,
-            options: null);
+            options: null!);
 
         Assert.Equal(2, file.Length);
 
@@ -80,7 +80,7 @@ public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
             objectName,
             new MemoryStream(new byte[] { 1, 2, 3, 4 }),
             contentLength: 4,
-            options: null);
+            options: null!);
 
         // Sync call — this is what we're verifying: no deadlock, result reflects server state.
         ((IRefreshable)file).Refresh();

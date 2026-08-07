@@ -58,27 +58,11 @@ public class FtpFileHubTests
     }
 
     [Fact]
-    public void Connect_GuardsAgainstInvalidPort()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            FtpFileHub.Connect("localhost", port: 0));
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-            FtpFileHub.Connect("localhost", port: 70_000));
-    }
-
-    [Fact]
-    public void Connect_GuardsAgainstEmptyHost()
-    {
-        Assert.Throws<ArgumentException>(() =>
-            FtpFileHub.Connect(host: ""));
-    }
-
-    [Fact]
-    public async Task FromClientAsync_DefaultOwnsFalse_DoesNotDisposeUnderlyingClient()
+    public async Task Create_FromClient_DefaultOwnsFalse_DoesNotDisposeUnderlyingClient()
     {
         // FluentFTP client created externally — caller expects to keep it alive.
         var client = new AsyncFtpClient("localhost", "u", "p", 21);
-        var hub = await FtpFileHub.FromClientAsync(client);
+        var hub = await FtpFileHub.CreateAsync(FtpHubOptions.FromClient(client));
 
         hub.Dispose();
 
@@ -89,11 +73,11 @@ public class FtpFileHubTests
     }
 
     [Fact]
-    public async Task FromClientAsync_OwnsClientTrue_DisposesUnderlyingClient()
+    public async Task Create_FromClient_OwnsClientTrue_DisposesUnderlyingClient()
     {
         // Caller built the client solely for the hub and opts into ownership transfer.
         var client = new AsyncFtpClient("localhost", "u", "p", 21);
-        var hub = await FtpFileHub.FromClientAsync(client, ownsClient: true);
+        var hub = await FtpFileHub.CreateAsync(FtpHubOptions.FromClient(client, ownsClient: true));
 
         hub.Dispose();
 

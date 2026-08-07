@@ -18,6 +18,6 @@ namespace FileHub
         /// Returns the root directory of the hub registered under <paramref name="name"/>,
         /// or <c>null</c> if no matching registration exists.
         /// </summary>
-        FileDirectory GetRootByName(string name);
+        DirectoryEntry GetRootByName(string name);
     }
 }

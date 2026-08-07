@@ -5,11 +5,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageDirectoryTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void CreateDirectory_CreatesMarkerObject()
@@ -148,7 +148,7 @@ public class OracleObjectStorageDirectoryTests : IClassFixture<InMemoryOciFixtur
         sub.Delete(recursive: true);
 
         Assert.False(scope.DirectoryExists("to-delete"));
-        Assert.Empty(_fixture.Client.Keys.Where(k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/")));
+        Assert.DoesNotContain(_fixture.Client.Keys, k => k.StartsWith($"{nameof(Delete_Recursive_DeletesAllObjects)}/to-delete/"));
     }
 
     [Fact]

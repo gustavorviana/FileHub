@@ -19,7 +19,7 @@ namespace FileHub.OracleObjectStorage
         private readonly OciSession _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private OracleObjectStorageFileHub(OciSession session, string rootPath)
         {
@@ -31,18 +31,18 @@ namespace FileHub.OracleObjectStorage
         // === Canonical factory: options bag ===
 
         /// <summary>
-        /// Build a FileHub from an <see cref="OciHubOptions"/> bag. This is the
+        /// Build a FileHub from an <see cref="OracleObjectStorageHubOptions"/> bag. This is the
         /// only entry point: covers config-file, provider-, and client-based
         /// construction in one place. Pick the strategy via a typed factory on
-        /// <see cref="OciHubOptions"/> (<c>FromConfigFile</c>, <c>FromProvider</c>,
+        /// <see cref="OracleObjectStorageHubOptions"/> (<c>FromConfigFile</c>, <c>FromProvider</c>,
         /// <c>FromClient</c>).
         /// </summary>
-        public static OracleObjectStorageFileHub Create(OciHubOptions options)
+        public static OracleObjectStorageFileHub Create(OracleObjectStorageHubOptions options)
             => SyncBridge.Run(ct => CreateAsync(options, ct));
 
-        /// <inheritdoc cref="Create(OciHubOptions)"/>
+        /// <inheritdoc cref="Create(OracleObjectStorageHubOptions)"/>
         public static async Task<OracleObjectStorageFileHub> CreateAsync(
-            OciHubOptions options,
+            OracleObjectStorageHubOptions options,
             CancellationToken cancellationToken = default)
         {
             if (options == null) throw new ArgumentNullException(nameof(options));
@@ -56,7 +56,7 @@ namespace FileHub.OracleObjectStorage
             // The "config file" strategy is also the default when nothing is set.
 
             if (strategies > 1)
-                throw new ArgumentException("OciHubOptions accepts exactly one of Client, Provider, or (ConfigFilePath/Profile).", nameof(options));
+                throw new ArgumentException("OracleObjectStorageHubOptions accepts exactly one of Client, Provider, or (ConfigFilePath/Profile).", nameof(options));
 
             if (options.Client != null && options.RetryConfiguration != null)
                 throw new ArgumentException("RetryConfiguration only applies when the hub creates the client; an external Client already carries its own configuration.", nameof(options));

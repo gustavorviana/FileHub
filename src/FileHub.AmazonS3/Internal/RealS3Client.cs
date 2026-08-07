@@ -470,7 +470,7 @@ namespace FileHub.AmazonS3.Internal
 
             var requestId = string.IsNullOrEmpty(ex.RequestId) ? "" : $" (request-id={ex.RequestId})";
             var status = ex.StatusCode == 0 ? (HttpStatusCode?)null : ex.StatusCode;
-            return new S3DriverException(
+            return new AmazonS3DriverException(
                 $"S3 request failed for \"{context}\": [{(string.IsNullOrEmpty(code) ? "unknown" : code)}] {ex.Message}{requestId}",
                 status,
                 string.IsNullOrEmpty(code) ? null : code,

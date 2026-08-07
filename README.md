@@ -12,6 +12,7 @@
 
 [Quick start](#quick-start) ·
 [Drivers](#drivers) ·
+[Packages](#packages) ·
 [Why FileHub?](#why-filehub) ·
 [Documentation](#documentation) ·
 [Contributing](#contributing)
@@ -24,7 +25,7 @@
 
 ## What you get
 
-- **One API, many backends** — `IFileHub` → `FileDirectory` → `FileEntry`. Write the service once, run it against disk, memory, or the cloud.
+- **One API, many backends** — `IFileHub` → `DirectoryEntry` → `FileEntry`. Write the service once, run it against disk, memory, or the cloud.
 - **Sync + async on the same types** — async is the source of truth; sync delegates. Every call has a `CancellationToken` sibling.
 - **Sandboxed by default** — every hub has a root. `..`, absolute paths, and symlink escapes are rejected at the boundary.
 - **Read-only on demand** — `dir.AsReadOnly()` / `file.AsReadOnly()` wraps anything and blocks writes at runtime.
@@ -94,6 +95,20 @@ Full walkthrough: **[Quick Start wiki](FileHub.wiki/Quick-Start.md)**.
 | **FTP** | `FileHub.Ftp` | FTP via FluentFTP | Plain FTP server. |
 | **Custom** | your assembly | anything | Implement two abstract classes — see [Custom drivers](FileHub.wiki/Custom-Drivers.md). |
 
+---
+
+## Packages
+
+Every published NuGet package:
+
+| Package | Purpose | Depends on |
+|---|---|---|
+| [`FileHub`](https://www.nuget.org/packages/FileHub) | Core: `IFileHub`, `DirectoryEntry`, `FileEntry` + Local & Memory drivers | — (zero external deps) |
+| [`FileHub.DependencyInjection`](https://www.nuget.org/packages/FileHub.DependencyInjection) | `AddFileHub` / `AddNamedFileHubs` — MS.Extensions.DI integration | `FileHub` |
+| [`FileHub.AmazonS3`](https://www.nuget.org/packages/FileHub.AmazonS3) | Amazon S3 driver | `FileHub` |
+| [`FileHub.OracleObjectStorage`](https://www.nuget.org/packages/FileHub.OracleObjectStorage) | Oracle OCI Object Storage driver | `FileHub` |
+| [`FileHub.Ftp`](https://www.nuget.org/packages/FileHub.Ftp) | FTP driver (FluentFTP) | `FileHub` |
+
 ```bash
 dotnet add package FileHub                        # core: Local + Memory
 dotnet add package FileHub.DependencyInjection    # MS.Extensions.DI integration
@@ -120,10 +135,10 @@ FileHub focuses on one thing: **a clean, modern storage abstraction for .NET**.
 - async-first (sync delegates to async)
 - sandboxed by default
 - provider-agnostic
-- minimal API surface — three types: `IFileHub` → `FileDirectory` → `FileEntry`
+- minimal API surface — three types: `IFileHub` → `DirectoryEntry` → `FileEntry`
 - designed for modern object storage (single-PUT writes, presigned URLs, lazy stubs, dirty-tracked metadata)
 
-The boundary is drawn once. A service written against `IFileHub` / `FileDirectory` runs against disk, memory, or the cloud — backend becomes a constructor detail.
+The boundary is drawn once. A service written against `IFileHub` / `DirectoryEntry` runs against disk, memory, or the cloud — backend becomes a constructor detail.
 
 **Before — coupled to a backend:**
 
@@ -152,7 +167,7 @@ new ReportService(new LocalFileHub(@"C:\reports")).Save("hi");
 
 // Prod
 new ReportService(await AmazonS3FileHub.CreateAsync(
-        S3HubOptions.FromProfile("my-bucket", profile: "prod", region: "us-east-1", rootPath: "reports/2026")))
+        AmazonS3HubOptions.FromProfile("my-bucket", profile: "prod", region: "us-east-1", rootPath: "reports/2026")))
     .Save("hi");
 ```
 
@@ -188,7 +203,7 @@ Full docs live in the [wiki](FileHub.wiki/Home.md).
 | Topic | Link |
 |---|---|
 | Quick start | [Quick Start](FileHub.wiki/Quick-Start.md) |
-| API reference | [`IFileHub`, `FileDirectory`, `FileEntry`, exceptions](FileHub.wiki/API.md) |
+| API reference | [`IFileHub`, `DirectoryEntry`, `FileEntry`, exceptions](FileHub.wiki/API.md) |
 | Usage patterns | [Sync/async, streams, pagination](FileHub.wiki/Usage.md) |
 | Security | [Sandbox + read-only](FileHub.wiki/Security.md) |
 | Dependency injection | [`AddFileHub`, named hubs, tenant scoping](FileHub.wiki/Dependency-Injection.md) |
