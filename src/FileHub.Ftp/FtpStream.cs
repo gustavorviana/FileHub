@@ -29,17 +29,24 @@ namespace FileHub.Ftp
             _isWrite = isWrite;
         }
 
-        public override bool CanRead => !_isWrite && !_disposed && _inner.CanRead;
-        public override bool CanWrite => _isWrite && !_disposed && _inner.CanWrite;
+        // Capability flags are fixed at open from the stream's direction, not
+        // read live from _inner — the BCL contract is that CanRead/CanWrite are
+        // stable from open until close, and _inner's flags can flip as the FTP
+        // data channel drains.
+        public override bool CanRead => !_isWrite && !_disposed;
+        public override bool CanWrite => _isWrite && !_disposed;
         public override bool CanSeek => false;
 
-        public override long Length =>
-            _isWrite ? throw new NotSupportedException("Length is not supported on an FTP write stream.")
-                     : _file.LengthInternal;
+        // A write stream has no server-known length; expose the running
+        // bytes-written count instead of throwing. A read stream reports the
+        // parent file's cached length.
+        public override long Length => _isWrite ? _bytesWritten : _file.LengthInternal;
 
         public override long Position
         {
-            get => _inner.Position;
+            // CanSeek is false, so both the getter and setter must throw to
+            // honor the Stream contract (the getter previously leaked _inner's).
+            get => throw new NotSupportedException("Seeking is not supported on FTP streams.");
             set => throw new NotSupportedException("Seeking is not supported on FTP streams.");
         }
 

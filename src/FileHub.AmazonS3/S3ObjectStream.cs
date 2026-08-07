@@ -70,6 +70,7 @@ namespace FileHub.AmazonS3
 
         public override async Task FlushAsync(CancellationToken cancellationToken)
         {
+            ThrowIfDisposed();
             if (!_hasUnflushedWrites || _multipart) return;
 
             await UploadBufferAsync(cancellationToken).ConfigureAwait(false);
