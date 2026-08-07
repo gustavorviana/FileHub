@@ -88,7 +88,7 @@ public sealed class FtpServerFixture : IAsyncLifetime
             // returns as soon as a login succeeds.
             await WaitForFtpReadyAsync(timeout: TimeSpan.FromSeconds(90));
 
-            Hub = await FtpFileHub.ConnectAsync(Host, Port, User, Password, rootPath: "/");
+            Hub = await FtpFileHub.CreateAsync(FtpHubOptions.FromCredentials(Host, Port, User, Password, rootPath: "/"));
         }
         catch (Exception ex)
         {
