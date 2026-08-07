@@ -5,7 +5,7 @@ namespace FileHub.Tests;
 
 public class MemoryFileTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     // === Read/Write via streams ===
 

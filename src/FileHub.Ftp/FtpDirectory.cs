@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace FileHub.Ftp
 {
-    public class FtpDirectory : FileDirectory, IRefreshable
+    public class FtpDirectory : DirectoryEntry, IRefreshable
     {
         private readonly IFtpSession _session;
         private readonly FtpDirectory _parent;
@@ -19,7 +19,7 @@ namespace FileHub.Ftp
         private DateTime _lastWriteTimeUtc;
 
         public override string Path => _path;
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
 
         /// <summary>
         /// Cached creation timestamp. Returns <c>default</c> until the first
@@ -265,11 +265,11 @@ namespace FileHub.Ftp
         // === Directory resolution primitives (base validates the whole path) ===
 
         // Nullable handle for the internal callers.
-        private async Task<FileDirectory> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
+        private async Task<DirectoryEntry> TryOpenDirectoryCoreAsync(string name, CancellationToken cancellationToken = default)
             => (await TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false)).Directory;
 
         // One recursive MKDIR creates the whole path.
-        public override async Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             var segments = PathUtil.SplitAndValidateSegments(name);
@@ -282,7 +282,7 @@ namespace FileHub.Ftp
         }
 
         // One probe proves the whole path exists.
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             string[] segments;
             try { segments = PathUtil.SplitAndValidateSegments(name); }
@@ -313,7 +313,7 @@ namespace FileHub.Ftp
             return current;
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
             var listing = SyncBridge.Run(async ct =>
             {
@@ -335,7 +335,7 @@ namespace FileHub.Ftp
         }
 
 #if NET8_0_OR_GREATER
-        public override async IAsyncEnumerable<FileDirectory> GetDirectoriesAsync(
+        public override async IAsyncEnumerable<DirectoryEntry> GetDirectoriesAsync(
             string searchPattern = "*",
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
@@ -472,9 +472,9 @@ namespace FileHub.Ftp
             return items.Count > 0;
         }
 
-        public override FileDirectory Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
+        public override DirectoryEntry Rename(string newName) => SyncBridge.Run(ct => RenameAsync(newName, ct));
 
-        public override async Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             if (_parent == null)
@@ -493,10 +493,10 @@ namespace FileHub.Ftp
             return new FtpDirectory(_parent, newName);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -556,10 +556,10 @@ namespace FileHub.Ftp
             return newDir;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, overwrite, ct));
 
-        public override async Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             if (directory is FtpDirectory ftpDir
                 && FtpSessionTarget.SameConnection(ftpDir._session.Client, _session.Client))
@@ -599,7 +599,7 @@ namespace FileHub.Ftp
             return destination.StartsWith(prefix, StringComparison.Ordinal);
         }
 
-        private static async Task CopyContentsAsync(FileDirectory source, FileDirectory destination, bool overwrite, CancellationToken cancellationToken)
+        private static async Task CopyContentsAsync(DirectoryEntry source, DirectoryEntry destination, bool overwrite, CancellationToken cancellationToken)
         {
 #if NET8_0_OR_GREATER
             await foreach (var file in source.GetFilesAsync(cancellationToken: cancellationToken).ConfigureAwait(false))

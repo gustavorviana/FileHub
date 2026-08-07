@@ -15,7 +15,7 @@ namespace FileHub
             return new ReadOnlyFileWrapper(file);
         }
 
-        public static FileDirectory AsReadOnly(this FileDirectory directory)
+        public static DirectoryEntry AsReadOnly(this DirectoryEntry directory)
         {
             if (directory.IsReadOnly) return directory;
             return new ReadOnlyDirectoryWrapper(directory);
@@ -25,10 +25,10 @@ namespace FileHub
     internal class ReadOnlyFileWrapper : FileEntry
     {
         private readonly FileEntry _inner;
-        private FileDirectory _parentWrapped;
+        private DirectoryEntry _parentWrapped;
 
         public override string Path => _inner.Path;
-        public override FileDirectory Parent =>
+        public override DirectoryEntry Parent =>
             _parentWrapped ??= _inner.Parent != null ? new ReadOnlyDirectoryWrapper(_inner.Parent) : null;
         public override long Length => _inner.Length;
         public override DateTime CreationTimeUtc => _inner.CreationTimeUtc;
@@ -46,21 +46,21 @@ namespace FileHub
         public override Stream GetWriteStream(FileWriteOptions options = null) { ThrowIfReadOnly(); return null; }
         public override void Delete() => ThrowIfReadOnly();
         public override FileEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false) { ThrowIfReadOnly(); return null; }
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 
-    internal class ReadOnlyDirectoryWrapper : FileDirectory
+    internal class ReadOnlyDirectoryWrapper : DirectoryEntry
     {
-        private readonly FileDirectory _inner;
-        private FileDirectory _parentWrapped;
+        private readonly DirectoryEntry _inner;
+        private DirectoryEntry _parentWrapped;
 
         public override string Path => _inner.Path;
-        public override FileDirectory Parent =>
+        public override DirectoryEntry Parent =>
             _parentWrapped ??= _inner.Parent != null ? new ReadOnlyDirectoryWrapper(_inner.Parent) : null;
         public override DateTime CreationTimeUtc => _inner.CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => _inner.LastWriteTimeUtc;
 
-        internal ReadOnlyDirectoryWrapper(FileDirectory inner) : base(inner.Name, rootPath: null)
+        internal ReadOnlyDirectoryWrapper(DirectoryEntry inner) : base(inner.Name, rootPath: null)
         {
             _inner = inner;
             IsReadOnly = true;
@@ -102,7 +102,7 @@ namespace FileHub
             return _inner.GetFiles(searchPattern, offset, limit).Select(f => f.AsReadOnly());
         }
 
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
+        public override bool TryOpenDirectory(string name, out DirectoryEntry directory)
         {
             if (_inner.TryOpenDirectory(name, out var d))
             {
@@ -113,13 +113,13 @@ namespace FileHub
             return false;
         }
 
-        public override async Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override async Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             var (d, exists) = await _inner.TryOpenDirectoryAsync(name, cancellationToken).ConfigureAwait(false);
             return (exists ? d.AsReadOnly() : null, exists);
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
             return _inner.GetDirectories(searchPattern).Select(d => d.AsReadOnly());
         }
@@ -127,14 +127,14 @@ namespace FileHub
         // Write operations - all throw
         public override FileEntry CreateFile(string name) { ThrowIfReadOnly(); return null; }
         public override Task<FileEntry> CreateFileAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileEntry>(null); }
-        public override FileDirectory CreateDirectory(string name) { ThrowIfReadOnly(); return null; }
-        public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<FileDirectory>(null); }
+        public override DirectoryEntry CreateDirectory(string name) { ThrowIfReadOnly(); return null; }
+        public override Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.FromResult<DirectoryEntry>(null); }
         public override void Delete(bool recursive = false) => ThrowIfReadOnly();
         public override void Delete(string name, bool recursive = false) => ThrowIfReadOnly();
         public override Task DeleteAsync(bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
         public override Task DeleteAsync(string name, bool recursive = false, CancellationToken cancellationToken = default) { ThrowIfReadOnly(); return Task.CompletedTask; }
-        public override FileDirectory Rename(string newName) { ThrowIfReadOnly(); return null; }
-        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
-        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
+        public override DirectoryEntry Rename(string newName) { ThrowIfReadOnly(); return null; }
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false) { ThrowIfReadOnly(); return null; }
     }
 }

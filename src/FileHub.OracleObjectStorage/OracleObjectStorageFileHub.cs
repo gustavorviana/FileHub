@@ -19,7 +19,7 @@ namespace FileHub.OracleObjectStorage
         private readonly OciSession _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private OracleObjectStorageFileHub(OciSession session, string rootPath)
         {

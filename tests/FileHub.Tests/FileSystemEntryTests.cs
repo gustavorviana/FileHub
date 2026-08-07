@@ -9,7 +9,7 @@ namespace FileHub.Tests;
 /// </summary>
 public class FileSystemEntryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     [Fact]
     public void ValidateName_NullOrEmpty_Throws()

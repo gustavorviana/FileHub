@@ -5,7 +5,7 @@ namespace FileHub.Local
 {
     public class LocalFileHub : ILocalFileHub
     {
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         public LocalFileHub(string rootPath)
         {

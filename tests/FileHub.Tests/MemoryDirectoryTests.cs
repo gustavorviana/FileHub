@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class MemoryDirectoryTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     // === CreateFile ===
 

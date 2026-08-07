@@ -7,7 +7,7 @@ namespace FileHub.Tests;
 /// Cross-driver checks that any method accepting a relative <c>name</c> tolerates
 /// (a) a trailing <c>/</c> or <c>\</c> and (b) a nested subpath like
 /// <c>"a/b/c.txt"</c>. Memory and Local share the same path-handling code in
-/// <see cref="FileDirectory.SplitPath"/> / <see cref="NestedPath.TrySplit"/>, so
+/// <see cref="DirectoryEntry.SplitPath"/> / <see cref="NestedPath.TrySplit"/>, so
 /// validating both here proves the invariant for every driver that delegates
 /// through the same helpers.
 /// </summary>
@@ -15,11 +15,11 @@ public class PathSemanticsTests
 {
     public static IEnumerable<object[]> Roots()
     {
-        yield return new object[] { (Func<IDisposable?, FileDirectory>)(_ => new MemoryFileHub().Root), (Func<IDisposable?>)(() => null) };
+        yield return new object[] { (Func<IDisposable?, DirectoryEntry>)(_ => new MemoryFileHub().Root), (Func<IDisposable?>)(() => null) };
     }
 
-    private static FileDirectory NewMemory() => new MemoryFileHub().Root;
-    private static (FileDirectory Root, TempDirectory Temp) NewLocal()
+    private static DirectoryEntry NewMemory() => new MemoryFileHub().Root;
+    private static (DirectoryEntry Root, TempDirectory Temp) NewLocal()
     {
         var temp = new TempDirectory();
         return (new LocalFileHub(temp.Path).Root, temp);

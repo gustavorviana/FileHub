@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class LocalDirectoryTests
 {
-    private static FileDirectory NewRoot(TempDirectory temp) =>
+    private static DirectoryEntry NewRoot(TempDirectory temp) =>
         new LocalFileHub(temp.Path).Root;
 
     // === CreateFile / CreateDirectory ===

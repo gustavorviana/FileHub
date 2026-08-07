@@ -10,12 +10,12 @@ namespace FileHub.Local
         private FileInfo _info;
 
         public override string Path => System.IO.Path.Combine(Parent.Path, Name);
-        public override FileDirectory Parent { get; }
+        public override DirectoryEntry Parent { get; }
         public override long Length => RefreshInfo().Length;
         public override DateTime CreationTimeUtc => RefreshInfo().CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => RefreshInfo().LastWriteTimeUtc;
 
-        internal LocalFile(FileDirectory parent, string name) : base(name)
+        internal LocalFile(DirectoryEntry parent, string name) : base(name)
         {
             Parent = parent;
         }
@@ -114,7 +114,7 @@ namespace FileHub.Local
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -184,7 +184,7 @@ namespace FileHub.Local
         // runs first so a failure leaves the original intact; a delete that
         // fails after a good copy surfaces as PartialMoveException instead of
         // pretending the move fully succeeded or fully failed.
-        private FileEntry MoveAcrossDrivers(FileDirectory directory, string name, IProgress<TransferStatus> progress, bool overwrite)
+        private FileEntry MoveAcrossDrivers(DirectoryEntry directory, string name, IProgress<TransferStatus> progress, bool overwrite)
         {
             var newFile = CopyTo(directory, name, progress, overwrite);
             try
@@ -207,7 +207,7 @@ namespace FileHub.Local
             return newFile;
         }
 
-        public override Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
             cancellationToken.ThrowIfCancellationRequested();
@@ -221,7 +221,7 @@ namespace FileHub.Local
             return MoveAcrossDriversAsync(directory, name, progress, overwrite, cancellationToken);
         }
 
-        private async Task<FileEntry> MoveAcrossDriversAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress, bool overwrite, CancellationToken cancellationToken)
+        private async Task<FileEntry> MoveAcrossDriversAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress, bool overwrite, CancellationToken cancellationToken)
         {
             var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             try
@@ -246,7 +246,7 @@ namespace FileHub.Local
 
         // Same-filesystem copy uses File.Copy so the OS moves the bytes; a
         // cross-driver destination falls back to the stream-based base copy.
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {

@@ -16,7 +16,7 @@ namespace FileHub.Memory
     /// </summary>
     public class MemoryFileHub : IMemoryFileHub
     {
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         public MemoryFileHub(string rootName = "root")
         {

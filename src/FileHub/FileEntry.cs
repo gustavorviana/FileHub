@@ -13,7 +13,7 @@ namespace FileHub
 
         public virtual string Extension => System.IO.Path.GetExtension(Name);
         public abstract long Length { get; }
-        public abstract FileDirectory Parent { get; }
+        public abstract DirectoryEntry Parent { get; }
 
         protected FileEntry(string name) : base(name) { }
 
@@ -39,12 +39,12 @@ namespace FileHub
         /// <paramref name="newName"/> must be a single name: a value containing
         /// a <c>/</c> or <c>\</c> separator throws
         /// <see cref="System.ArgumentException"/> — use
-        /// <see cref="MoveTo(FileDirectory, string, IProgress{TransferStatus}, bool)"/>
+        /// <see cref="MoveTo(DirectoryEntry, string, IProgress{TransferStatus}, bool)"/>
         /// to relocate. An existing target throws
         /// <see cref="FileAlreadyExistsException"/>.
         /// </summary>
         public abstract FileEntry Rename(string newName);
-        public abstract FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false);
+        public abstract FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false);
 
         // === Sync convenience (implemented using streams) ===
 
@@ -132,7 +132,7 @@ namespace FileHub
         public virtual FileEntry CopyTo(string newName, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => CopyTo(Parent, newName, progress, overwrite);
 
-        public virtual FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public virtual FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
         {
             if (!overwrite && directory.Exists(name))
                 throw new FileAlreadyExistsException(directory.CombineChildPath(name));
@@ -326,7 +326,7 @@ namespace FileHub
             return await CopyToAsync(Parent, newName, progress, overwrite, cancellationToken).ConfigureAwait(false);
         }
 
-        public virtual async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -352,7 +352,7 @@ namespace FileHub
             return newFile;
         }
 
-        public virtual async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public virtual async Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             var newFile = await CopyToAsync(directory, name, progress, overwrite, cancellationToken).ConfigureAwait(false);
             await DeleteAsync(cancellationToken).ConfigureAwait(false);

@@ -4,7 +4,7 @@ namespace FileHub.Tests;
 
 public class FileHubExtensionsTests
 {
-    private static FileDirectory NewRoot() => new MemoryFileHub().Root;
+    private static DirectoryEntry NewRoot() => new MemoryFileHub().Root;
 
     // === File.AsReadOnly ===
 

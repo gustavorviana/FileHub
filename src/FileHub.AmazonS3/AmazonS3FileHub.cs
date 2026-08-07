@@ -18,7 +18,7 @@ namespace FileHub.AmazonS3
         private readonly S3Session _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private AmazonS3FileHub(S3Session session, string rootPath)
         {

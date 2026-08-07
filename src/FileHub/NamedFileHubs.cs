@@ -35,6 +35,6 @@ namespace FileHub
             return _hubs.TryGetValue(name, out var hub) ? hub : null;
         }
 
-        public FileDirectory GetRootByName(string name) => GetByName(name)?.Root;
+        public DirectoryEntry GetRootByName(string name) => GetByName(name)?.Root;
     }
 }

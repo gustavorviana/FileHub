@@ -18,7 +18,7 @@ namespace FileHub.Ftp
         private readonly FtpSession _session;
         private bool _disposed;
 
-        public FileDirectory Root { get; }
+        public DirectoryEntry Root { get; }
 
         private FtpFileHub(FtpSession session, string rootPath)
         {

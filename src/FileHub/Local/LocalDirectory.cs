@@ -7,17 +7,17 @@ using System.Threading.Tasks;
 
 namespace FileHub.Local
 {
-    public class LocalDirectory : FileDirectory
+    public class LocalDirectory : DirectoryEntry
     {
         private DirectoryInfo _info;
 
         public override string Path { get; }
-        public override FileDirectory Parent { get; }
+        public override DirectoryEntry Parent { get; }
 
         public override DateTime CreationTimeUtc => RefreshInfo().CreationTimeUtc;
         public override DateTime LastWriteTimeUtc => RefreshInfo().LastWriteTimeUtc;
 
-        internal LocalDirectory(string path, string rootPath, FileDirectory parent)
+        internal LocalDirectory(string path, string rootPath, DirectoryEntry parent)
             : base(GetDirectoryName(path), rootPath)
         {
             Path = path;
@@ -113,7 +113,7 @@ namespace FileHub.Local
 
         // === Directory operations ===
 
-        public override FileDirectory CreateDirectory(string name)
+        public override DirectoryEntry CreateDirectory(string name)
         {
             ThrowIfReadOnly();
             var segments = PathUtil.SplitAndValidateSegments(name, PathUtil.ValidateLocalName);
@@ -133,7 +133,7 @@ namespace FileHub.Local
             return BuildDirectoryChain(segments);
         }
 
-        public override bool TryOpenDirectory(string name, out FileDirectory directory)
+        public override bool TryOpenDirectory(string name, out DirectoryEntry directory)
         {
             string[] segments;
             try
@@ -169,13 +169,13 @@ namespace FileHub.Local
             return Task.FromResult((file, exists));
         }
 
-        public override Task<FileDirectory> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> CreateDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(CreateDirectory(name));
         }
 
-        public override Task<(FileDirectory Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
+        public override Task<(DirectoryEntry Directory, bool Exists)> TryOpenDirectoryAsync(string name, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var exists = TryOpenDirectory(name, out var directory);
@@ -208,25 +208,25 @@ namespace FileHub.Local
             return Task.CompletedTask;
         }
 
-        public override Task<FileDirectory> RenameAsync(string newName, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> RenameAsync(string newName, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(Rename(newName));
         }
 
-        public override Task<FileDirectory> MoveToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> MoveToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(MoveTo(directory, name, overwrite));
         }
 
-        public override Task<FileDirectory> CopyToAsync(FileDirectory directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override Task<DirectoryEntry> CopyToAsync(DirectoryEntry directory, string name, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(CopyTo(directory, name, overwrite));
         }
 
-        public override IEnumerable<FileDirectory> GetDirectories(string searchPattern = "*")
+        public override IEnumerable<DirectoryEntry> GetDirectories(string searchPattern = "*")
         {
             var dir = new DirectoryInfo(Path);
             foreach (var d in dir.GetDirectories(searchPattern, SearchOption.TopDirectoryOnly))
@@ -334,7 +334,7 @@ namespace FileHub.Local
             InvalidateInfo();
         }
 
-        public override FileDirectory Rename(string newName)
+        public override DirectoryEntry Rename(string newName)
         {
             ThrowIfReadOnly();
             NestedPath.EnsureLeaf(newName);
@@ -368,7 +368,7 @@ namespace FileHub.Local
             return new LocalDirectory(newPath, RootPath, Parent);
         }
 
-        public override FileDirectory MoveTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry MoveTo(DirectoryEntry directory, string name, bool overwrite = false)
         {
             ThrowIfReadOnly();
 
@@ -425,7 +425,7 @@ namespace FileHub.Local
         // Copy the subtree, then delete the source. A delete failure rolls the
         // copy back so no duplicate is left behind, and the raw System.IO error
         // is translated before it reaches the caller.
-        private FileDirectory MoveByCopyDelete(FileDirectory directory, string name, bool overwrite)
+        private DirectoryEntry MoveByCopyDelete(DirectoryEntry directory, string name, bool overwrite)
         {
             var copied = CopyTo(directory, name, overwrite);
             try
@@ -446,7 +446,7 @@ namespace FileHub.Local
             return copied;
         }
 
-        public override FileDirectory CopyTo(FileDirectory directory, string name, bool overwrite = false)
+        public override DirectoryEntry CopyTo(DirectoryEntry directory, string name, bool overwrite = false)
         {
             if (directory is LocalDirectory localDir)
             {
@@ -517,7 +517,7 @@ namespace FileHub.Local
             return (info.Attributes & FileAttributes.ReparsePoint) != 0;
         }
 
-        private static void CopyContents(FileDirectory source, FileDirectory destination, bool overwrite)
+        private static void CopyContents(DirectoryEntry source, DirectoryEntry destination, bool overwrite)
         {
             foreach (var file in source.GetFiles())
                 file.CopyTo(destination, file.Name, progress: null, overwrite: overwrite);

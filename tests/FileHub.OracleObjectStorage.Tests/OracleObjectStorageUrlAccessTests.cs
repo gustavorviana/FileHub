@@ -6,7 +6,7 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageUrlAccessTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageUrlAccessTests(InMemoryOciFixture fixture) => _fixture = fixture;
 

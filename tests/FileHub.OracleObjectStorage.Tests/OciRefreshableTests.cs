@@ -12,11 +12,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OciRefreshableTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OciRefreshableTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     [Fact]
     public void OracleObjectStorageFile_ImplementsIRefreshable()

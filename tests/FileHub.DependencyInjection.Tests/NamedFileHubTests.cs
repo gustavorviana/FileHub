@@ -442,7 +442,7 @@ public class NamedFileHubTests
     private sealed class DisposableFileHub : IFileHub, IDisposable
     {
         private readonly MemoryFileHub _inner = new();
-        public FileDirectory Root => _inner.Root;
+        public DirectoryEntry Root => _inner.Root;
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;
     }

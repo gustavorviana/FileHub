@@ -25,7 +25,7 @@ public class FtpIntegrationTests : IClassFixture<FtpServerFixture>
             rootPath: "/");
 
     /// <summary>Per-test directory scoping so state from one test doesn't leak into the next.</summary>
-    private static async Task<FileDirectory> ScopeAsync(FtpFileHub hub, string name)
+    private static async Task<DirectoryEntry> ScopeAsync(FtpFileHub hub, string name)
     {
         if (hub.Root.TryOpenDirectory(name, out var existing))
         {

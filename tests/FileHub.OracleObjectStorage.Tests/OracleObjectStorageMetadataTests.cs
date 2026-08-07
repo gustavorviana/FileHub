@@ -3,11 +3,11 @@ namespace FileHub.OracleObjectStorage.Tests;
 public class OracleObjectStorageMetadataTests : IClassFixture<InMemoryOciFixture>
 {
     private readonly InMemoryOciFixture _fixture;
-    private FileDirectory Root => _fixture.FileHub.Root;
+    private DirectoryEntry Root => _fixture.FileHub.Root;
 
     public OracleObjectStorageMetadataTests(InMemoryOciFixture fixture) => _fixture = fixture;
 
-    private FileDirectory Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
+    private DirectoryEntry Scope(string name) => Root.OpenDirectory(name, createIfNotExists: true);
 
     // N1 — the driver stores the last-write timestamp under the internal
     // ChangedAtTag ("_changedAt") user-metadata key. It must never surface in

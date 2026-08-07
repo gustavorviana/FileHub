@@ -46,7 +46,7 @@ namespace FileHub.AmazonS3
         /// </summary>
         public bool IsLoaded => _isLoaded;
 
-        public override FileDirectory Parent => _parent;
+        public override DirectoryEntry Parent => _parent;
         public override string Path => ConcatPath(_parent.Path, Name);
 
         /// <summary>
@@ -260,10 +260,10 @@ namespace FileHub.AmazonS3
             return this;
         }
 
-        public override FileEntry MoveTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry MoveTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => MoveToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> MoveToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> MoveToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             ThrowIfReadOnly();
 
@@ -343,10 +343,10 @@ namespace FileHub.AmazonS3
             };
         }
 
-        public override FileEntry CopyTo(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
+        public override FileEntry CopyTo(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false)
             => SyncBridge.Run(ct => CopyToAsync(directory, name, progress, overwrite, ct));
 
-        public override async Task<FileEntry> CopyToAsync(FileDirectory directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
+        public override async Task<FileEntry> CopyToAsync(DirectoryEntry directory, string name, IProgress<TransferStatus> progress = null, bool overwrite = false, CancellationToken cancellationToken = default)
         {
             // A separator means the tail is the real name and the rest is a
             // path — resolve/create that subdirectory under the destination and
