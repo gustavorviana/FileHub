@@ -9,6 +9,14 @@ on:
 permissions:
   contents: read
 
+# A push to `development` while a `development -> main` PR is open fires two
+# events for the same commit (push + pull_request), producing duplicate runs.
+# Grouping by the head SHA collapses them into one — the PR run and the push
+# run share a key, so the newer supersedes the older instead of running twice.
+concurrency:
+  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build & test
