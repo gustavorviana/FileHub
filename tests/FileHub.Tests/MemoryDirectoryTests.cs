@@ -24,7 +24,7 @@ public class MemoryDirectoryTests
     {
         var root = NewRoot();
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
     }
 
     [Fact]

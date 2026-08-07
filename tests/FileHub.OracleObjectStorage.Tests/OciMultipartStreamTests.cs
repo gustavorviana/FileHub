@@ -137,7 +137,7 @@ public class OciMultipartStreamTests
     [Fact]
     public void HubMultipartDefaults_Are32MibThresholdAnd64MibParts()
     {
-        var multipart = new OciHubOptions().Multipart;
+        var multipart = new OracleObjectStorageHubOptions().Multipart;
         Assert.Equal(32L * 1024 * 1024, multipart.Threshold);
         Assert.Equal(64L * 1024 * 1024, multipart.PartSize);
     }

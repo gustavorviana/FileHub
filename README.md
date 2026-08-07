@@ -152,7 +152,7 @@ new ReportService(new LocalFileHub(@"C:\reports")).Save("hi");
 
 // Prod
 new ReportService(await AmazonS3FileHub.CreateAsync(
-        S3HubOptions.FromProfile("my-bucket", profile: "prod", region: "us-east-1", rootPath: "reports/2026")))
+        AmazonS3HubOptions.FromProfile("my-bucket", profile: "prod", region: "us-east-1", rootPath: "reports/2026")))
     .Save("hi");
 ```
 

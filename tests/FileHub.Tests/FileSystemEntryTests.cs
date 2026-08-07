@@ -15,9 +15,10 @@ public class FileSystemEntryTests
     public void ValidateName_NullOrEmpty_Throws()
     {
         var root = NewRoot();
-        Assert.Throws<ArgumentException>(() => root.CreateFile(null));
+        // null -> ArgumentNullException; empty/whitespace -> ArgumentException.
+        Assert.Throws<ArgumentNullException>(() => root.CreateFile(null));
         Assert.Throws<ArgumentException>(() => root.CreateFile(""));
-        Assert.Throws<ArgumentException>(() => root.CreateDirectory(null));
+        Assert.Throws<ArgumentNullException>(() => root.CreateDirectory(null));
         Assert.Throws<ArgumentException>(() => root.CreateDirectory(""));
     }
 

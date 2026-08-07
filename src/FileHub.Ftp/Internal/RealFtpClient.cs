@@ -13,7 +13,9 @@ namespace FileHub.Ftp.Internal
     /// <see cref="AsyncFtpClient"/>. All FluentFTP-specific exceptions are
     /// translated into BCL / FileHub exceptions inside this class so consumers
     /// only see <see cref="FileNotFoundException"/>,
-    /// <see cref="UnauthorizedAccessException"/> or <see cref="FileHubException"/>.
+    /// <see cref="UnauthorizedAccessException"/> or a FileHub exception
+    /// (<see cref="FtpDriverException"/> for driver-level failures,
+    /// <see cref="FileHubException"/> for the rest).
     /// <para>
     /// Every operation is serialized on a per-connection gate: FTP multiplexes
     /// all commands over a single control channel and allows one data transfer
@@ -144,8 +146,9 @@ namespace FileHub.Ftp.Internal
         {
             var reply = await _client.GetReply(cancellationToken).ConfigureAwait(false);
             if (!reply.Success)
-                throw new FileHubException(
-                    $"FTP transfer for \"{contextPath}\" did not complete: {reply.Code} {reply.Message}");
+                throw new FtpDriverException(
+                    $"FTP transfer for \"{contextPath}\" did not complete: {reply.Code} {reply.Message}",
+                    reply.Code, contextPath, innerException: null);
         }
 
         /// <summary>
@@ -312,6 +315,10 @@ namespace FileHub.Ftp.Internal
                     return new FileNotFoundException(
                         $"FTP path \"{contextPath}\" was not found.",
                         cmd);
+
+                return new FtpDriverException(
+                    $"FTP operation failed for \"{contextPath}\": {cmd.CompletionCode} {cmd.Message}",
+                    cmd.CompletionCode, contextPath, cmd);
             }
 
             if (MessageIndicatesNotFound(raw.Message))
@@ -319,9 +326,9 @@ namespace FileHub.Ftp.Internal
                     $"FTP path \"{contextPath}\" was not found.",
                     raw);
 
-            return new FileHubException(
+            return new FtpDriverException(
                 $"FTP operation failed for \"{contextPath}\": {raw.Message}",
-                raw);
+                completionCode: null, path: contextPath, innerException: raw);
         }
 
         private static bool MessageIndicatesNotFound(string message)

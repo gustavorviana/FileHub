@@ -34,7 +34,7 @@ namespace FileHub.AmazonS3
 
         /// <summary>
         /// Per-write multipart policy. <c>null</c> inherits
-        /// <see cref="S3HubOptions.Multipart"/> from the hub.
+        /// <see cref="AmazonS3HubOptions.Multipart"/> from the hub.
         /// </summary>
         public MultipartStreamOptions Multipart { get; set; }
     }

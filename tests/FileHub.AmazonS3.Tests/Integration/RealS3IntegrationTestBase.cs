@@ -24,13 +24,13 @@ public abstract class RealS3IntegrationTestBase : IAsyncLifetime
         return (AmazonS3Directory)await hub.Root.OpenDirectoryAsync(_runId, true);
     }
 
-    private S3HubOptions CreateOptions(BucketName bucket, string? subfolder)
+    private AmazonS3HubOptions CreateOptions(BucketName bucket, string? subfolder)
     {
         var bucketName = GetBucketName(bucket);
         var region = GetRegion(bucket);
         var rootDir = Prefix + (string.IsNullOrEmpty(subfolder) ? "" : subfolder + "/");
 
-        return S3HubOptions.FromCredentials(bucketName, _credentials, region, rootDir);
+        return AmazonS3HubOptions.FromCredentials(bucketName, _credentials, region, rootDir);
     }
 
     protected static string GetBucketName(BucketName bucket)

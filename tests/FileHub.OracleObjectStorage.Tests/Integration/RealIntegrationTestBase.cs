@@ -35,13 +35,13 @@ public abstract class RealIntegrationTestBase : IAsyncLifetime
         return (OracleObjectStorageDirectory)await hub.Root.OpenDirectoryAsync(_runId, true);
     }
 
-    private OciHubOptions CreateOptions(BucketName bucket, string? subfolder)
+    private OracleObjectStorageHubOptions CreateOptions(BucketName bucket, string? subfolder)
     {
         var bucketName = GetBucketName(bucket);
         var ns = Environment.GetEnvironmentVariable("FILEHUB_OCI_NAMESPACE")!;
         var rootDir = Prefix + (string.IsNullOrEmpty(subfolder) ? "" : subfolder + "/");
 
-        return OciHubOptions.FromClient(bucketName, _client, RegionId, ns, rootDir);
+        return OracleObjectStorageHubOptions.FromClient(bucketName, _client, RegionId, ns, rootDir);
     }
 
     protected static string GetBucketName(BucketName bucket)

@@ -357,8 +357,10 @@ namespace FileHub
 
         protected static (string Head, string Remainder) SplitPath(string path)
         {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentException("Path cannot be null or empty.", nameof(path));
+            if (path is null)
+                throw new ArgumentNullException(nameof(path));
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Path cannot be empty or whitespace.", nameof(path));
 
             if (path[0] == '/' || path[0] == '\\')
                 throw new FileHubException($"Absolute paths are not allowed; path \"{path}\" must be relative.");

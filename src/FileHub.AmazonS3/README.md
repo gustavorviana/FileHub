@@ -20,7 +20,7 @@ using Amazon.Runtime;
 using FileHub.AmazonS3;
 
 using var hub = AmazonS3FileHub.Create(
-    S3HubOptions.FromCredentials(
+    AmazonS3HubOptions.FromCredentials(
         bucketName:  "reports",
         credentials: new BasicAWSCredentials(key, secret),
         region:      "us-east-1",
@@ -34,7 +34,7 @@ Always `using` or register as a singleton — the hub owns the AWSSDK HTTP clien
 ## Features
 
 - Server-side `CopyObject` for `Rename` / `MoveTo` / `CopyTo` (same and cross-region).
-- Multipart uploads with constant memory (`IMultipartUploadable`) and presigned-part flows for direct browser/mobile uploads (`IMultipartUploadSignable`).
+- Multipart uploads with constant memory — large writes spill to multipart automatically (tune via `FileWriteOptions.StreamPreference`) — plus presigned-part flows for direct browser/mobile uploads (`IMultipartUploadSignable`).
 - Presigned GET URLs via SigV4 (`IUrlAccessible`).
 - Mutable, dirty-tracked metadata (`Content-Type`, `StorageClass`, `ServerSideEncryption`, user-metadata tags) applied automatically on the next write/copy.
 - Lazy stubs — `OpenFile(name, createIfNotExists: true)` / `CreateFile("a/b/c.txt")` cost zero server calls until you actually write.

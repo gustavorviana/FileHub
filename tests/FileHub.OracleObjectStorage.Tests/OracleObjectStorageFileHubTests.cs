@@ -37,7 +37,7 @@ public class OracleObjectStorageFileHubTests
             Region = Oci.Common.Region.SA_SAOPAULO_1,
         };
         using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
-        var options = new OciHubOptions
+        var options = new OracleObjectStorageHubOptions
         {
             BucketName = "bucket",
             Client = sdkClient,
@@ -64,7 +64,7 @@ public class OracleObjectStorageFileHubTests
         using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
 
         using var hub = await OracleObjectStorageFileHub.CreateAsync(
-            OciHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
+            OracleObjectStorageHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
@@ -83,7 +83,7 @@ public class OracleObjectStorageFileHubTests
         using var sdkClient = new Oci.ObjectstorageService.ObjectStorageClient(provider);
 
         using var hub = OracleObjectStorageFileHub.Create(
-            OciHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
+            OracleObjectStorageHubOptions.FromClient("bucket", sdkClient, "sa-saopaulo-1", "ns"));
 
         Assert.NotNull(hub.Root);
         Assert.Equal("/", hub.Root.Path);
