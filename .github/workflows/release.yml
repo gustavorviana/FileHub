@@ -6,21 +6,16 @@ on:
       - "v*.*.*"
       - "v*.*.*-*"
 
-# id-token: write — required to request the OIDC token from GitHub that
-# NuGet/login@v1 exchanges for a short-lived NuGet API key under the
-# Trusted Publishing policy. contents: write — GitHub release upload.
-permissions:
-  id-token: write
-  contents: write
-
 jobs:
-  publish:
-    name: Pack & publish to NuGet
+  build:
+    name: Build, test & pack
     runs-on: ubuntu-latest
-    # Bind to a GitHub environment so the Trusted Publishing policy on
-    # NuGet.org can pin against it. Optional protection rules (required
-    # reviewers, wait timer) apply once configured in repo Settings → Environments.
-    environment: release
+    permissions:
+      contents: read
+    # Expose the parsed version suffix so the publish job can decide whether
+    # the GitHub release is a pre-release without re-parsing the tag.
+    outputs:
+      suffix: ${{ steps.version.outputs.suffix }}
 
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +71,36 @@ jobs:
           name: nupkg
           path: artifacts/*.*nupkg
 
+  publish:
+    name: Publish to NuGet & GitHub
+    needs: build
+    runs-on: ubuntu-latest
+    # Bind to a GitHub environment so the Trusted Publishing policy on
+    # NuGet.org can pin against it. Optional protection rules (required
+    # reviewers, wait timer) apply once configured in repo Settings → Environments.
+    # Scoped to this job so a failed build/test never reaches the gate.
+    environment: release
+    # id-token: write — required to request the OIDC token from GitHub that
+    # NuGet/login@v1 exchanges for a short-lived NuGet API key under the
+    # Trusted Publishing policy. contents: write — GitHub release upload.
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: artifacts
+
       # Exchange the workflow's GitHub OIDC token for a short-lived NuGet
       # API key. Requires a Trusted Publishing policy on NuGet.org matching
       # this repo + workflow file + environment. No long-lived secret stored.
@@ -99,4 +124,4 @@ jobs:
         with:
           files: artifacts/*.*nupkg
           generate_release_notes: true
-          prerelease: ${{ steps.version.outputs.suffix != '' }}
+          prerelease: ${{ needs.build.outputs.suffix != '' }}
